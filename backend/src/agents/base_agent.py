@@ -1,0 +1,120 @@
+"""Abstract base agent for the SENTINEL market simulator."""
+
+from abc import ABC, abstractmethod
+from typing import List, Dict
+import math
+from ..market.order import Order
+from ..market.trade import Trade
+
+
+class BaseAgent(ABC):
+    """
+    Abstract base class for all trading agents.
+
+    Every agent has capital, a position, and tracks its own PnL.
+    Subclasses must implement decide_action() to produce orders
+    based on the current market state.
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        agent_type: str,
+        initial_capital: float = 100_000.0,
+        latency_seconds: float = 0.0,
+    ) -> None:
+        self.agent_id = agent_id
+        self.agent_type = agent_type
+        self.initial_capital = initial_capital
+        self.capital = initial_capital
+        self.latency_seconds = latency_seconds
+
+        # Position tracking
+        self.position: int = 0  # net shares held (positive=long, negative=short)
+        self.avg_entry_price: float = 0.0
+        self.realized_pnl: float = 0.0
+        self.num_trades: int = 0
+        self._trade_returns: List[float] = []
+
+    @abstractmethod
+    def decide_action(self, market_state: Dict) -> List[Order]:
+        """
+        Given the current market state, return a list of orders to submit.
+        Must be implemented by every agent subclass.
+        """
+        ...
+
+    def update_position(self, trade: Trade) -> None:
+        """Update position and PnL after a trade fills."""
+        if trade.buyer_agent_id == self.agent_id:
+            self._apply_fill(trade.quantity, trade.price, is_buy=True)
+        elif trade.seller_agent_id == self.agent_id:
+            self._apply_fill(trade.quantity, trade.price, is_buy=False)
+        self.num_trades += 1
+
+    def _apply_fill(self, quantity: int, price: float, is_buy: bool) -> None:
+        """Apply a fill to the position, tracking average entry and realized PnL."""
+        direction = 1 if is_buy else -1
+        new_qty = direction * quantity
+
+        if (self.position >= 0 and is_buy) or (self.position <= 0 and not is_buy):
+            # Adding to position: update average entry
+            total_cost = self.avg_entry_price * abs(self.position) + price * quantity
+            self.position += new_qty
+            if self.position != 0:
+                self.avg_entry_price = total_cost / abs(self.position)
+        else:
+            # Reducing or flipping position: realize PnL
+            close_qty = min(quantity, abs(self.position))
+            if is_buy:
+                pnl = (self.avg_entry_price - price) * close_qty  # closing short
+            else:
+                pnl = (price - self.avg_entry_price) * close_qty  # closing long
+            self.realized_pnl += pnl
+            self._trade_returns.append(pnl)
+            self.position += new_qty
+
+            # If flipped, the remainder is a new position at the trade price
+            if abs(new_qty) > close_qty:
+                self.avg_entry_price = price
+
+    def get_unrealized_pnl(self, current_price: float) -> float:
+        """Mark-to-market unrealized PnL."""
+        if self.position == 0:
+            return 0.0
+        return (current_price - self.avg_entry_price) * self.position
+
+    def get_metrics(self, current_price: float = 0.0) -> Dict:
+        """Return agent performance metrics."""
+        unrealized = self.get_unrealized_pnl(current_price)
+        total_pnl = self.realized_pnl + unrealized
+        return_pct = (total_pnl / self.initial_capital) * 100 if self.initial_capital else 0.0
+        sharpe = self._compute_sharpe()
+
+        return {
+            "agent_id": self.agent_id,
+            "agent_type": self.agent_type,
+            "position": self.position,
+            "total_pnl": round(total_pnl, 2),
+            "realized_pnl": round(self.realized_pnl, 2),
+            "unrealized_pnl": round(unrealized, 2),
+            "return_pct": round(return_pct, 4),
+            "sharpe_ratio": round(sharpe, 4),
+            "num_trades": self.num_trades,
+        }
+
+    def _compute_sharpe(self) -> float:
+        """Compute Sharpe ratio from trade returns."""
+        if len(self._trade_returns) < 2:
+            return 0.0
+        mean = sum(self._trade_returns) / len(self._trade_returns)
+        variance = sum((r - mean) ** 2 for r in self._trade_returns) / (
+            len(self._trade_returns) - 1
+        )
+        std = math.sqrt(variance) if variance > 0 else 0.0
+        if std == 0:
+            return 0.0
+        return (mean / std) * math.sqrt(252)  # annualized
+
+    def __repr__(self) -> str:
+        return f"{self.agent_type}({self.agent_id}, pos={self.position}, pnl={self.realized_pnl:.2f})"
