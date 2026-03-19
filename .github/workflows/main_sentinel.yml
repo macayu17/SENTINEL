@@ -8,6 +8,9 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/<your-workflow-file>.yml'
   workflow_dispatch:
 
 jobs:
