@@ -53,3 +53,7 @@ data = p.generate_training_data(num_simulations=50)
 p.train(data)
 "
 ```
+
+## Azure Deployment
+
+If you want to host the backend on Azure App Service and keep the frontend on Vercel, use the guide in [AZURE_APP_SERVICE.md](./AZURE_APP_SERVICE.md).

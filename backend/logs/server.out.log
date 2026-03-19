@@ -1,0 +1,5 @@
+18:05:23 | sentinel.api             | INFO  | SENTINEL API starting up
+INFO:     127.0.0.1:60353 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54872 - "POST /api/simulation/start HTTP/1.1" 200 OK
+18:07:53 | sentinel.api             | INFO  | Simulation loop started
+INFO:     127.0.0.1:54874 - "GET /api/market/snapshot HTTP/1.1" 200 OK

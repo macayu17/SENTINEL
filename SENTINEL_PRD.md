@@ -1,7 +1,7 @@
 # SENTINEL — Product Requirements Document
 **Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events**
 
-**Version:** 4.0 | **Stack:** Next.js 14 · TypeScript · Tailwind CSS · Python FastAPI · Stitch MCP · Zerodha Kite API  
+**Version:** 4.0 | **Stack:** Next.js 14 · TypeScript · Tailwind CSS · Python FastAPI · Google Stitch MCP UI Components · Zerodha Kite API  
 **Target:** Production-ready handoff for Claude Code / GitHub Copilot
 
 ---
@@ -99,17 +99,15 @@
 
 **Goals:**
 - Run SENTINEL headlessly (no dashboard) to generate large volumes of synthetic market microstructure data
-- Connect Stitch MCP to pull real data for seeding and calibration
 - Export simulation results to Parquet / CSV for downstream ML training
 
 **Pain points:**
 - Most simulation libraries aren't designed for high-throughput data generation
-- Stitch MCP integration docs are sparse and require significant plumbing
 - No easy way to export structured agent-level data from existing tools
 
-**How he uses SENTINEL:** Calls the backend Python API directly, bypasses the FastAPI layer for bulk runs, and uses `StitchMCPClient` to calibrate baselines from real market data. Exports `simulator.get_results()` to Parquet.
+**How he uses SENTINEL:** Calls the backend Python API directly, bypasses the FastAPI layer for bulk runs, and exports `simulator.get_results()` to Parquet.
 
-**Key metric:** Simulation throughput (steps/sec), Stitch MCP reliability, and data export flexibility.
+**Key metric:** Simulation throughput (steps/sec) and data export flexibility.
 
 ---
 
@@ -121,7 +119,7 @@
 | Large Order Detector | ★★★ Critical | ★★★ Critical | ★★ Nice-to-have | ★ Low |
 | Real-time Dashboard | ★★ Secondary | ★★★ Critical | ★★★ Critical | ✗ Not needed |
 | WebSocket API | ★★★ Critical | ✗ Not needed | ★ Low | ★★★ Critical |
-| Stitch MCP Integration | ★★ Secondary | ★ Low | ✗ Not needed | ★★★ Critical |
+| Google Stitch UI Components | ★ Low | ★★ Secondary | ★★ Secondary | ✗ Not needed |
 | Agent Metrics Panel | ★★ Secondary | ★ Low | ★★★ Critical | ★★ Secondary |
 | Docker Setup | ★★ Secondary | ✗ Not needed | ★★★ Critical | ★★★ Critical |
 | Data Export (Parquet/CSV) | ★ Low | ✗ Not needed | ✗ Not needed | ★★★ Critical |
@@ -137,7 +135,7 @@ SENTINEL is a real-time market microstructure simulator and early-warning system
 - Liquidity shock predictor with 60–90 second lead time
 - Iceberg and TWAP large-order detector
 - Real-time Next.js 14 dashboard (TSX + Tailwind CSS)
-- Stitch MCP integration for external data connectivity
+- Optional Google Stitch MCP UI components on the frontend (not part of the market-data layer)
 
 ---
 
@@ -149,7 +147,7 @@ SENTINEL is a real-time market microstructure simulator and early-warning system
 | Backend | Python 3.10, FastAPI, WebSockets, Uvicorn |
 | ML | Scikit-learn (RandomForest), XGBoost, NumPy, Pandas |
 | Market Data | Zerodha Kite Connect (real-time + historical) |
-| Data Integration | Stitch MCP (external data connectivity) |
+| UI Components | Google Stitch MCP (frontend-only, optional) |
 | Fallback Data | yfinance (historical OHLCV fallback) |
 | Infra | Docker, docker-compose |
 | Testing | Pytest (backend), Jest (frontend) |
@@ -191,7 +189,7 @@ sentinel/
 │   │   │   └── data_manager.py
 │   │   ├── mcp/
 │   │   │   ├── __init__.py
-│   │   │   └── stitch_client.py
+│   │   │   └── kite_client.py
 │   │   ├── api/
 │   │   │   ├── __init__.py
 │   │   │   ├── main.py
@@ -224,7 +222,7 @@ sentinel/
 │   ├── lib/
 │   │   ├── websocket.ts
 │   │   ├── api-client.ts
-│   │   └── stitch-mcp.ts             # Stitch MCP client wrapper
+│   │   └── stitch-mcp.ts             # Google Stitch MCP UI wrapper
 │   ├── store/
 │   │   └── market-store.ts           # Zustand global state
 │   ├── types/
@@ -251,7 +249,6 @@ uvicorn[standard]==0.24.0
 websockets==12.0
 yfinance==0.2.28
 pydantic==2.5.0
-httpx==0.25.0
 pytest==7.4.0
 python-dotenv==1.0.0
 ```
@@ -398,52 +395,25 @@ Training data generation: `generate_training_data(num_simulations=100)` — runs
 
 ---
 
-## 8. Phase 4 — Stitch MCP Integration (Week 4)
+## 8. Phase 4 — Google Stitch MCP UI Components (Week 4)
 
-**`backend/src/mcp/stitch_client.py`** — `StitchMCPClient` class.
+Stitch is **frontend-only** in SENTINEL. It is used for UI composition and widgets, not for market data, simulator seeding, prediction calibration, or backend services.
 
-Purpose: Pull live or historical market data from external sources via Stitch MCP to seed the simulator or validate predictions against real data.
-
-```python
-class StitchMCPClient:
-    def __init__(self, api_key: str, base_url: str):
-        ...
-
-    async def get_market_snapshot(self, symbol: str) -> Dict:
-        """Returns current bid, ask, last price, volume from Stitch."""
-        ...
-
-    async def stream_trades(self, symbol: str, callback) -> None:
-        """Streams live trade feed, calls callback on each trade."""
-        ...
-
-    async def get_historical_ohlcv(self, symbol: str, interval: str, bars: int) -> List[Dict]:
-        """Returns OHLCV bars for backtesting feature baseline calibration."""
-        ...
-```
-
-**`frontend/lib/stitch-mcp.ts`** — TypeScript client wrapper.
+**`frontend/lib/stitch-mcp.ts`** — TypeScript UI wrapper.
 
 ```typescript
-export class StitchMCPClient {
-  constructor(private apiUrl: string) {}
+export class StitchMCPUI {
+  constructor(private root: HTMLElement) {}
 
-  async getMarketSnapshot(symbol: string): Promise<MarketSnapshot>
-  async subscribeToTrades(symbol: string, onTrade: (trade: Trade) => void): Promise<() => void>
+  mount(componentName: string, props?: Record<string, unknown>): void
+  unmount(): void
 }
 ```
 
 **Integration points:**
-- On dashboard load, call `getMarketSnapshot` to initialise the price display with real mid-price before simulation starts
-- Use `stream_trades` to overlay real trade prints on the PriceChart
-- Use `get_historical_ohlcv` to calibrate `FeatureExtractor` baselines (`baseline_spread`, `baseline_depth`, `baseline_volatility`) per symbol
-
-Configure via `.env`:
-```
-STITCH_API_KEY=your_key_here
-STITCH_BASE_URL=https://api.stitch.money/mcp
-STITCH_SYMBOL=AAPL
-```
+- Mount optional Google Stitch MCP UI components inside dashboard cards, side panels, or modal workflows
+- Keep all market data, predictions, and order-book state sourced from SENTINEL's own backend and provider layer
+- Do not introduce any backend dependency on Stitch for quotes, trades, OHLCV, or calibration
 
 ---
 
@@ -698,7 +668,7 @@ Any Kite-tradeable instrument can be used by updating `KITE_DEFAULT_SYMBOL` in `
 
 CORS: allow `http://localhost:3000`.
 
-Global singletons: `simulator`, `liquidity_predictor`, `large_order_detector`, `stitch_client`, `ConnectionManager`.
+Global singletons: `simulator`, `liquidity_predictor`, `large_order_detector`, `ConnectionManager`.
 
 ### REST Endpoints
 
@@ -810,7 +780,7 @@ Price history: capped at 500 data points (rolling window).
 
 - Recharts `LineChart` with 500-point rolling price history
 - Secondary Y-axis for spread
-- Real-time Stitch trade overlays as dots on price line (if Stitch connected)
+- Optional UI annotations may be layered independently without affecting price data
 - Time formatted as HH:MM:SS
 
 **`components/OrderBookHeatmap.tsx`**
@@ -893,9 +863,6 @@ CMD ["npm", "run", "dev"]
 
 **`backend/.env`**
 ```
-STITCH_API_KEY=your_key_here
-STITCH_BASE_URL=https://api.stitch.money/mcp
-STITCH_SYMBOL=AAPL
 SIMULATION_DURATION=23400
 INITIAL_PRICE=100.0
 ```
@@ -904,7 +871,6 @@ INITIAL_PRICE=100.0
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000
-NEXT_PUBLIC_STITCH_SYMBOL=AAPL
 ```
 
 ---

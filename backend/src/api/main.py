@@ -1,7 +1,7 @@
 """FastAPI application — REST endpoints and WebSocket for SENTINEL."""
 
 from contextlib import asynccontextmanager
-from typing import Dict, Optional
+from typing import Optional
 import asyncio
 
 from pydantic import BaseModel
@@ -18,7 +18,6 @@ from ..agents.informed import InformedAgent
 from ..agents.noise import NoiseAgent
 from ..prediction.liquidity_shock import LiquidityShockPredictor
 from ..prediction.large_order import LargeOrderDetector
-from ..mcp.stitch_client import StitchMCPClient
 from ..utils.logger import get_logger
 from ..utils.config import config
 
@@ -28,7 +27,6 @@ logger = get_logger("api")
 simulator: Optional[MarketSimulator] = None
 liquidity_predictor = LiquidityShockPredictor()
 large_order_detector = LargeOrderDetector()
-stitch_client = StitchMCPClient()
 manager = ConnectionManager()
 
 # Simulation task handle
@@ -39,8 +37,6 @@ _sim_task: Optional[asyncio.Task] = None
 async def lifespan(app: FastAPI):
     logger.info("SENTINEL API starting up")
     yield
-    if stitch_client:
-        await stitch_client.close()
     logger.info("SENTINEL API shutting down")
 
 
@@ -53,7 +49,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+    allow_origins=config.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

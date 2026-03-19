@@ -1,3 +1,3 @@
-from .stitch_client import StitchMCPClient
+from .kite_client import KiteClient
 
-__all__ = ["StitchMCPClient"]
+__all__ = ["KiteClient"]
