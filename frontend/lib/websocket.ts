@@ -3,8 +3,8 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useMarketStore } from '@/store/market-store';
 import { MarketUpdate } from '@/types/market';
+import { getWsBaseUrl } from '@/lib/runtime-config';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
 const MAX_RETRIES = 5;
 
 export function useMarketWebSocket() {
@@ -19,7 +19,7 @@ export function useMarketWebSocket() {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(`${WS_URL}/ws`);
+      const ws = new WebSocket(`${getWsBaseUrl()}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {

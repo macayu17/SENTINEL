@@ -1,14 +1,9 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { getApiBaseUrl } from '@/lib/runtime-config';
 
 class SentinelAPI {
-  private baseUrl: string;
-
-  constructor(baseUrl: string = API_URL) {
-    this.baseUrl = baseUrl;
-  }
-
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const url = `${getApiBaseUrl()}${path}`;
+    const response = await fetch(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
@@ -16,7 +11,7 @@ class SentinelAPI {
       },
     });
     if (!response.ok) {
-      throw new Error(`API error: ${response.status} ${response.statusText}`);
+      throw new Error(`API error: ${response.status} ${response.statusText} (${url})`);
     }
     return response.json();
   }

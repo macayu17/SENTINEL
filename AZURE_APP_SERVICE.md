@@ -49,6 +49,8 @@ If you use a custom Vercel domain, set `FRONTEND_URL` and `ALLOWED_ORIGINS` to t
    - `NEXT_PUBLIC_API_URL=https://<your-app>.azurewebsites.net`
    - `NEXT_PUBLIC_WS_URL=wss://<your-app>.azurewebsites.net`
 
+Use the backend origin only. Do not append `/api` or `/ws` to those Vercel values.
+
 ## Azure CLI Example
 
 Replace the placeholder values before running:
@@ -124,6 +126,8 @@ Set these environment variables in Vercel:
 NEXT_PUBLIC_API_URL=https://<your-app>.azurewebsites.net
 NEXT_PUBLIC_WS_URL=wss://<your-app>.azurewebsites.net
 ```
+
+Do not append `/api` or `/ws` to those variables.
 
 ## Operational Notes
 
