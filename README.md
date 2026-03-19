@@ -1,12 +1,47 @@
 # SENTINEL
 
-**Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events**
+Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events.
 
-Real-time market microstructure simulator with ML-powered liquidity shock prediction, large order detection, and a Bloomberg-terminal-style dashboard.
+SENTINEL is a real-time market microstructure simulator with a FastAPI backend and a Next.js dashboard. It simulates order-book activity across multiple agent types, produces liquidity and large-order signals, and streams live updates over WebSockets to a terminal-style frontend.
 
-## Quick Start
+## Stack
 
-### Backend (Local Dev)
+- Backend: Python 3.10, FastAPI, WebSockets
+- Frontend: Next.js 14, TypeScript, Tailwind CSS, Zustand, Recharts
+- Simulation: Multi-agent order-book engine with market maker, HFT, institutional, retail, informed, and noise agents
+- Prediction: Liquidity shock scoring and large-order pattern detection
+- Deployment: Vercel frontend + Azure App Service backend
+
+## Repository Layout
+
+```text
+.
+├── backend/
+│   ├── src/
+│   │   ├── agents/
+│   │   ├── api/
+│   │   ├── market/
+│   │   ├── mcp/
+│   │   ├── prediction/
+│   │   └── utils/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── .env.example
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   ├── store/
+│   ├── types/
+│   └── .env.example
+├── AZURE_APP_SERVICE.md
+├── SENTINEL_PRD.md
+└── docker-compose.yml
+```
+
+## Local Development
+
+### Backend
 
 ```bash
 cd backend
@@ -14,7 +49,7 @@ pip install -r requirements.txt
 uvicorn src.api.main:app --reload --port 8000
 ```
 
-### Frontend (Local Dev)
+### Frontend
 
 ```bash
 cd frontend
@@ -22,38 +57,79 @@ npm install
 npm run dev
 ```
 
-### Docker (Full Stack)
+### Full Stack With Docker
 
 ```bash
 docker-compose up --build
 ```
 
-## URLs
+## Local URLs
 
-- **Dashboard:** http://localhost:3000/dashboard
-- **Backend API:** http://localhost:8000
-- **API Docs:** http://localhost:8000/docs
-- **WebSocket:** ws://localhost:8000/ws
+- Dashboard: `http://localhost:3000/dashboard`
+- Backend API: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+- WebSocket: `ws://localhost:8000/ws`
 
-## Architecture
+## Environment Files
 
-- **Backend:** Python 3.10 + FastAPI — multi-agent order book simulation, ML prediction, WebSocket streaming
-- **Frontend:** Next.js 14 + TypeScript + Tailwind CSS — Bloomberg terminal-style real-time dashboard
-- **Agents:** MarketMaker, HFT, Institutional, Retail, Informed, Noise
-- **ML:** RandomForest liquidity shock predictor, Iceberg/TWAP large order detector
+### Backend
 
-## Train ML Models
+Copy `backend/.env.example` to `backend/.env` and adjust values if needed.
 
-```bash
-cd backend
-python -c "
-from src.prediction.liquidity_shock import LiquidityShockPredictor
-p = LiquidityShockPredictor()
-data = p.generate_training_data(num_simulations=50)
-p.train(data)
-"
+```text
+SIMULATION_DURATION=23400
+INITIAL_PRICE=100.0
+HOST=0.0.0.0
+PORT=8000
+FRONTEND_URL=http://localhost:3000
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 ```
 
-## Azure Deployment
+### Frontend
 
-If you want to host the backend on Azure App Service and keep the frontend on Vercel, use the guide in [AZURE_APP_SERVICE.md](./AZURE_APP_SERVICE.md).
+Copy `frontend/.env.example` to `frontend/.env.local`.
+
+```text
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_WS_URL=ws://localhost:8000
+```
+
+## Backend API Overview
+
+- `GET /api/health`
+- `POST /api/simulation/start`
+- `POST /api/simulation/stop`
+- `POST /api/simulation/mode`
+- `GET /api/prediction/liquidity`
+- `GET /api/prediction/large-order`
+- `GET /api/agents/metrics`
+- `GET /api/market/snapshot`
+- `WS /ws`
+
+## Notes About The Current Architecture
+
+- The simulator state is stored in process memory, so production should run a single backend instance unless state is externalized.
+- WebSocket streaming and the simulation loop both depend on a long-running backend process, so serverless backends are a poor fit.
+- Stitch is treated as frontend/UI-only and is not part of the backend data pipeline.
+
+## Deployment
+
+### Frontend
+
+- Host on Vercel
+- Set:
+  - `NEXT_PUBLIC_API_URL=https://<your-backend-domain>`
+  - `NEXT_PUBLIC_WS_URL=wss://<your-backend-domain>`
+
+### Backend
+
+- Host on Azure App Service (Linux, custom container)
+- Use the existing `backend/Dockerfile`
+- Set `WEBSITES_PORT=8000`
+- Set `FRONTEND_URL` and `ALLOWED_ORIGINS` to your Vercel production domain
+
+Full Azure guide: [AZURE_APP_SERVICE.md](./AZURE_APP_SERVICE.md)
+
+## Product Spec
+
+The full product requirements doc is in [SENTINEL_PRD.md](./SENTINEL_PRD.md).

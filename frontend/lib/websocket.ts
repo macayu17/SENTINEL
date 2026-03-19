@@ -1,0 +1,74 @@
+'use client';
+
+import { useEffect, useRef, useCallback } from 'react';
+import { useMarketStore } from '@/store/market-store';
+import { MarketUpdate } from '@/types/market';
+
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+const MAX_RETRIES = 5;
+
+export function useMarketWebSocket() {
+  const wsRef = useRef<WebSocket | null>(null);
+  const retriesRef = useRef(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const setMarketData = useMarketStore((s) => s.setMarketData);
+  const setConnected = useMarketStore((s) => s.setConnected);
+
+  const connect = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
+    try {
+      const ws = new WebSocket(`${WS_URL}/ws`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setConnected(true);
+        retriesRef.current = 0;
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data: MarketUpdate = JSON.parse(event.data);
+          if (data.type === 'market_update') {
+            setMarketData(data);
+          }
+        } catch {
+          // ignore malformed messages
+        }
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        wsRef.current = null;
+
+        // Exponential backoff reconnect
+        if (retriesRef.current < MAX_RETRIES) {
+          const delay = Math.min(1000 * Math.pow(2, retriesRef.current), 16000);
+          retriesRef.current++;
+          timerRef.current = setTimeout(connect, delay);
+        }
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    } catch {
+      setConnected(false);
+    }
+  }, [setMarketData, setConnected]);
+
+  const disconnect = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (wsRef.current) wsRef.current.close();
+    wsRef.current = null;
+    setConnected(false);
+  }, [setConnected]);
+
+  useEffect(() => {
+    connect();
+    return () => disconnect();
+  }, [connect, disconnect]);
+
+  return { connect, disconnect };
+}
