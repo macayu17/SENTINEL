@@ -1,9 +1,14 @@
+<<<<<<< HEAD
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+=======
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
+>>>>>>> upstream/main
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+<<<<<<< HEAD
 :root {
   --bg-main: #0b1018;
   --bg-grad-a: #111a29;
@@ -19,6 +24,23 @@
   --rose: #f28686;
   --gold: #ffcc70;
   --sky: #6fc4ff;
+=======
+/* ── Bloomberg Terminal Base Theme ──────────────────────────────────────── */
+
+:root {
+  --bg-primary: #000000;
+  --bg-panel: #0a0a0a;
+  --border-primary: #1a1a1a;
+  --border-active: #333;
+  --text-primary: #e0e0e0;
+  --text-secondary: #888;
+  --text-muted: #555;
+  --green: #00ff41;
+  --red: #ff0040;
+  --amber: #ffb800;
+  --cyan: #00bfff;
+  --purple: #bf00ff;
+>>>>>>> upstream/main
 }
 
 * {
@@ -26,6 +48,7 @@
 }
 
 html {
+<<<<<<< HEAD
   background-color: var(--bg-main);
   color: var(--text-strong);
 }
@@ -67,6 +90,117 @@ body {
 @keyframes floatIn {
   from {
     transform: translateY(14px);
+=======
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+body {
+  font-family:
+    "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", monospace;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-x: hidden;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: #000;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* ── Terminal Panel ─────────────────────────────────────────────────────── */
+
+.terminal-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal-panel:hover {
+  border-color: var(--border-active);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-primary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.panel-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+/* ── Stat Cells ─────────────────────────────────────────────────────────── */
+
+.stat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.stat-label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Blinking Indicator ────────────────────────────────────────────────── */
+
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0.3;
+  }
+}
+
+.blink {
+  animation: blink 1s infinite;
+}
+
+/* ── Slide Down Animation ──────────────────────────────────────────────── */
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+>>>>>>> upstream/main
     opacity: 0;
   }
   to {
@@ -75,6 +209,7 @@ body {
   }
 }
 
+<<<<<<< HEAD
 .sentinel-card {
   border: 1px solid var(--line-soft);
   background: linear-gradient(160deg, rgba(18, 26, 38, 0.96) 0%, rgba(14, 21, 32, 0.92) 100%);
@@ -107,4 +242,46 @@ td {
     padding: 0.875rem;
     border-radius: 0.85rem;
   }
+=======
+.animate-slideDown {
+  animation: slideDown 0.3s ease-out;
+}
+
+/* ── Scanline Effect (subtle) ──────────────────────────────────────────── */
+
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.03) 0px,
+    rgba(0, 0, 0, 0.03) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+}
+
+/* ── Selection ─────────────────────────────────────────────────────────── */
+
+::selection {
+  background: rgba(0, 255, 65, 0.2);
+  color: #fff;
+}
+
+/* ── Recharts Overrides ────────────────────────────────────────────────── */
+
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #111 !important;
+}
+
+.recharts-tooltip-wrapper {
+  z-index: 100;
+>>>>>>> upstream/main
 }

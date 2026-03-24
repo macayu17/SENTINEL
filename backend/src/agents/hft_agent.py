@@ -22,7 +22,10 @@ class HFTAgent(BaseAgent):
         momentum_threshold: float = 0.001,
     ) -> None:
         super().__init__(agent_id, "HFT", initial_capital, latency_seconds=0.0001)
+<<<<<<< HEAD
         self.wakeup_interval = 0.2
+=======
+>>>>>>> upstream/main
         self.position_limit = position_limit
         self.lookback = lookback
         self.z_threshold = z_threshold
@@ -31,8 +34,11 @@ class HFTAgent(BaseAgent):
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+<<<<<<< HEAD
         imbalance = market_state.get("order_book_imbalance", 0.0)
         spread = market_state.get("spread", 0.05)
+=======
+>>>>>>> upstream/main
         self._price_history.append(price)
         orders: List[Order] = []
 
@@ -93,6 +99,7 @@ class HFTAgent(BaseAgent):
                     )
                 )
 
+<<<<<<< HEAD
         # Imbalance scalp: small passive quote on pressured side when spread supports it.
         if spread >= 0.02 and abs(imbalance) > 0.2:
             quote_side = OrderSide.BUY if imbalance > 0 else OrderSide.SELL
@@ -107,4 +114,6 @@ class HFTAgent(BaseAgent):
                 )
             )
 
+=======
+>>>>>>> upstream/main
         return orders
