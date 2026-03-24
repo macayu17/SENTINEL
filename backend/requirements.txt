@@ -1,20 +1,15 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-stable-baselines3[extra]
-tensorboard
-=======
-numpy
-pandas
-scikit-learn
-xgboost
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 websockets==12.0
 pydantic
-pytest==7.4.0
 python-dotenv==1.0.0
->>>>>>> upstream/main
-=======
+
+numpy
+pandas
+scikit-learn
+xgboost
+
 stable-baselines3[extra]
 tensorboard
->>>>>>> 4435196 (Ani Here)
+
+pytest==7.4.0

@@ -1,0 +1,72 @@
+name: SENTINEL Contract CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-contracts:
+    name: Backend Contracts and Validation Harness
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run backend contract tests
+        run: |
+          python -m pytest -q backend/tests
+
+      - name: Run live-feed validation harness
+        run: |
+          python backend/scripts/validate_live_feed_contracts.py | tee backend-contract-validation.log
+
+      - name: Upload validation harness log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-contract-validation-log
+          path: backend-contract-validation.log
+
+  frontend-quality:
+    name: Frontend Lint and Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend lint
+        run: npm run lint
+
+      - name: Run frontend build
+        run: npm run build

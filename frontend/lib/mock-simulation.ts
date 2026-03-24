@@ -139,7 +139,8 @@ const defaultMilestones: Milestone[] = [
   },
 ];
 
-export function useSimulationDashboardData(): SimulationDashboardData {
+export function useSimulationDashboardData(options?: { enabled?: boolean }): SimulationDashboardData {
+  const enabled = options?.enabled ?? true;
   const marketData = useMarketStore((s) => s.marketData);
   const connected = useMarketStore((s) => s.connected);
 
@@ -161,8 +162,13 @@ export function useSimulationDashboardData(): SimulationDashboardData {
   const [tradeFlow, setTradeFlow] = useState<TradeFlowPoint[]>([]);
   const [depthHeatmap, setDepthHeatmap] = useState<DepthHeatLevel[]>(nextDepthHeat(seedPrice));
   const [events, setEvents] = useState<KernelEvent[]>([]);
+  const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const interval = setInterval(() => {
       setStep((prev) => prev + 1);
       setMidPrice((prev) => clamp(prev + (Math.random() - 0.5) * 0.18, 96, 106));
@@ -175,9 +181,13 @@ export function useSimulationDashboardData(): SimulationDashboardData {
     }, 1200);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const now = timestampLabel(new Date());
     const observedPrice = marketData?.price ?? midPrice;
     const observedSpread = marketData?.spread ?? spread;
@@ -211,7 +221,8 @@ export function useSimulationDashboardData(): SimulationDashboardData {
 
     setDepthHeatmap(nextDepthHeat(observedPrice));
     setEvents((prev) => [nextEvent(step, observedSpread, imbalance), ...prev].slice(0, MAX_EVENTS));
-  }, [step, midPrice, spread, inventory, reward, imbalance, marketData]);
+    setLastUpdateMs(Date.now());
+  }, [enabled, step, midPrice, spread, inventory, reward, imbalance, marketData]);
 
   const agentActivity = useMemo(() => nextAgentActivity(midPrice, step), [midPrice, step]);
 
@@ -257,6 +268,27 @@ export function useSimulationDashboardData(): SimulationDashboardData {
     agentActivity,
     milestones: defaultMilestones,
     events,
+    prediction: {
+      signal: step % 7 === 0 ? 'HOLD' : reward > 0 ? 'BUY' : 'SELL',
+      confidence: Number((0.55 + Math.random() * 0.35).toFixed(3)),
+      explanation: 'Mock rule-based signal from momentum, imbalance, and spread penalty.',
+    },
+    operatingMode: 'SIMULATION',
+    liveMarketConnected: false,
+    liveMarketSource: 'simulation',
+    liveMarketProvider: 'simulation',
+    liveMarketFallback: false,
+    liveMarketLastUpdateTs: null,
+    liveMarketLastUpdateWallTime: null,
+    liveMarketStale: false,
+    liveMarketLatencyMs: null,
+    liveMarketTransport: null,
+    liveMarketMessage: null,
     connected,
+    dataSource: 'mock',
+    loading: false,
+    stale: false,
+    error: null,
+    lastUpdateMs,
   };
 }

@@ -90,6 +90,12 @@ export interface ProjectOverview {
   inProgress: string[];
 }
 
+export interface PredictionSignal {
+  signal: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number;
+  explanation: string;
+}
+
 export interface SimulationDashboardData {
   projectOverview: ProjectOverview;
   metrics: SimulationMetrics;
@@ -102,5 +108,22 @@ export interface SimulationDashboardData {
   agentActivity: AgentActivity;
   milestones: Milestone[];
   events: KernelEvent[];
+  prediction: PredictionSignal;
+  operatingMode: 'SIMULATION' | 'LIVE_SHADOW';
+  liveMarketConnected: boolean;
+  liveMarketSource: 'binance' | 'mock' | 'simulation' | string;
+  liveMarketProvider: 'binance' | 'nse' | 'broker' | 'mock' | 'simulation' | string;
+  liveMarketFallback: boolean;
+  liveMarketLastUpdateTs: number | null;
+  liveMarketLastUpdateWallTime: number | null;
+  liveMarketStale: boolean;
+  liveMarketLatencyMs: number | null;
+  liveMarketTransport: string | null;
+  liveMarketMessage: string | null;
   connected: boolean;
+  dataSource: 'live' | 'mock';
+  loading: boolean;
+  stale: boolean;
+  error: string | null;
+  lastUpdateMs: number | null;
 }

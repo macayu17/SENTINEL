@@ -1,31 +1,13 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-"""Market simulator — orchestrates agents, order book, and state tracking using a Discrete Event Kernel."""
+"""Market simulator — orchestrates agents, order book, and state tracking using a discrete event kernel."""
 
 from typing import List, Dict, Optional, Any
-=======
-"""Market simulator — orchestrates agents, order book, and state tracking."""
-
-from typing import List, Dict, Optional
->>>>>>> upstream/main
-=======
-"""Market simulator — orchestrates agents, order book, and state tracking using a Discrete Event Kernel."""
-
-from typing import List, Dict, Optional, Any
->>>>>>> 4435196 (Ani Here)
 import math
+import random
 from collections import deque
 from .order_book import OrderBook
-from .order import Order
+from .order import Order, OrderStatus
 from .trade import Trade
-<<<<<<< HEAD
-<<<<<<< HEAD
 from .kernel import EventKernel, EventType
-=======
->>>>>>> upstream/main
-=======
-from .kernel import EventKernel, EventType
->>>>>>> 4435196 (Ani Here)
 from ..agents.base_agent import BaseAgent
 from ..utils.logger import get_logger
 
@@ -34,22 +16,11 @@ logger = get_logger("simulator")
 
 class MarketSimulator:
     """
-<<<<<<< HEAD
-<<<<<<< HEAD
     Multi-agent market microstructure simulator powered by an Event Kernel.
-=======
-    Multi-agent market microstructure simulator.
 
-    Each step:
-    1. Sorts agents by latency (fastest first).
-    2. Calls each agent's decide_action() with the current market state.
-    3. Submits orders to the central OrderBook.
-    4. Updates agent positions from resulting trades.
-    5. Records history for downstream analysis.
->>>>>>> upstream/main
-=======
-    Multi-agent market microstructure simulator powered by an Event Kernel.
->>>>>>> 4435196 (Ani Here)
+    Agents wake up according to latency-aware scheduling, submit orders,
+    and receive delayed execution reports. The simulator also tracks
+    recent activity for dashboard streaming.
     """
 
     def __init__(
@@ -59,307 +30,278 @@ class MarketSimulator:
         duration_seconds: int = 23_400,
         mode: str = "SANDBOX",
     ) -> None:
-<<<<<<< HEAD
-<<<<<<< HEAD
-        self.agents = agents
-        self.order_book = OrderBook()
-        self.kernel = EventKernel()
-=======
         self.agents = sorted(agents, key=lambda a: a.latency_seconds)
         self.order_book = OrderBook()
->>>>>>> upstream/main
-=======
-        self.agents = agents
-        self.order_book = OrderBook()
         self.kernel = EventKernel()
->>>>>>> 4435196 (Ani Here)
         self.initial_price = initial_price
         self.duration_seconds = duration_seconds
 
-        # State
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        self.current_time: float = 0.0
->>>>>>> upstream/main
-=======
->>>>>>> 4435196 (Ani Here)
         self.current_price: float = initial_price
         self.step_count: int = 0
         self.running: bool = False
         self.mode: str = mode
 
-        # History tracking
-        self._price_history: deque = deque(maxlen=500)
+        self._price_history: deque[float] = deque(maxlen=500)
         self._price_history.append(initial_price)
-        self._state_history: List[Dict] = []
+        self._state_history: List[Dict[str, Any]] = []
         self._all_trades: List[Trade] = []
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 4435196 (Ani Here)
-        
-        # New Microstructure Metrics
-        self._recent_volume_history = deque(maxlen=100) # (time, signed_qty)
-        self._recent_signed_volume: float = 0.0
+
+        self._recent_volume_history: deque[tuple[float, float]] = deque(maxlen=100)
+
+        self._recent_events: deque[Dict[str, Any]] = deque(maxlen=200)
+        self._recent_orders: deque[Dict[str, Any]] = deque(maxlen=200)
+        self._recent_trades: deque[Dict[str, Any]] = deque(maxlen=200)
+        self._agent_actions: Dict[str, str] = {}
 
     @property
-    def current_time(self):
+    def current_time(self) -> float:
         return self.kernel.current_time
 
-    def reset(self, seed: Optional[int] = None) -> None:
+    def _record_event(
+        self,
+        event_type: str,
+        message: str,
+        severity: str = "info",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self._recent_events.append(
+            {
+                "ts": self.kernel.current_time,
+                "type": event_type,
+                "severity": severity,
+                "message": message,
+                "metadata": metadata or {},
+            }
+        )
+
+    def _set_agent_action(self, agent: BaseAgent, message: str) -> None:
+        self._agent_actions[agent.agent_id] = message
+
+    def reset(self, seed: Optional[int] = None) -> Dict[str, Any]:
         """Reset the simulator for a new episode."""
         if seed is not None:
-            import random
             random.seed(seed)
-            import numpy as np
-            np.random.seed(seed)
-            
+            try:
+                import numpy as np
+
+                np.random.seed(seed)
+            except Exception:
+                pass
+
         self.order_book = OrderBook()
         self.kernel.clear()
         self.current_price = self.initial_price
         self.step_count = 0
         self.running = False
-        
+
         self._price_history.clear()
         self._price_history.append(self.initial_price)
         self._state_history.clear()
         self._all_trades.clear()
-        
-        # Initial seed liquidity
+        self._recent_volume_history.clear()
+        self._recent_events.clear()
+        self._recent_orders.clear()
+        self._recent_trades.clear()
+        self._agent_actions.clear()
+
         self._seed_order_book()
-        
+
         for agent in self.agents:
-            if hasattr(agent, 'reset'):
+            if hasattr(agent, "reset"):
                 agent.reset()
             else:
                 agent.position = 0
-                agent.cash = agent.initial_capital if hasattr(agent, 'initial_capital') else 10000.0
-                agent.active_orders = {}
+                agent.realized_pnl = 0.0
 
-            # Ignore RL agents in standard automatic waking as Gym will drive them manually
             if getattr(agent, "agent_type", "") != "RL_MM":
-                # Schedule first wakeup randomly within the first second to avoid sync-clustering
-                import random
                 first_wake = random.uniform(0.01, 1.0)
                 self.kernel.schedule(first_wake, EventType.WAKEUP, self._agent_wakeup, agent)
 
+        self._record_event("Kernel", "Simulation reset and agents scheduled")
         return self.get_market_state()
-<<<<<<< HEAD
-=======
-
-        # Seed the order book with initial liquidity
-        self._seed_order_book()
->>>>>>> upstream/main
-=======
->>>>>>> 4435196 (Ani Here)
 
     def _seed_order_book(self) -> None:
         """Place initial resting orders to bootstrap the book."""
+        from .order import OrderSide, OrderType
+
         for i in range(10):
             offset = (i + 1) * 0.01
             bid = Order(
                 agent_id="SEED",
-                side="buy",
-                order_type="limit",
+                side=OrderSide.BUY,
+                order_type=OrderType.LIMIT,
                 price=round(self.initial_price - offset, 2),
                 quantity=500,
             )
             ask = Order(
                 agent_id="SEED",
-                side="sell",
-                order_type="limit",
+                side=OrderSide.SELL,
+                order_type=OrderType.LIMIT,
                 price=round(self.initial_price + offset, 2),
                 quantity=500,
             )
-            from .order import OrderSide, OrderType
-            bid.side = OrderSide.BUY
-            bid.order_type = OrderType.LIMIT
-            ask.side = OrderSide.SELL
-            ask.order_type = OrderType.LIMIT
             self.order_book.add_order(bid)
             self.order_book.add_order(ask)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 4435196 (Ani Here)
     def _process_order(self, order: Order) -> None:
-        """Exchange receives and processes the order."""
-        if self.mode == "SANDBOX":
-            trades = self.order_book.add_order(order)
-            self._all_trades.extend(trades)
-            
-            # Post-trade processing (position updates and metrics)
-            for trade in trades:
-                # Update last trade price
-                self.current_price = trade.price
-                self._price_history.append(self.current_price)
-                signed_qty = trade.quantity if trade.buyer_agent_id != "SEED" else -trade.quantity
-                self._recent_volume_history.append((self.kernel.current_time, signed_qty))
-                
-                # Signal agents they executed
-                for agent in self.agents:
-                    if agent.agent_id in (trade.buyer_agent_id, trade.seller_agent_id):
-                        # Simulating execution report network delay latency back to agent
-                        self.kernel.schedule(agent.latency_seconds, EventType.MARKET_DATA, agent.update_position, trade)
-        else:
-            pass # LIVE_SHADOW mode logic
+        """Exchange receives and processes an order."""
+        order_payload = {
+            "ts": self.kernel.current_time,
+            "order_id": order.order_id,
+            "agent_id": order.agent_id,
+            "side": order.side.value.upper(),
+            "order_type": order.order_type.value.upper(),
+            "price": float(order.price),
+            "quantity": int(order.quantity),
+            "status": "Submitted",
+        }
+        self._recent_orders.append(order_payload)
+        self._record_event(
+            "Order Submission",
+            f"{order.agent_id} submitted {order.side.value.upper()} {order.quantity}@{order.price:.2f}",
+        )
+
+        if self.mode != "SANDBOX":
+            return
+
+        trades = self.order_book.add_order(order)
+        if trades:
+            self._record_event("Order Match", f"{len(trades)} match(es) at step {self.step_count}")
+
+        for trade in trades:
+            self._all_trades.append(trade)
+            self.current_price = trade.price
+            self._price_history.append(self.current_price)
+
+            signed_qty = (
+                trade.quantity
+                if trade.buyer_agent_id != "SEED"
+                else -trade.quantity
+            )
+            self._recent_volume_history.append((self.kernel.current_time, signed_qty))
+
+            self._recent_trades.append(
+                {
+                    "ts": self.kernel.current_time,
+                    "trade_id": trade.trade_id,
+                    "price": float(trade.price),
+                    "quantity": int(trade.quantity),
+                    "buyer_agent_id": trade.buyer_agent_id,
+                    "seller_agent_id": trade.seller_agent_id,
+                    "aggressor_side": "BUY"
+                    if order.side.value == "buy"
+                    else "SELL",
+                }
+            )
+            self._record_event(
+                "Fill",
+                f"{trade.quantity} filled at {trade.price:.2f} ({trade.buyer_agent_id} vs {trade.seller_agent_id})",
+            )
+
+            for agent in self.agents:
+                if agent.agent_id in (trade.buyer_agent_id, trade.seller_agent_id):
+                    self.kernel.schedule(
+                        agent.latency_seconds,
+                        EventType.MARKET_DATA,
+                        agent.update_position,
+                        trade,
+                    )
+
+        if order.status == OrderStatus.CANCELLED:
+            self._record_event(
+                "Cancellation",
+                f"Unfilled remainder cancelled for order {order.order_id}",
+                severity="warning",
+            )
 
     def _agent_wakeup(self, agent: BaseAgent) -> None:
-        """Trigger an agent to observe the book and potentially issue orders."""
+        """Trigger an agent to observe market state and issue orders."""
         if not self.running:
             return
-            
+
         try:
             state = self.get_market_state()
             orders = agent.decide_action(state)
-            
-            # Schedule orders to arrive at the exchange after agent's structural latency
+
+            if orders:
+                buy_count = sum(1 for o in orders if o.side.value == "buy")
+                sell_count = len(orders) - buy_count
+                self._set_agent_action(
+                    agent,
+                    f"Submitted {len(orders)} orders ({buy_count} buy / {sell_count} sell)",
+                )
+            else:
+                self._set_agent_action(agent, "No action this wakeup")
+
             for order in orders:
-                self.kernel.schedule(agent.latency_seconds, EventType.ORDER_ARRIVAL, self._process_order, order)
-                
-        except Exception as e:
-            logger.error(f"Agent {agent.agent_id} error: {e}")
-            
-        # Reschedule next WAKEUP. Defaulting to 1 second if agent doesn't specify an explicit interval.
+                if agent.latency_seconds >= 0.01:
+                    self._record_event(
+                        "Latency",
+                        f"{agent.agent_id} order delayed by {agent.latency_seconds * 1000:.1f} ms",
+                    )
+                self.kernel.schedule(
+                    agent.latency_seconds,
+                    EventType.ORDER_ARRIVAL,
+                    self._process_order,
+                    order,
+                )
+        except Exception as exc:
+            logger.error(f"Agent {agent.agent_id} error: {exc}")
+            self._record_event(
+                "Kernel",
+                f"Agent error for {agent.agent_id}: {exc}",
+                severity="critical",
+            )
+
         interval = getattr(agent, "wakeup_interval", 1.0)
-        
-        # Add slight jitter to prevent artificial clustering using kernel current time hash
-        import random
         jitter = random.uniform(0.9, 1.1)
-        
         self.kernel.schedule(interval * jitter, EventType.WAKEUP, self._agent_wakeup, agent)
 
-    def run(self, steps: Optional[int] = None) -> Dict:
-        """Run the simulation synchronously. (Steps is now treated as seconds for legacy support)."""
+    def run(self, steps: Optional[int] = None) -> Dict[str, Any]:
+        """Run synchronously for legacy scripts and tests."""
         self.reset()
         self.running = True
-        target_time = steps if steps else self.duration_seconds
-        
+        target_time = float(steps if steps is not None else self.duration_seconds)
+
         logger.info(f"Starting kernel event loop until T={target_time}s")
         self.kernel.run_until(target_time)
         self.running = False
-        
-        # Synthesize state changes for standard output return
         self.step_count = int(self.kernel.current_time)
         return self.get_results()
 
-    def step(self) -> Dict:
-        """Legacy 1-second fixed step support, mainly used by older gym env wrappers."""
+    def step(self) -> Dict[str, Any]:
+        """Advance simulator by one second equivalent."""
         if not self.running:
             self.running = True
-        
+
         self.step_count += 1
-        # Advance kernel by exactly 1 unit of time
         target = self.kernel.current_time + 1.0
         self.kernel.run_until(target)
-        
-        # Return state for RL or metrics
+
         state = self.get_market_state()
         self._state_history.append(state)
-<<<<<<< HEAD
-=======
-    def run(self, steps: Optional[int] = None) -> Dict:
-        """Run the simulation for a given number of steps (or until duration)."""
-        self.running = True
-        max_steps = steps or self.duration_seconds
-        logger.info(f"Starting simulation: {len(self.agents)} agents, {max_steps} steps")
-
-        for i in range(max_steps):
-            if not self.running:
-                break
-            self.step()
-            if (i + 1) % 1000 == 0:
-                logger.info(
-                    f"Step {i+1}/{max_steps} | Price={self.current_price:.2f} | "
-                    f"Trades={len(self._all_trades)} | Spread={self.order_book.spread or 0:.4f}"
-                )
-
-        self.running = False
-        return self.get_results()
-
-    def step(self) -> Dict:
-        """Process one simulation time step."""
-        self.current_time += 1.0
-        self.step_count += 1
-
-        market_state = self.get_market_state()
-        step_trades: List[Trade] = []
-
-        # Each agent decides and submits orders
-        for agent in self.agents:
-            try:
-                orders = agent.decide_action(market_state)
-                for order in orders:
-                    # In SANDBOX mode, the market is deterministic and driven by agents.
-                    if self.mode == "SANDBOX":
-                        trades = self.order_book.add_order(order)
-                        step_trades.extend(trades)
-                    else:
-                        # In LIVE_SHADOW mode, agents paper-trade against the exogenous LIVE book.
-                        # Real orders are dropped so they do not impact the live clone.
-                        # Advanced paper-matching slippage logic would go here.
-                        pass
-            except Exception as e:
-                logger.error(f"Agent {agent.agent_id} error: {e}")
-
-        # Update agent positions from trades
-        for trade in step_trades:
-            for agent in self.agents:
-                if agent.agent_id in (trade.buyer_agent_id, trade.seller_agent_id):
-                    agent.update_position(trade)
-
-        # Update price from last trade
-        if step_trades:
-            self.current_price = step_trades[-1].price
-        elif self.order_book.mid_price:
-            self.current_price = self.order_book.mid_price
-
-        self._price_history.append(self.current_price)
-        self._all_trades.extend(step_trades)
-
-        # Record state
-        state = self.get_market_state()
-        state["step_trades"] = len(step_trades)
-        self._state_history.append(state)
-
->>>>>>> upstream/main
-=======
->>>>>>> 4435196 (Ani Here)
         return state
 
-    def get_market_state(self) -> Dict:
-        """Return the current market state snapshot."""
+    def get_market_state(self) -> Dict[str, Any]:
+        """Return current market state snapshot."""
         depth_data = self.order_book.get_depth(levels=10)
         total_depth = self.order_book.get_total_depth(levels=10)
         volatility = self._compute_volatility()
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 4435196 (Ani Here)
-        recent_price_change = 0.0
+
         prices = list(self._price_history)
+        recent_price_change = 0.0
         if len(prices) >= 5 and prices[-5] > 0:
             recent_price_change = (prices[-1] - prices[-5]) / prices[-5]
-        
-        # Aggregate signed volume over the recent 10-second horizon
-        volume_window = 10.0
+
         now = self.kernel.current_time
         recent_signed_volume = sum(
-            qty for ts, qty in self._recent_volume_history if (now - ts) <= volume_window
+            qty for ts, qty in self._recent_volume_history if (now - ts) <= 10.0
         )
-        
-        # Calculate depth sums directly for RL Env features
+
         bid_sum = sum(level["size"] for level in depth_data["bids"])
         ask_sum = sum(level["size"] for level in depth_data["asks"])
         fill_rate = len(self._all_trades) / max(1.0, self.kernel.current_time)
         imbalance = (bid_sum - ask_sum) / max(1, bid_sum + ask_sum)
-<<<<<<< HEAD
-=======
->>>>>>> upstream/main
-=======
->>>>>>> 4435196 (Ani Here)
 
         return {
             "current_time": self.current_time,
@@ -367,10 +309,6 @@ class MarketSimulator:
             "best_bid": self.order_book.best_bid,
             "best_ask": self.order_book.best_ask,
             "spread": self.order_book.spread or 0.0,
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 4435196 (Ani Here)
             "bid_depth": bid_sum,
             "ask_depth": ask_sum,
             "order_book_imbalance": imbalance,
@@ -379,24 +317,15 @@ class MarketSimulator:
             "fill_rate": fill_rate,
             "total_depth": total_depth,
             "current_price": self.current_price,
-            "time_to_close": max(0, self.duration_seconds - self.kernel.current_time),
-<<<<<<< HEAD
-=======
-            "bid_depth": depth_data["bids"],
-            "ask_depth": depth_data["asks"],
-            "total_depth": total_depth,
-            "current_price": self.current_price,
-            "time_to_close": max(0, self.duration_seconds - self.current_time),
->>>>>>> upstream/main
-=======
->>>>>>> 4435196 (Ani Here)
+            "time_to_close": max(0.0, self.duration_seconds - self.kernel.current_time),
             "volatility": volatility,
+            "order_book_levels": depth_data,
             "agents": {
                 agent.agent_id: {
                     "type": agent.agent_type,
                     "position": agent.position,
                     "inventory_ratio": (
-                        abs(agent.position) / 5000 if hasattr(agent, "max_inventory") else 0
+                        abs(agent.position) / 5000 if hasattr(agent, "max_inventory") else 0.0
                     ),
                 }
                 for agent in self.agents
@@ -404,11 +333,25 @@ class MarketSimulator:
             "step": self.step_count,
         }
 
-    def get_results(self) -> Dict:
+    def get_recent_activity(self, limit: int = 20) -> Dict[str, Any]:
+        """Return recent events, orders, trades, and latest agent actions."""
+
+        def latest(items: deque[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            sliced = list(items)[-limit:]
+            return list(reversed(sliced))
+
+        return {
+            "events": latest(self._recent_events),
+            "orders": latest(self._recent_orders),
+            "trades": latest(self._recent_trades),
+            "agent_actions": self._agent_actions,
+        }
+
+    def get_results(self) -> Dict[str, Any]:
         """Return final simulation results."""
-        agent_metrics = {}
-        for agent in self.agents:
-            agent_metrics[agent.agent_id] = agent.get_metrics(self.current_price)
+        agent_metrics = {
+            agent.agent_id: agent.get_metrics(self.current_price) for agent in self.agents
+        }
 
         return {
             "final_price": self.current_price,
@@ -438,7 +381,6 @@ class MarketSimulator:
         variance = sum((r - mean_ret) ** 2 for r in log_returns) / (len(log_returns) - 1)
         std = math.sqrt(variance) if variance > 0 else 0.0
 
-        # Annualise: sqrt(252 trading days * 390 minutes/day)
         return std * math.sqrt(252 * 390)
 
     def stop(self) -> None:
