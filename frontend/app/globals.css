@@ -1,14 +1,21 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 =======
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
 >>>>>>> upstream/main
+=======
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+>>>>>>> 4435196 (Ani Here)
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
 :root {
   --bg-main: #0b1018;
   --bg-grad-a: #111a29;
@@ -24,6 +31,7 @@
   --rose: #f28686;
   --gold: #ffcc70;
   --sky: #6fc4ff;
+<<<<<<< HEAD
 =======
 /* ── Bloomberg Terminal Base Theme ──────────────────────────────────────── */
 
@@ -41,6 +49,8 @@
   --cyan: #00bfff;
   --purple: #bf00ff;
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
 }
 
 * {
@@ -49,6 +59,9 @@
 
 html {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
   background-color: var(--bg-main);
   color: var(--text-strong);
 }
@@ -90,6 +103,7 @@ body {
 @keyframes floatIn {
   from {
     transform: translateY(14px);
+<<<<<<< HEAD
 =======
   background-color: var(--bg-primary);
   color: var(--text-primary);
@@ -201,6 +215,8 @@ body {
   from {
     transform: translateY(-100%);
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
     opacity: 0;
   }
   to {
@@ -210,6 +226,9 @@ body {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
 .sentinel-card {
   border: 1px solid var(--line-soft);
   background: linear-gradient(160deg, rgba(18, 26, 38, 0.96) 0%, rgba(14, 21, 32, 0.92) 100%);
@@ -242,6 +261,7 @@ td {
     padding: 0.875rem;
     border-radius: 0.85rem;
   }
+<<<<<<< HEAD
 =======
 .animate-slideDown {
   animation: slideDown 0.3s ease-out;
@@ -284,4 +304,6 @@ body::after {
 .recharts-tooltip-wrapper {
   z-index: 100;
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
 }

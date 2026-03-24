@@ -1,6 +1,9 @@
 'use client';
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
 import { useMemo } from 'react';
 import MetricCard from '@/components/dashboard/MetricCard';
 import ProjectOverviewPanel from '@/components/dashboard/ProjectOverviewPanel';
@@ -161,6 +164,7 @@ export default function DashboardPage() {
         </section>
       </div>
     </main>
+<<<<<<< HEAD
 =======
 import React, { useState, useEffect } from 'react';
 import { useMarketWebSocket } from '@/lib/websocket';
@@ -343,5 +347,7 @@ export default function DashboardPage() {
       </footer>
     </div>
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
   );
 }

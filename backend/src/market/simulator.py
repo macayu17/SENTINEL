@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 """Market simulator — orchestrates agents, order book, and state tracking using a Discrete Event Kernel."""
 
 from typing import List, Dict, Optional, Any
@@ -7,15 +8,24 @@ from typing import List, Dict, Optional, Any
 
 from typing import List, Dict, Optional
 >>>>>>> upstream/main
+=======
+"""Market simulator — orchestrates agents, order book, and state tracking using a Discrete Event Kernel."""
+
+from typing import List, Dict, Optional, Any
+>>>>>>> 4435196 (Ani Here)
 import math
 from collections import deque
 from .order_book import OrderBook
 from .order import Order
 from .trade import Trade
 <<<<<<< HEAD
+<<<<<<< HEAD
 from .kernel import EventKernel, EventType
 =======
 >>>>>>> upstream/main
+=======
+from .kernel import EventKernel, EventType
+>>>>>>> 4435196 (Ani Here)
 from ..agents.base_agent import BaseAgent
 from ..utils.logger import get_logger
 
@@ -24,6 +34,7 @@ logger = get_logger("simulator")
 
 class MarketSimulator:
     """
+<<<<<<< HEAD
 <<<<<<< HEAD
     Multi-agent market microstructure simulator powered by an Event Kernel.
 =======
@@ -36,6 +47,9 @@ class MarketSimulator:
     4. Updates agent positions from resulting trades.
     5. Records history for downstream analysis.
 >>>>>>> upstream/main
+=======
+    Multi-agent market microstructure simulator powered by an Event Kernel.
+>>>>>>> 4435196 (Ani Here)
     """
 
     def __init__(
@@ -46,6 +60,7 @@ class MarketSimulator:
         mode: str = "SANDBOX",
     ) -> None:
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.agents = agents
         self.order_book = OrderBook()
         self.kernel = EventKernel()
@@ -53,14 +68,22 @@ class MarketSimulator:
         self.agents = sorted(agents, key=lambda a: a.latency_seconds)
         self.order_book = OrderBook()
 >>>>>>> upstream/main
+=======
+        self.agents = agents
+        self.order_book = OrderBook()
+        self.kernel = EventKernel()
+>>>>>>> 4435196 (Ani Here)
         self.initial_price = initial_price
         self.duration_seconds = duration_seconds
 
         # State
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         self.current_time: float = 0.0
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
         self.current_price: float = initial_price
         self.step_count: int = 0
         self.running: bool = False
@@ -72,6 +95,9 @@ class MarketSimulator:
         self._state_history: List[Dict] = []
         self._all_trades: List[Trade] = []
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
         
         # New Microstructure Metrics
         self._recent_volume_history = deque(maxlen=100) # (time, signed_qty)
@@ -119,11 +145,14 @@ class MarketSimulator:
                 self.kernel.schedule(first_wake, EventType.WAKEUP, self._agent_wakeup, agent)
 
         return self.get_market_state()
+<<<<<<< HEAD
 =======
 
         # Seed the order book with initial liquidity
         self._seed_order_book()
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
 
     def _seed_order_book(self) -> None:
         """Place initial resting orders to bootstrap the book."""
@@ -152,6 +181,9 @@ class MarketSimulator:
             self.order_book.add_order(ask)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
     def _process_order(self, order: Order) -> None:
         """Exchange receives and processes the order."""
         if self.mode == "SANDBOX":
@@ -226,6 +258,7 @@ class MarketSimulator:
         # Return state for RL or metrics
         state = self.get_market_state()
         self._state_history.append(state)
+<<<<<<< HEAD
 =======
     def run(self, steps: Optional[int] = None) -> Dict:
         """Run the simulation for a given number of steps (or until duration)."""
@@ -292,6 +325,8 @@ class MarketSimulator:
         self._state_history.append(state)
 
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
         return state
 
     def get_market_state(self) -> Dict:
@@ -300,6 +335,9 @@ class MarketSimulator:
         total_depth = self.order_book.get_total_depth(levels=10)
         volatility = self._compute_volatility()
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
         recent_price_change = 0.0
         prices = list(self._price_history)
         if len(prices) >= 5 and prices[-5] > 0:
@@ -317,8 +355,11 @@ class MarketSimulator:
         ask_sum = sum(level["size"] for level in depth_data["asks"])
         fill_rate = len(self._all_trades) / max(1.0, self.kernel.current_time)
         imbalance = (bid_sum - ask_sum) / max(1, bid_sum + ask_sum)
+<<<<<<< HEAD
 =======
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
 
         return {
             "current_time": self.current_time,
@@ -327,6 +368,9 @@ class MarketSimulator:
             "best_ask": self.order_book.best_ask,
             "spread": self.order_book.spread or 0.0,
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4435196 (Ani Here)
             "bid_depth": bid_sum,
             "ask_depth": ask_sum,
             "order_book_imbalance": imbalance,
@@ -336,6 +380,7 @@ class MarketSimulator:
             "total_depth": total_depth,
             "current_price": self.current_price,
             "time_to_close": max(0, self.duration_seconds - self.kernel.current_time),
+<<<<<<< HEAD
 =======
             "bid_depth": depth_data["bids"],
             "ask_depth": depth_data["asks"],
@@ -343,6 +388,8 @@ class MarketSimulator:
             "current_price": self.current_price,
             "time_to_close": max(0, self.duration_seconds - self.current_time),
 >>>>>>> upstream/main
+=======
+>>>>>>> 4435196 (Ani Here)
             "volatility": volatility,
             "agents": {
                 agent.agent_id: {
