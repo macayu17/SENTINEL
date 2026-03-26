@@ -16,6 +16,10 @@ from ..agents.institutional import InstitutionalAgent
 from ..agents.retail import RetailAgent
 from ..agents.informed import InformedAgent
 from ..agents.noise import NoiseAgent
+from ..agents.momentum import MomentumAgent
+from ..agents.mean_reversion import MeanReversionAgent
+from ..agents.spoofing import SpoofingAgent
+from ..agents.sentiment import SentimentAgent
 from ..prediction.liquidity_shock import LiquidityShockPredictor
 from ..prediction.large_order import LargeOrderDetector
 from ..utils.logger import get_logger
@@ -99,6 +103,10 @@ async def start_simulation():
         + [RetailAgent(f"RET_{i}") for i in range(10)]
         + [InformedAgent(f"INF_{i}") for i in range(3)]
         + [NoiseAgent(f"NOISE_{i}") for i in range(10)]
+        + [MomentumAgent(f"MOM_{i}") for i in range(2)]
+        + [MeanReversionAgent(f"MR_{i}") for i in range(2)]
+        + [SpoofingAgent(f"SPOOF_0")]
+        + [SentimentAgent(f"SENT_{i}") for i in range(5)]
     )
 
     simulator = MarketSimulator(
