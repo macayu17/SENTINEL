@@ -1,9 +1,30 @@
+<<<<<<< HEAD
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+=======
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
+>>>>>>> upstream/main
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+<<<<<<< HEAD
+:root {
+  --bg-main: #0b1018;
+  --bg-grad-a: #111a29;
+  --bg-grad-b: #0b141f;
+  --card-base: #121a26cc;
+  --card-elevated: #162132;
+  --line-soft: #25344a;
+  --line-strong: #365072;
+  --text-strong: #e3ecf8;
+  --text-soft: #a6b5c8;
+  --text-muted: #7f8c9f;
+  --mint: #62d5a4;
+  --rose: #f28686;
+  --gold: #ffcc70;
+  --sky: #6fc4ff;
+=======
 /* ── Bloomberg Terminal Base Theme ──────────────────────────────────────── */
 
 :root {
@@ -19,6 +40,7 @@
   --amber: #ffb800;
   --cyan: #00bfff;
   --purple: #bf00ff;
+>>>>>>> upstream/main
 }
 
 * {
@@ -26,6 +48,49 @@
 }
 
 html {
+<<<<<<< HEAD
+  background-color: var(--bg-main);
+  color: var(--text-strong);
+}
+
+body {
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(1400px 700px at 100% -5%, rgba(111, 196, 255, 0.18), transparent 52%),
+    radial-gradient(1200px 700px at 0% 0%, rgba(98, 213, 164, 0.16), transparent 48%),
+    linear-gradient(170deg, var(--bg-grad-a) 0%, var(--bg-main) 55%, var(--bg-grad-b) 100%);
+  color: var(--text-strong);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d1522;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #263851;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #375171;
+}
+
+@keyframes floatIn {
+  from {
+    transform: translateY(14px);
+=======
   background-color: var(--bg-primary);
   color: var(--text-primary);
 }
@@ -135,6 +200,7 @@ body {
 @keyframes slideDown {
   from {
     transform: translateY(-100%);
+>>>>>>> upstream/main
     opacity: 0;
   }
   to {
@@ -143,6 +209,40 @@ body {
   }
 }
 
+<<<<<<< HEAD
+.sentinel-card {
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(160deg, rgba(18, 26, 38, 0.96) 0%, rgba(14, 21, 32, 0.92) 100%);
+  border-radius: 1rem;
+  padding: 1rem;
+  box-shadow:
+    inset 0 1px 0 rgba(173, 194, 220, 0.06),
+    0 20px 34px rgba(6, 9, 14, 0.34);
+  animation: floatIn 0.35s ease-out;
+}
+
+.numeric {
+  font-family: "IBM Plex Mono", "Menlo", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: rgba(111, 196, 255, 0.24);
+  color: #f3f8ff;
+}
+
+table,
+th,
+td {
+  font-family: "IBM Plex Mono", "Menlo", monospace;
+}
+
+@media (max-width: 768px) {
+  .sentinel-card {
+    padding: 0.875rem;
+    border-radius: 0.85rem;
+  }
+=======
 .animate-slideDown {
   animation: slideDown 0.3s ease-out;
 }
@@ -183,4 +283,5 @@ body::after {
 
 .recharts-tooltip-wrapper {
   z-index: 100;
+>>>>>>> upstream/main
 }

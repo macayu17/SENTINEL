@@ -23,6 +23,10 @@ class InformedAgent(BaseAgent):
         max_position: int = 5000,
     ) -> None:
         super().__init__(agent_id, "Informed", initial_capital, latency_seconds=0.005)
+<<<<<<< HEAD
+        self.wakeup_interval = 0.6
+=======
+>>>>>>> upstream/main
         self.signal_probability = signal_probability
         self.signal_accuracy = signal_accuracy
         self.signal_duration = signal_duration
@@ -34,6 +38,12 @@ class InformedAgent(BaseAgent):
     def decide_action(self, market_state: Dict) -> List[Order]:
         current_time = market_state.get("current_time", 0.0)
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+<<<<<<< HEAD
+        flow = market_state.get("recent_signed_volume", 0.0)
+        imbalance = market_state.get("order_book_imbalance", 0.0)
+        trend = market_state.get("recent_price_change", 0.0)
+=======
+>>>>>>> upstream/main
         orders: List[Order] = []
 
         # Check if current signal has expired
@@ -55,7 +65,16 @@ class InformedAgent(BaseAgent):
 
         # Check for new signal
         if not self._active_signal and random.random() < self.signal_probability:
+<<<<<<< HEAD
+            # Microstructure-informed direction guess with some randomness.
+            score = 0.8 * trend + 0.15 * imbalance + 0.05 * (1 if flow > 0 else -1 if flow < 0 else 0)
+            if abs(score) < 1e-6:
+                direction = "buy" if random.random() < 0.5 else "sell"
+            else:
+                direction = "buy" if score > 0 else "sell"
+=======
             direction = "buy" if random.random() < 0.5 else "sell"
+>>>>>>> upstream/main
             # Accuracy: with signal_accuracy chance, the direction is correct
             if random.random() > self.signal_accuracy:
                 direction = "sell" if direction == "buy" else "buy"

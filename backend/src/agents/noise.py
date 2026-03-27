@@ -21,6 +21,10 @@ class NoiseAgent(BaseAgent):
         max_size: int = 200,
     ) -> None:
         super().__init__(agent_id, "Noise", initial_capital, latency_seconds=0.05)
+<<<<<<< HEAD
+        self.wakeup_interval = 1.0
+=======
+>>>>>>> upstream/main
         self.order_rate = order_rate
         self.min_size = min_size
         self.max_size = max_size

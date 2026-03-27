@@ -21,6 +21,10 @@ class RetailAgent(BaseAgent):
         order_size: int = 50,
     ) -> None:
         super().__init__(agent_id, "Retail", initial_capital, latency_seconds=0.1)
+<<<<<<< HEAD
+        self.wakeup_interval = 2.0
+=======
+>>>>>>> upstream/main
         self.stop_loss = stop_loss
         self.take_profit = take_profit
         self.order_size = order_size
