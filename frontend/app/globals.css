@@ -1,14 +1,9 @@
-<<<<<<< HEAD
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
-=======
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
->>>>>>> upstream/main
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-<<<<<<< HEAD
 :root {
   --bg-main: #0b1018;
   --bg-grad-a: #111a29;
@@ -24,23 +19,18 @@
   --rose: #f28686;
   --gold: #ffcc70;
   --sky: #6fc4ff;
-=======
-/* ── Bloomberg Terminal Base Theme ──────────────────────────────────────── */
 
-:root {
   --bg-primary: #000000;
-  --bg-panel: #0a0a0a;
-  --border-primary: #1a1a1a;
-  --border-active: #333;
-  --text-primary: #e0e0e0;
-  --text-secondary: #888;
-  --text-muted: #555;
+  --bg-panel: rgba(10, 10, 10, 0.86);
+  --border-primary: rgba(127, 140, 159, 0.22);
+  --border-active: #365072;
+  --text-primary: #e3ecf8;
+  --text-secondary: #a6b5c8;
   --green: #00ff41;
   --red: #ff0040;
   --amber: #ffb800;
   --cyan: #00bfff;
   --purple: #bf00ff;
->>>>>>> upstream/main
 }
 
 * {
@@ -48,7 +38,6 @@
 }
 
 html {
-<<<<<<< HEAD
   background-color: var(--bg-main);
   color: var(--text-strong);
 }
@@ -90,48 +79,57 @@ body {
 @keyframes floatIn {
   from {
     transform: translateY(14px);
-=======
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
-body {
-  font-family:
-    "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", monospace;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  margin: 0;
-  padding: 0;
-  -webkit-font-smoothing: antialiased;
-  font-size: 13px;
-  line-height: 1.4;
-  overflow-x: hidden;
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0.3;
+  }
 }
 
-/* ── Scrollbar ──────────────────────────────────────────────────────────── */
-
-::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
-::-webkit-scrollbar-track {
-  background: #000;
+.sentinel-card {
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(160deg, rgba(18, 26, 38, 0.96) 0%, rgba(14, 21, 32, 0.92) 100%);
+  border-radius: 1rem;
+  padding: 1rem;
+  box-shadow:
+    inset 0 1px 0 rgba(173, 194, 220, 0.06),
+    0 20px 34px rgba(6, 9, 14, 0.34);
+  animation: floatIn 0.35s ease-out;
 }
 
-::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 0;
+.numeric,
+table,
+th,
+td {
+  font-family: "IBM Plex Mono", "JetBrains Mono", "Menlo", monospace;
+  font-variant-numeric: tabular-nums;
 }
-
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
-
-/* ── Terminal Panel ─────────────────────────────────────────────────────── */
 
 .terminal-panel {
-  background: var(--bg-panel);
+  background: linear-gradient(180deg, rgba(10, 10, 10, 0.9), rgba(14, 20, 28, 0.92));
   border: 1px solid var(--border-primary);
   position: relative;
   overflow: hidden;
@@ -157,8 +155,6 @@ body {
   color: var(--text-muted);
 }
 
-/* ── Stat Cells ─────────────────────────────────────────────────────────── */
-
 .stat-cell {
   display: flex;
   flex-direction: column;
@@ -178,103 +174,18 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Blinking Indicator ────────────────────────────────────────────────── */
-
-@keyframes blink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-  51%,
-  100% {
-    opacity: 0.3;
-  }
-}
-
 .blink {
   animation: blink 1s infinite;
 }
 
-/* ── Slide Down Animation ──────────────────────────────────────────────── */
-
-@keyframes slideDown {
-  from {
-    transform: translateY(-100%);
->>>>>>> upstream/main
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-<<<<<<< HEAD
-.sentinel-card {
-  border: 1px solid var(--line-soft);
-  background: linear-gradient(160deg, rgba(18, 26, 38, 0.96) 0%, rgba(14, 21, 32, 0.92) 100%);
-  border-radius: 1rem;
-  padding: 1rem;
-  box-shadow:
-    inset 0 1px 0 rgba(173, 194, 220, 0.06),
-    0 20px 34px rgba(6, 9, 14, 0.34);
-  animation: floatIn 0.35s ease-out;
-}
-
-.numeric {
-  font-family: "IBM Plex Mono", "Menlo", monospace;
-  font-variant-numeric: tabular-nums;
+.animate-slideDown {
+  animation: slideDown 0.3s ease-out;
 }
 
 ::selection {
   background: rgba(111, 196, 255, 0.24);
   color: #f3f8ff;
 }
-
-table,
-th,
-td {
-  font-family: "IBM Plex Mono", "Menlo", monospace;
-}
-
-@media (max-width: 768px) {
-  .sentinel-card {
-    padding: 0.875rem;
-    border-radius: 0.85rem;
-  }
-=======
-.animate-slideDown {
-  animation: slideDown 0.3s ease-out;
-}
-
-/* ── Scanline Effect (subtle) ──────────────────────────────────────────── */
-
-body::after {
-  content: "";
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.03) 0px,
-    rgba(0, 0, 0, 0.03) 1px,
-    transparent 1px,
-    transparent 2px
-  );
-}
-
-/* ── Selection ─────────────────────────────────────────────────────────── */
-
-::selection {
-  background: rgba(0, 255, 65, 0.2);
-  color: #fff;
-}
-
-/* ── Recharts Overrides ────────────────────────────────────────────────── */
 
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {
@@ -283,5 +194,11 @@ body::after {
 
 .recharts-tooltip-wrapper {
   z-index: 100;
->>>>>>> upstream/main
+}
+
+@media (max-width: 768px) {
+  .sentinel-card {
+    padding: 0.875rem;
+    border-radius: 0.85rem;
+  }
 }

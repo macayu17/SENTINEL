@@ -179,8 +179,8 @@ async def get_market_snapshot():
         "best_ask": state["best_ask"],
         "depth": state["total_depth"],
         "order_book": {
-            "bids": state["bid_depth"],
-            "asks": state["ask_depth"],
+            "bids": state["bid_levels"],
+            "asks": state["ask_levels"],
         },
         "volatility": state["volatility"],
         "step": state["step"],
@@ -248,8 +248,8 @@ async def _run_simulation_loop():
                 "spread": state["spread"],
                 "depth": state["total_depth"],
                 "order_book": {
-                    "bids": state["bid_depth"][:10],
-                    "asks": state["ask_depth"][:10],
+                    "bids": state["bid_levels"][:10],
+                    "asks": state["ask_levels"][:10],
                 },
                 "liquidity_prediction": liquidity_pred,
                 "large_order_detection": large_order_det,

@@ -167,7 +167,7 @@ class MarketMakerEnv(gym.Env):
         for a in self.simulator.agents:
             if a.agent_id == self.rl_agent_id:
                 mid = self.simulator.get_market_state()['mid_price']
-                return a.cash - a.initial_capital + (a.position * mid)
+                return a.realized_pnl + a.get_unrealized_pnl(mid)
         return 0.0
         
     def _get_agent_inventory(self) -> int:

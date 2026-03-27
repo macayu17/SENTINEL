@@ -27,6 +27,7 @@ class BaseAgent(ABC):
         self.agent_type = agent_type
         self.initial_capital = initial_capital
         self.capital = initial_capital
+        self.cash = initial_capital
         self.latency_seconds = latency_seconds
 
         # Position tracking
@@ -35,6 +36,7 @@ class BaseAgent(ABC):
         self.realized_pnl: float = 0.0
         self.num_trades: int = 0
         self._trade_returns: List[float] = []
+        self.active_orders: Dict[str, Order] = {}
 
     @abstractmethod
     def decide_action(self, market_state: Dict) -> List[Order]:
@@ -56,6 +58,12 @@ class BaseAgent(ABC):
         """Apply a fill to the position, tracking average entry and realized PnL."""
         direction = 1 if is_buy else -1
         new_qty = direction * quantity
+        cash_delta = price * quantity
+
+        if is_buy:
+            self.cash -= cash_delta
+        else:
+            self.cash += cash_delta
 
         if (self.position >= 0 and is_buy) or (self.position <= 0 and not is_buy):
             # Adding to position: update average entry
@@ -77,6 +85,17 @@ class BaseAgent(ABC):
             # If flipped, the remainder is a new position at the trade price
             if abs(new_qty) > close_qty:
                 self.avg_entry_price = price
+
+    def reset(self) -> None:
+        """Reset mutable state for a fresh simulation episode."""
+        self.capital = self.initial_capital
+        self.cash = self.initial_capital
+        self.position = 0
+        self.avg_entry_price = 0.0
+        self.realized_pnl = 0.0
+        self.num_trades = 0
+        self._trade_returns.clear()
+        self.active_orders.clear()
 
     def get_unrealized_pnl(self, current_price: float) -> float:
         """Mark-to-market unrealized PnL."""

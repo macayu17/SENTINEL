@@ -17,7 +17,12 @@ class SentinelAPI {
   }
 
   async health() {
-    return this.request<{ status: string; simulation_active: boolean; connected_clients: number }>('/api/health');
+    return this.request<{
+      status: string;
+      simulation_active: boolean;
+      connected_clients: number;
+      mode: 'SANDBOX' | 'LIVE_SHADOW';
+    }>('/api/health');
   }
 
   async startSimulation() {
