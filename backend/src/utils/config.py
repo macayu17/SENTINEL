@@ -67,7 +67,7 @@ class Config:
     broker_account_id: str = os.getenv("BROKER_ACCOUNT_ID", "").strip()
 
     def validate(self) -> None:
-        supported = {"binance", "nse", "mock", "broker"}
+        supported = {"binance", "nse", "mock", "broker", "scraper"}
         if self.live_feed_provider not in supported:
             raise ValueError(
                 f"Unsupported LIVE_FEED_PROVIDER='{self.live_feed_provider}'. "

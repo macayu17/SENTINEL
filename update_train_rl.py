@@ -1,4 +1,4 @@
-"""Main RL training script for the Sentinel Market Maker."""
+new_script = r"""\"\"\"Main RL training script for the Sentinel Market Maker.\"\"\"
 
 import os
 import sys
@@ -24,10 +24,10 @@ from backend.src.agents.rl_agent import RLAgent
 from backend.src.agents.institutional import InstitutionalAgent
 
 class MetricsLoggerCallback(BaseCallback):
-    """
+    \"\"\"
     Custom callback for logging structured market-making metrics
     to TensorBoard over the course of training.
-    """
+    \"\"\"
     def __init__(self, verbose=0):
         super().__init__(verbose)
         self.pnls = []
@@ -143,3 +143,7 @@ def train():
     
 if __name__ == "__main__":
     train()
+"""
+
+with open("/Users/anindhithsankanna/CS Projects/Sentinel/train_rl.py", "w") as f:
+    f.write(new_script.replace('\\"\\"\\"', '\"\"\"'))

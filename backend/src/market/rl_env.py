@@ -93,20 +93,24 @@ class MarketMakerEnv(gym.Env):
         self.last_pnl = current_pnl
         
         # Track drawdown
+        old_max_dd = self.max_drawdown
         self.peak_pnl = max(self.peak_pnl, current_pnl)
         drawdown = self.peak_pnl - current_pnl
         self.max_drawdown = max(self.max_drawdown, drawdown)
         
         # Shaping penalties
-        inventory_penalty = 0.005 * (position ** 2) 
+        inventory_penalty = 0.001 * abs(position) 
         cancel_penalty = 0.01 * num_cancels
-        drawdown_penalty = 0.01 * drawdown
+        drawdown_penalty = 0.5 * max(0.0, self.max_drawdown - old_max_dd)
         
         # Add carry penalty so lingering inventory over time is discouraged.
         inventory_carry_penalty = 0.0005 * abs(position)
 
         # Spooner-like inventory-aware asymmetric reward.
         reward = pnl_diff - inventory_penalty - inventory_carry_penalty - cancel_penalty - drawdown_penalty
+        
+        # Basic safety guard: prevent NaNs and clip extreme values to maintain stable PPO gradients
+        reward = float(np.clip(np.nan_to_num(reward, nan=0.0), -100.0, 100.0))
         
         self.last_position = position
         
@@ -167,7 +171,7 @@ class MarketMakerEnv(gym.Env):
         for a in self.simulator.agents:
             if a.agent_id == self.rl_agent_id:
                 mid = self.simulator.get_market_state()['mid_price']
-                return a.cash - a.initial_capital + (a.position * mid)
+                return a.capital - a.initial_capital + (a.position * mid)
         return 0.0
         
     def _get_agent_inventory(self) -> int:

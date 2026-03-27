@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
+from pathlib import Path
 import asyncio
 import time
 
@@ -17,6 +18,12 @@ from ..agents.institutional import InstitutionalAgent
 from ..agents.retail import RetailAgent
 from ..agents.informed import InformedAgent
 from ..agents.noise import NoiseAgent
+
+from ..agents.momentum import MomentumAgent
+from ..agents.mean_reversion import MeanReversionAgent
+from ..agents.spoofing import SpoofingAgent
+from ..agents.sentiment import SentimentAgent
+
 from ..prediction.liquidity_shock import LiquidityShockPredictor
 from ..prediction.large_order import LargeOrderDetector
 from ..prediction.signal_engine import SignalEngine, SignalInput
@@ -27,6 +34,7 @@ from ..data.live_feed import (
     BrokerAuthConfig,
     MockLiveFeedAdapter,
     NseLikeLiveFeedAdapter,
+    ScraperLiveFeedAdapter,
 )
 from ..utils.logger import get_logger
 from ..utils.config import config
@@ -37,7 +45,18 @@ logger = get_logger("api")
 simulator: Optional[MarketSimulator] = None
 liquidity_predictor = LiquidityShockPredictor()
 large_order_detector = LargeOrderDetector()
-signal_engine = SignalEngine()
+
+# Signal engine with optional trained model
+_model_path = Path(__file__).parent.parent.parent / "models" / "signal_model.pkl"
+signal_engine: Optional[SignalEngine] = None
+
+def _initialize_signal_engine() -> SignalEngine:
+    """Initialize signal engine with trained model if available."""
+    global signal_engine
+    if signal_engine is None:
+        signal_engine = SignalEngine(model_path=_model_path if _model_path.exists() else None)
+    return signal_engine
+
 manager = ConnectionManager()
 
 # Stream task handle (simulation loop or live-shadow loop)
@@ -72,8 +91,8 @@ def _phase_status() -> list[Dict[str, str]]:
     return [
         {"phase": "Phase 1", "status": "completed"},
         {"phase": "Phase 2", "status": "completed"},
-        {"phase": "Phase 3", "status": "in-progress"},
-        {"phase": "Phase 4", "status": "in-progress"},
+        {"phase": "Phase 3", "status": "completed"},
+        {"phase": "Phase 4", "status": "completed"},
     ]
 
 
@@ -86,7 +105,8 @@ def _signal_payload(
     trade_flow: float,
     inventory: float,
 ) -> Dict[str, Any]:
-    return signal_engine.predict(
+    engine = _initialize_signal_engine()
+    return engine.predict(
         SignalInput(
             mid_price=mid_price,
             spread=spread,
@@ -135,6 +155,11 @@ def _build_live_feed_adapter() -> LiveMarketFeed:
         )
     if provider == "mock":
         return MockLiveFeedAdapter(
+            initial_price=config.initial_price,
+            duration_seconds=config.simulation_duration,
+        )
+    if provider == "scraper":
+        return ScraperLiveFeedAdapter(
             initial_price=config.initial_price,
             duration_seconds=config.simulation_duration,
         )
@@ -225,6 +250,10 @@ async def start_simulation():
             + [RetailAgent(f"RET_{i}") for i in range(10)]
             + [InformedAgent(f"INF_{i}") for i in range(3)]
             + [NoiseAgent(f"NOISE_{i}") for i in range(10)]
+            + [MomentumAgent(f"MOM_{i}") for i in range(2)]
+            + [MeanReversionAgent(f"MR_{i}") for i in range(2)]
+            + [SpoofingAgent(f"SPOOF_0")]
+            + [SentimentAgent(f"SENT_{i}") for i in range(5)]
         )
 
         simulator = MarketSimulator(

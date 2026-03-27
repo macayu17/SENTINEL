@@ -86,20 +86,36 @@ class HFTAgent(BaseAgent):
                     )
                 )
 
-        if spread >= 0.02 and abs(imbalance) > 0.2:
-            quote_side = OrderSide.BUY if imbalance > 0 else OrderSide.SELL
-            quote_px = (
-                round(price - 0.01, 2)
-                if quote_side == OrderSide.BUY
-                else round(price + 0.01, 2)
+        if abs(imbalance) > 0.65 and self.position != 0:
+            exit_side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
+            orders.append(
+                Order(
+                    agent_id=self.agent_id,
+                    side=exit_side,
+                    order_type=OrderType.MARKET,
+                    price=price,
+                    quantity=abs(self.position),
+                )
+            )
+            return orders
+
+        if spread >= 0.04:
+            orders.append(
+                Order(
+                    agent_id=self.agent_id,
+                    side=OrderSide.BUY,
+                    order_type=OrderType.LIMIT,
+                    price=round(price + 0.01, 2),
+                    quantity=50,
+                )
             )
             orders.append(
                 Order(
                     agent_id=self.agent_id,
-                    side=quote_side,
+                    side=OrderSide.SELL,
                     order_type=OrderType.LIMIT,
-                    price=quote_px,
-                    quantity=25,
+                    price=round(price - 0.01, 2),
+                    quantity=50,
                 )
             )
 

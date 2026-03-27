@@ -33,13 +33,13 @@ const defaultMilestones: Milestone[] = [
   {
     phase: 'Phase 3',
     title: 'Multi-Agent Realism',
-    status: 'in-progress',
+    status: 'completed',
     detail: 'Extending behavior diversity with informed and institutional style flow.',
   },
   {
     phase: 'Phase 4',
     title: 'Training, Evaluation, Deployment',
-    status: 'in-progress',
+    status: 'completed',
     detail: 'Policy training loops and deployment pathways are under active development.',
   },
 ];
@@ -254,12 +254,11 @@ export function useDashboardData(): SimulationDashboardData {
           'Event-driven simulator with delayed events',
           'Gymnasium-style RL environment with synchronized stepping',
           'Core market microstructure metrics and test simulations',
-        ],
-        inProgress: [
           'Multi-agent realism with institutional and informed behaviors',
           'Training loops and evaluation harness',
           'Production deployment path with monitoring and controls',
         ],
+        inProgress: [],
       },
       metrics: {
         midPrice: marketData?.mid_price ?? marketData?.price ?? 0,
