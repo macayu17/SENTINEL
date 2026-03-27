@@ -73,7 +73,20 @@ class InstitutionalAgent(BaseAgent):
                         quantity=slice_size,
                     )
                 )
-                self.executed_quantity += slice_size
                 self._last_slice_time = current_time
 
         return orders
+
+    def update_position(self, trade) -> None:
+        super().update_position(trade)
+        self.executed_quantity = abs(self.position)
+
+    def reset(self) -> None:
+        super().reset()
+        self.executed_quantity = 0
+        self.side = random.choice([OrderSide.BUY, OrderSide.SELL])
+        self._last_slice_time = 0.0
+        self._started = False
+
+    def consume_cancellations(self) -> List[str]:
+        return self.cancel_all_active_orders()

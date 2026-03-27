@@ -31,12 +31,14 @@ class MarketSimulator:
         initial_price: float = 100.0,
         duration_seconds: int = 23_400,
         mode: str = "SANDBOX",
+        order_ttl_seconds: float = 20.0,
     ) -> None:
         self.agents = sorted(agents, key=lambda agent: agent.latency_seconds)
         self.order_book = OrderBook()
         self.kernel = EventKernel()
         self.initial_price = initial_price
         self.duration_seconds = duration_seconds
+        self.order_ttl_seconds = order_ttl_seconds
 
         self.current_price: float = initial_price
         self.step_count: int = 0
@@ -111,6 +113,37 @@ class MarketSimulator:
             self.order_book.add_order(bid)
             self.order_book.add_order(ask)
 
+    def _ensure_liquidity_floor(self) -> None:
+        """Replenish thin books so the dashboard demo remains two-sided and responsive."""
+        total_depth = self.order_book.get_total_depth(levels=10)
+        if (
+            self.order_book.best_bid is not None
+            and self.order_book.best_ask is not None
+            and total_depth >= 600
+        ):
+            return
+
+        anchor = self.order_book.mid_price or self.current_price or self.initial_price
+        for i in range(5):
+            offset = (i + 1) * 0.02
+            quantity = 150
+            bid = Order(
+                agent_id="SEED",
+                side=OrderSide.BUY,
+                order_type=OrderType.LIMIT,
+                price=round(anchor - offset, 2),
+                quantity=quantity,
+            )
+            ask = Order(
+                agent_id="SEED",
+                side=OrderSide.SELL,
+                order_type=OrderType.LIMIT,
+                price=round(anchor + offset, 2),
+                quantity=quantity,
+            )
+            self.order_book.add_order(bid)
+            self.order_book.add_order(ask)
+
     def _process_order(self, order: Order) -> None:
         """Exchange receives and processes an order."""
         if self.mode != "SANDBOX":
@@ -118,6 +151,20 @@ class MarketSimulator:
 
         trades = self.order_book.add_order(order)
         self._all_trades.extend(trades)
+
+        owner = next((agent for agent in self.agents if agent.agent_id == order.agent_id), None)
+        if (
+            owner is not None
+            and order.order_type == OrderType.LIMIT
+            and order.remaining_quantity > 0
+        ):
+            owner.active_orders[order.order_id] = order
+            self.kernel.schedule(
+                self.order_ttl_seconds,
+                EventType.CANCEL_ARRIVAL,
+                self._cancel_order,
+                order.order_id,
+            )
 
         signed_qty = order.quantity if order.side == OrderSide.BUY else -order.quantity
 
@@ -135,12 +182,23 @@ class MarketSimulator:
                         trade,
                     )
 
+    def _cancel_order(self, order_id: str) -> None:
+        """Cancel a resting order and clear its agent-side tracking."""
+        cancelled = self.order_book.cancel_order(order_id)
+        for agent in self.agents:
+            agent.active_orders.pop(order_id, None)
+        if cancelled:
+            logger.debug(f"Cancelled stale order {order_id}")
+
     def _agent_wakeup(self, agent: BaseAgent) -> None:
         """Trigger an agent to observe the market and submit fresh orders."""
         if not self.running:
             return
 
         try:
+            for order_id in agent.consume_cancellations():
+                self._cancel_order(order_id)
+
             state = self.get_market_state()
             orders = agent.decide_action(state)
 
@@ -179,6 +237,8 @@ class MarketSimulator:
         self.step_count += 1
         target_time = self.current_time + 1.0
         self.kernel.run_until(target_time)
+
+        self._ensure_liquidity_floor()
 
         if self.order_book.mid_price is not None:
             self.current_price = self.order_book.mid_price

@@ -53,6 +53,8 @@ class SpoofingAgent(BaseAgent):
         self._spoof_side: Optional[OrderSide] = None
         self._steps_in_state: int = 0
         self._cooldown_target: int = 0
+        self._spoof_order_id: Optional[str] = None
+        self._pending_cancellations: List[str] = []
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
@@ -81,26 +83,25 @@ class SpoofingAgent(BaseAgent):
             self._steps_in_state = 0
 
         if self._state == self.SPOOFING:
-            # Place a large phantom order away from best price
-            tick = 0.01
-            spoof_size = random.randint(self.spoof_size_min, self.spoof_size_max)
+            if self._spoof_order_id is None:
+                # Place one large phantom order away from best price.
+                tick = 0.01
+                spoof_size = random.randint(self.spoof_size_min, self.spoof_size_max)
 
-            if self._spoof_side == OrderSide.BUY:
-                # Large bid a few ticks below — fake buy support
-                spoof_price = round(price - self.spoof_ticks_offset * tick, 2)
-            else:
-                # Large ask a few ticks above — fake sell pressure
-                spoof_price = round(price + self.spoof_ticks_offset * tick, 2)
+                if self._spoof_side == OrderSide.BUY:
+                    spoof_price = round(price - self.spoof_ticks_offset * tick, 2)
+                else:
+                    spoof_price = round(price + self.spoof_ticks_offset * tick, 2)
 
-            orders.append(
-                Order(
+                spoof_order = Order(
                     agent_id=self.agent_id,
                     side=self._spoof_side,
                     order_type=OrderType.LIMIT,
                     price=spoof_price,
                     quantity=spoof_size,
                 )
-            )
+                self._spoof_order_id = spoof_order.order_id
+                orders.append(spoof_order)
 
             # After enough steps, move to trading phase
             if self._steps_in_state >= self.spoof_duration_steps:
@@ -108,6 +109,10 @@ class SpoofingAgent(BaseAgent):
                 self._steps_in_state = 0
 
         elif self._state == self.TRADING:
+            if self._spoof_order_id is not None:
+                self._pending_cancellations.append(self._spoof_order_id)
+                self._spoof_order_id = None
+
             # Trade in the OPPOSITE direction of the spoof
             real_side = OrderSide.SELL if self._spoof_side == OrderSide.BUY else OrderSide.BUY
             orders.append(
@@ -130,3 +135,17 @@ class SpoofingAgent(BaseAgent):
                 self._steps_in_state = 0
 
         return orders
+
+    def consume_cancellations(self) -> List[str]:
+        cancellations = self._pending_cancellations[:]
+        self._pending_cancellations.clear()
+        return cancellations
+
+    def reset(self) -> None:
+        super().reset()
+        self._state = self.IDLE
+        self._spoof_side = None
+        self._steps_in_state = 0
+        self._cooldown_target = 0
+        self._spoof_order_id = None
+        self._pending_cancellations.clear()

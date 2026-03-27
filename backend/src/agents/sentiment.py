@@ -100,3 +100,8 @@ class SentimentAgent(BaseAgent):
                 )
 
         return orders
+
+    def reset(self) -> None:
+        super().reset()
+        self._price_history.clear()
+        self._is_herding = random.random() < self.herding_probability

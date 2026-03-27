@@ -46,6 +46,16 @@ class BaseAgent(ABC):
         """
         ...
 
+    def consume_cancellations(self) -> List[str]:
+        """Return any outstanding order IDs the simulator should cancel."""
+        return []
+
+    def cancel_all_active_orders(self) -> List[str]:
+        """Cancel and clear any currently tracked resting orders."""
+        order_ids = list(self.active_orders.keys())
+        self.active_orders.clear()
+        return order_ids
+
     def update_position(self, trade: Trade) -> None:
         """Update position and PnL after a trade fills."""
         if trade.buyer_agent_id == self.agent_id:

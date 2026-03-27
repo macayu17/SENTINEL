@@ -89,3 +89,8 @@ class InformedAgent(BaseAgent):
                 )
 
         return orders
+
+    def reset(self) -> None:
+        super().reset()
+        self._active_signal = None
+        self._signal_start_time = 0.0

@@ -107,3 +107,10 @@ class HFTAgent(BaseAgent):
                 )
             )
         return orders
+
+    def reset(self) -> None:
+        super().reset()
+        self._price_history.clear()
+
+    def consume_cancellations(self) -> List[str]:
+        return self.cancel_all_active_orders()

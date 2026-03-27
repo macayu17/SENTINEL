@@ -18,7 +18,7 @@ interface MarketStore {
   setSimulationMode: (mode: 'SANDBOX' | 'LIVE_SHADOW') => void;
 }
 
-const MAX_PRICE_HISTORY = 500;
+const MAX_PRICE_HISTORY = 240;
 
 export const useMarketStore = create<MarketStore>((set) => ({
   marketData: null,

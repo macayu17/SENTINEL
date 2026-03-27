@@ -389,11 +389,16 @@ export default function DashboardPage() {
       ? asks.reduce((sum, level) => sum + level.size, 0)
       : Math.round(dashboard.depthHeatmap.reduce((sum, level) => sum + level.askDepth, 0));
 
-  const bestBid = bids[0]?.price ?? dashboard.metrics.bestBid;
-  const bestAsk = asks[0]?.price ?? dashboard.metrics.bestAsk;
   const depth = marketData?.depth ?? bidDepth + askDepth;
-  const spread = marketData?.spread ?? dashboard.metrics.spread;
   const midPrice = marketData?.price ?? dashboard.metrics.midPrice;
+  const spread =
+    bids[0]?.price != null && asks[0]?.price != null
+      ? Math.max(0, asks[0].price - bids[0].price)
+      : marketData?.spread ?? dashboard.metrics.spread;
+  const derivedBid = midPrice - spread / 2;
+  const derivedAsk = midPrice + spread / 2;
+  const bestBid = bids[0]?.price ?? derivedBid;
+  const bestAsk = asks[0]?.price ?? derivedAsk;
   const imbalance =
     bidDepth + askDepth > 0
       ? (bidDepth - askDepth) / (bidDepth + askDepth)

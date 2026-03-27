@@ -95,3 +95,8 @@ class RetailAgent(BaseAgent):
                 self._entry_price = price
 
         return orders
+
+    def reset(self) -> None:
+        super().reset()
+        self._price_history.clear()
+        self._entry_price = 0.0
