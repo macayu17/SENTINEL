@@ -54,6 +54,12 @@ function eventClass(severity: KernelEvent['severity']): string {
   return 'border-l-[#00bfff]';
 }
 
+function feedStateLabel(connected: boolean, simulationRunning: boolean, activeLabel: string): string {
+  if (!connected) return 'BACKEND OFFLINE';
+  if (!simulationRunning) return 'SIM PAUSED';
+  return activeLabel;
+}
+
 function TerminalOverviewPanel({ overview }: { overview: ProjectOverview }) {
   return (
     <div className="terminal-panel h-full">
@@ -131,18 +137,29 @@ function TerminalMilestonesPanel({ milestones }: { milestones: Milestone[] }) {
   );
 }
 
-function TerminalEventPanel({ events }: { events: KernelEvent[] }) {
+function TerminalEventPanel({
+  events,
+  connected,
+  simulationRunning,
+}: {
+  events: KernelEvent[];
+  connected: boolean;
+  simulationRunning: boolean;
+}) {
+  const statusLabel = feedStateLabel(connected, simulationRunning, 'LIVE FEED');
+  const emptyLabel = !connected ? 'BACKEND OFFLINE' : 'EVENT STREAM IDLE';
+
   return (
     <div className="terminal-panel h-full">
       <div className="panel-header">
         <span className="panel-tag">KERNEL EVENT TAPE</span>
-        <span className="text-[10px] tracking-[0.16em] text-gray-500">LIVE FEED</span>
+        <span className="text-[10px] tracking-[0.16em] text-gray-500">{statusLabel}</span>
       </div>
 
       <div className="max-h-[340px] space-y-2 overflow-auto p-3">
         {events.length === 0 ? (
           <div className="border border-dashed border-gray-800 px-3 py-6 text-center text-xs tracking-[0.14em] text-gray-600">
-            EVENT STREAM IDLE
+            {emptyLabel}
           </div>
         ) : (
           events.map((event) => (
@@ -163,24 +180,34 @@ function TerminalEventPanel({ events }: { events: KernelEvent[] }) {
   );
 }
 
-function TerminalTradeFlowPanel({ data }: { data: TradeFlowPoint[] }) {
+function TerminalTradeFlowPanel({
+  data,
+  connected,
+  simulationRunning,
+}: {
+  data: TradeFlowPoint[];
+  connected: boolean;
+  simulationRunning: boolean;
+}) {
   const rows = data.slice(-8).reverse();
   const peakVolume = Math.max(
     1,
     ...rows.flatMap((row) => [row.buyVolume, row.sellVolume]),
   );
+  const statusLabel = feedStateLabel(connected, simulationRunning, 'BUY VS SELL');
+  const emptyLabel = !connected ? 'BACKEND OFFLINE' : 'FLOW BUFFER IDLE';
 
   return (
     <div className="terminal-panel h-full">
       <div className="panel-header">
         <span className="panel-tag">FLOW LADDER</span>
-        <span className="text-[10px] tracking-[0.16em] text-gray-500">BUY VS SELL</span>
+        <span className="text-[10px] tracking-[0.16em] text-gray-500">{statusLabel}</span>
       </div>
 
       <div className="space-y-2 p-3">
         {rows.length === 0 ? (
           <div className="border border-dashed border-gray-800 px-3 py-6 text-center text-xs tracking-[0.14em] text-gray-600">
-            FLOW BUFFER EMPTY
+            {emptyLabel}
           </div>
         ) : (
           rows.map((row) => (
@@ -213,12 +240,22 @@ function TerminalTradeFlowPanel({ data }: { data: TradeFlowPoint[] }) {
   );
 }
 
-function TerminalActivityPanel({ activity }: { activity: AgentActivity }) {
+function TerminalActivityPanel({
+  activity,
+  connected,
+  simulationRunning,
+}: {
+  activity: AgentActivity;
+  connected: boolean;
+  simulationRunning: boolean;
+}) {
+  const statusLabel = feedStateLabel(connected, simulationRunning, 'AGENT TRACE');
+
   return (
     <div className="terminal-panel h-full">
       <div className="panel-header">
         <span className="panel-tag">EXECUTION MONITOR</span>
-        <span className="text-[10px] tracking-[0.16em] text-gray-500">AGENT TRACE</span>
+        <span className="text-[10px] tracking-[0.16em] text-gray-500">{statusLabel}</span>
       </div>
 
       <div className="grid gap-3 p-3 xl:grid-cols-[0.95fr_1.1fr]">
@@ -274,37 +311,43 @@ function TerminalActivityPanel({ activity }: { activity: AgentActivity }) {
             <div className="col-span-2 text-right">STATUS</div>
           </div>
           <div className="max-h-[260px] overflow-auto">
-            {activity.recentOrders.map((order) => (
-              <div
-                key={order.id}
-                className="grid grid-cols-12 gap-2 border-b border-gray-950 px-3 py-2 text-xs text-gray-300"
-              >
-                <div className="col-span-2 text-gray-500">{order.id}</div>
-                <div className="col-span-3 truncate">{order.agent}</div>
-                <div
-                  className={`col-span-1 text-center ${
-                    order.side === 'BUY' ? 'text-[#00ff41]' : 'text-[#ff0040]'
-                  }`}
-                >
-                  {order.side === 'BUY' ? 'B' : 'S'}
-                </div>
-                <div className="col-span-2 text-right">{order.price.toFixed(3)}</div>
-                <div className="col-span-2 text-right">{order.quantity}</div>
-                <div
-                  className={`col-span-2 text-right ${
-                    order.status === 'Filled'
-                      ? 'text-[#00ff41]'
-                      : order.status === 'Cancelled'
-                        ? 'text-[#ff0040]'
-                        : order.status === 'Partial Fill'
-                          ? 'text-[#ffb800]'
-                          : 'text-[#00bfff]'
-                  }`}
-                >
-                  {order.status.toUpperCase()}
-                </div>
+            {activity.recentOrders.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs tracking-[0.14em] text-gray-600">
+                {!connected ? 'BACKEND OFFLINE' : 'NO ACTIVE AGENT TRACE'}
               </div>
-            ))}
+            ) : (
+              activity.recentOrders.map((order) => (
+                <div
+                  key={order.id}
+                  className="grid grid-cols-12 gap-2 border-b border-gray-950 px-3 py-2 text-xs text-gray-300"
+                >
+                  <div className="col-span-2 text-gray-500">{order.id}</div>
+                  <div className="col-span-3 truncate">{order.agent}</div>
+                  <div
+                    className={`col-span-1 text-center ${
+                      order.side === 'BUY' ? 'text-[#00ff41]' : 'text-[#ff0040]'
+                    }`}
+                  >
+                    {order.side === 'BUY' ? 'B' : 'S'}
+                  </div>
+                  <div className="col-span-2 text-right">{order.price.toFixed(3)}</div>
+                  <div className="col-span-2 text-right">{order.quantity}</div>
+                  <div
+                    className={`col-span-2 text-right ${
+                      order.status === 'Filled'
+                        ? 'text-[#00ff41]'
+                        : order.status === 'Cancelled'
+                          ? 'text-[#ff0040]'
+                          : order.status === 'Partial Fill'
+                            ? 'text-[#ffb800]'
+                            : 'text-[#00bfff]'
+                    }`}
+                  >
+                    {order.status.toUpperCase()}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -319,6 +362,7 @@ export default function DashboardPage() {
   const marketData = useMarketStore((state) => state.marketData);
   const connected = useMarketStore((state) => state.connected);
   const simulationRunning = useMarketStore((state) => state.simulationRunning);
+  const resetSimulationData = useMarketStore((state) => state.resetSimulationData);
   const setSimulationRunning = useMarketStore((state) => state.setSimulationRunning);
   const simulationMode = useMarketStore((state) => state.simulationMode);
   const setSimulationMode = useMarketStore((state) => state.setSimulationMode);
@@ -336,6 +380,9 @@ export default function DashboardPage() {
         }
         setSimulationRunning(health.simulation_active);
         setSimulationMode(health.mode);
+        if (!health.simulation_active) {
+          resetSimulationData();
+        }
       } catch {
         // Ignore health sync failures and let websocket state drive the shell.
       }
@@ -346,7 +393,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [setSimulationMode, setSimulationRunning]);
+  }, [resetSimulationData, setSimulationMode, setSimulationRunning]);
 
   useEffect(() => {
     setCurrentTime(new Date().toLocaleTimeString());
@@ -358,8 +405,10 @@ export default function DashboardPage() {
     try {
       if (simulationRunning) {
         await api.stopSimulation();
+        resetSimulationData();
         setSimulationRunning(false);
       } else {
+        resetSimulationData();
         await api.startSimulation();
         setSimulationRunning(true);
       }
@@ -380,84 +429,118 @@ export default function DashboardPage() {
 
   const bids = marketData?.order_book?.bids ?? [];
   const asks = marketData?.order_book?.asks ?? [];
-  const bidDepth =
-    bids.length > 0
-      ? bids.reduce((sum, level) => sum + level.size, 0)
-      : Math.round(dashboard.depthHeatmap.reduce((sum, level) => sum + level.bidDepth, 0));
-  const askDepth =
-    asks.length > 0
-      ? asks.reduce((sum, level) => sum + level.size, 0)
-      : Math.round(dashboard.depthHeatmap.reduce((sum, level) => sum + level.askDepth, 0));
-
-  const depth = marketData?.depth ?? bidDepth + askDepth;
-  const midPrice = marketData?.price ?? dashboard.metrics.midPrice;
+  const bidDepth = bids.reduce((sum, level) => sum + level.size, 0);
+  const askDepth = asks.reduce((sum, level) => sum + level.size, 0);
+  const depth = marketData?.depth ?? (bidDepth + askDepth > 0 ? bidDepth + askDepth : null);
+  const midPrice = marketData?.price ?? null;
   const spread =
     bids[0]?.price != null && asks[0]?.price != null
       ? Math.max(0, asks[0].price - bids[0].price)
-      : marketData?.spread ?? dashboard.metrics.spread;
-  const derivedBid = midPrice - spread / 2;
-  const derivedAsk = midPrice + spread / 2;
+      : marketData?.spread ?? null;
+  const derivedBid = midPrice != null && spread != null ? midPrice - spread / 2 : null;
+  const derivedAsk = midPrice != null && spread != null ? midPrice + spread / 2 : null;
   const bestBid = bids[0]?.price ?? derivedBid;
   const bestAsk = asks[0]?.price ?? derivedAsk;
   const imbalance =
     bidDepth + askDepth > 0
       ? (bidDepth - askDepth) / (bidDepth + askDepth)
-      : dashboard.metrics.orderBookImbalance;
+      : null;
+  const liveAgentMetrics = Object.values(marketData?.agent_metrics ?? {});
+  const inventory = liveAgentMetrics.reduce((sum, agent) => sum + agent.position, 0);
+  const realizedPnl = liveAgentMetrics.reduce((sum, agent) => sum + agent.realized_pnl, 0);
+  const unrealizedPnl = liveAgentMetrics.reduce((sum, agent) => sum + agent.unrealized_pnl, 0);
+  const totalPnl = realizedPnl + unrealizedPnl;
+  const hasMarketSnapshot = marketData !== null;
+  const midLabel = hasMarketSnapshot && midPrice != null ? `$${midPrice.toFixed(2)}` : '--';
+  const depthLabel = hasMarketSnapshot && depth != null ? depth.toLocaleString() : '—';
 
   const metricCells = useMemo(
     () => [
       {
         label: 'BID/ASK',
-        value: `${bestBid.toFixed(2)} / ${bestAsk.toFixed(2)}`,
+        value:
+          bestBid != null && bestAsk != null
+            ? `${bestBid.toFixed(2)} / ${bestAsk.toFixed(2)}`
+            : '—',
         tone: 'neutral' as const,
       },
       {
         label: 'SPREAD',
-        value: spread.toFixed(4),
-        tone: spread > 0.1 ? ('warning' as const) : ('accent' as const),
+        value: spread != null ? spread.toFixed(4) : '—',
+        tone:
+          spread == null
+            ? ('neutral' as const)
+            : spread > 0.1
+              ? ('warning' as const)
+              : ('accent' as const),
       },
       {
         label: 'IMBALANCE',
-        value: formatSigned(imbalance, 3),
-        tone: imbalance >= 0 ? ('positive' as const) : ('negative' as const),
+        value: imbalance != null ? formatSigned(imbalance, 3) : '—',
+        tone:
+          imbalance == null
+            ? ('neutral' as const)
+            : imbalance >= 0
+              ? ('positive' as const)
+              : ('negative' as const),
       },
       {
         label: 'DEPTH',
-        value: depth.toLocaleString(),
+        value: depthLabel,
         tone: 'neutral' as const,
       },
       {
         label: 'INVENTORY',
-        value: dashboard.metrics.inventory.toString(),
-        tone: dashboard.metrics.inventory >= 0 ? ('accent' as const) : ('warning' as const),
+        value: hasMarketSnapshot ? inventory.toLocaleString() : '—',
+        tone:
+          !hasMarketSnapshot
+            ? ('neutral' as const)
+            : inventory >= 0
+              ? ('accent' as const)
+              : ('warning' as const),
       },
       {
         label: 'REALIZED PNL',
-        value: formatSigned(dashboard.metrics.realizedPnl),
-        tone: dashboard.metrics.realizedPnl >= 0 ? ('positive' as const) : ('negative' as const),
+        value: hasMarketSnapshot ? formatSigned(realizedPnl) : '—',
+        tone:
+          !hasMarketSnapshot
+            ? ('neutral' as const)
+            : realizedPnl >= 0
+              ? ('positive' as const)
+              : ('negative' as const),
       },
       {
         label: 'UNREALIZED PNL',
-        value: formatSigned(dashboard.metrics.unrealizedPnl),
+        value: hasMarketSnapshot ? formatSigned(unrealizedPnl) : '—',
         tone:
-          dashboard.metrics.unrealizedPnl >= 0 ? ('positive' as const) : ('negative' as const),
+          !hasMarketSnapshot
+            ? ('neutral' as const)
+            : unrealizedPnl >= 0
+              ? ('positive' as const)
+              : ('negative' as const),
       },
       {
-        label: 'CUM REWARD',
-        value: dashboard.metrics.cumulativeReward.toFixed(3),
-        tone: 'accent' as const,
+        label: 'TOTAL PNL',
+        value: hasMarketSnapshot ? formatSigned(totalPnl) : '—',
+        tone:
+          !hasMarketSnapshot
+            ? ('neutral' as const)
+            : totalPnl >= 0
+              ? ('positive' as const)
+              : ('negative' as const),
       },
     ],
     [
       bestAsk,
       bestBid,
-      dashboard.metrics.cumulativeReward,
-      dashboard.metrics.inventory,
-      dashboard.metrics.realizedPnl,
-      dashboard.metrics.unrealizedPnl,
-      depth,
+      depthLabel,
+      hasMarketSnapshot,
+      inventory,
       imbalance,
+      realizedPnl,
       spread,
+      totalPnl,
+      unrealizedPnl,
     ],
   );
 
@@ -489,7 +572,7 @@ export default function DashboardPage() {
             </span>
             <span>
               MID:{' '}
-              <span className="text-gray-200">${midPrice.toFixed(2)}</span>
+              <span className="text-gray-200">{midLabel}</span>
             </span>
             <span>
               STEP:{' '}
@@ -497,7 +580,7 @@ export default function DashboardPage() {
             </span>
             <span>
               MODELED DEPTH:{' '}
-              <span className="text-cyan-400">{depth.toLocaleString()}</span>
+              <span className="text-cyan-400">{depthLabel}</span>
             </span>
           </div>
 
@@ -566,7 +649,11 @@ export default function DashboardPage() {
           <TerminalMilestonesPanel milestones={dashboard.milestones} />
         </div>
         <div className="col-span-12 lg:col-span-4">
-          <TerminalEventPanel events={dashboard.events} />
+          <TerminalEventPanel
+            events={dashboard.events}
+            connected={connected}
+            simulationRunning={simulationRunning}
+          />
         </div>
 
         <div className="col-span-12 lg:col-span-4">
@@ -577,10 +664,18 @@ export default function DashboardPage() {
         </div>
 
         <div className="col-span-12 lg:col-span-4">
-          <TerminalTradeFlowPanel data={dashboard.tradeFlow} />
+          <TerminalTradeFlowPanel
+            data={dashboard.tradeFlow}
+            connected={connected}
+            simulationRunning={simulationRunning}
+          />
         </div>
         <div className="col-span-12 lg:col-span-8">
-          <TerminalActivityPanel activity={dashboard.agentActivity} />
+          <TerminalActivityPanel
+            activity={dashboard.agentActivity}
+            connected={connected}
+            simulationRunning={simulationRunning}
+          />
         </div>
       </main>
 
@@ -589,10 +684,9 @@ export default function DashboardPage() {
         <span>
           {marketData
             ? `$${marketData.price.toFixed(2)} | SPR ${marketData.spread.toFixed(4)} | DEPTH ${marketData.depth.toLocaleString()} | VOL ${marketData.volatility.toFixed(4)}`
-            : `MID $${midPrice.toFixed(2)} | SPR ${spread.toFixed(4)} | IMB ${formatSigned(
-                imbalance,
-                3,
-              )} | STAGE ${dashboard.projectOverview.currentStage.toUpperCase()}`}
+            : simulationRunning
+              ? 'SYNCING LIVE FEED...'
+              : `SIM IDLE | STAGE ${dashboard.projectOverview.currentStage.toUpperCase()}`}
         </span>
         <span>{currentTime}</span>
       </footer>

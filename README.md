@@ -49,6 +49,10 @@ pip install -r requirements.txt
 uvicorn src.api.main:app --reload --port 8000
 ```
 
+The backend can optionally load a trained PPO market-making policy for the live simulator.
+By default it looks for `models/ppo_market_maker.zip` and enables it automatically when
+`stable-baselines3` is installed.
+
 ### Frontend
 
 ```bash
@@ -79,6 +83,8 @@ Copy `backend/.env.example` to `backend/.env` and adjust values if needed.
 ```text
 SIMULATION_DURATION=23400
 INITIAL_PRICE=100.0
+RL_POLICY_ENABLED=true
+RL_MODEL_PATH=models/ppo_market_maker.zip
 HOST=0.0.0.0
 PORT=8000
 FRONTEND_URL=http://localhost:3000

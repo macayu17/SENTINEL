@@ -14,6 +14,7 @@ interface MarketStore {
   addAlert: (alert: Alert) => void;
   dismissAlert: (id: string) => void;
   clearAlerts: () => void;
+  resetSimulationData: () => void;
   setSimulationRunning: (running: boolean) => void;
   setSimulationMode: (mode: 'SANDBOX' | 'LIVE_SHADOW') => void;
 }
@@ -79,6 +80,14 @@ export const useMarketStore = create<MarketStore>((set) => ({
     })),
 
   clearAlerts: () => set({ alerts: [] }),
+
+  resetSimulationData: () =>
+    set({
+      marketData: null,
+      priceHistory: [],
+      alerts: [],
+      simulationRunning: false,
+    }),
 
   setSimulationRunning: (running: boolean) => set({ simulationRunning: running }),
 

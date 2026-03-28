@@ -6,9 +6,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_UTILS_DIR = os.path.dirname(__file__)
+_REPO_ROOT = os.path.abspath(os.path.join(_UTILS_DIR, "..", "..", ".."))
+
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip().rstrip("/") for item in value.split(",") if item.strip()]
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _resolve_repo_path(value: str) -> str:
+    if os.path.isabs(value):
+        return value
+    return os.path.abspath(os.path.join(_REPO_ROOT, value))
 
 
 def _default_allowed_origins() -> list[str]:
@@ -48,6 +64,12 @@ class Config:
     baseline_spread: float = 0.001
     baseline_depth: float = 1000.0
     baseline_volatility: float = 0.02
+
+    # RL policy
+    rl_policy_enabled: bool = _get_bool("RL_POLICY_ENABLED", True)
+    rl_model_path: str = _resolve_repo_path(
+        os.getenv("RL_MODEL_PATH", os.path.join("models", "ppo_market_maker.zip"))
+    )
 
 
 config = Config()

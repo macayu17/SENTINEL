@@ -142,17 +142,19 @@ const defaultMilestones: Milestone[] = [
 export function useSimulationDashboardData(): SimulationDashboardData {
   const marketData = useMarketStore((s) => s.marketData);
   const connected = useMarketStore((s) => s.connected);
+  const simulationRunning = useMarketStore((s) => s.simulationRunning);
+  const feedActive = connected && simulationRunning;
 
   const seedPrice = marketData?.price ?? 100;
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0);
   const [midPrice, setMidPrice] = useState(seedPrice);
-  const [spread, setSpread] = useState(0.08);
-  const [inventory, setInventory] = useState(18);
-  const [realizedPnl, setRealizedPnl] = useState(1240);
-  const [unrealizedPnl, setUnrealizedPnl] = useState(310);
-  const [reward, setReward] = useState(42);
-  const [imbalance, setImbalance] = useState(0.12);
+  const [spread, setSpread] = useState(0);
+  const [inventory, setInventory] = useState(0);
+  const [realizedPnl, setRealizedPnl] = useState(0);
+  const [unrealizedPnl, setUnrealizedPnl] = useState(0);
+  const [reward, setReward] = useState(0);
+  const [imbalance, setImbalance] = useState(0);
 
   const [priceSeries, setPriceSeries] = useState<PriceSpreadPoint[]>([]);
   const [spreadSeries, setSpreadSeries] = useState<TimeSeriesPoint[]>([]);
@@ -163,6 +165,10 @@ export function useSimulationDashboardData(): SimulationDashboardData {
   const [events, setEvents] = useState<KernelEvent[]>([]);
 
   useEffect(() => {
+    if (!feedActive) {
+      return;
+    }
+
     const interval = setInterval(() => {
       setStep((prev) => prev + 1);
       setMidPrice((prev) => clamp(prev + (Math.random() - 0.5) * 0.18, 96, 106));
@@ -175,9 +181,13 @@ export function useSimulationDashboardData(): SimulationDashboardData {
     }, 1200);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [feedActive]);
 
   useEffect(() => {
+    if (!feedActive) {
+      return;
+    }
+
     const now = timestampLabel(new Date());
     const observedPrice = marketData?.price ?? midPrice;
     const observedSpread = marketData?.spread ?? spread;
@@ -211,9 +221,56 @@ export function useSimulationDashboardData(): SimulationDashboardData {
 
     setDepthHeatmap(nextDepthHeat(observedPrice));
     setEvents((prev) => [nextEvent(step, observedSpread, imbalance), ...prev].slice(0, MAX_EVENTS));
-  }, [step, midPrice, spread, inventory, reward, imbalance, marketData]);
+  }, [feedActive, step, midPrice, spread, inventory, reward, imbalance, marketData]);
 
-  const agentActivity = useMemo(() => nextAgentActivity(midPrice, step), [midPrice, step]);
+  useEffect(() => {
+    if (feedActive) {
+      return;
+    }
+
+    setStep(0);
+    setMidPrice(seedPrice);
+    setSpread(0);
+    setInventory(0);
+    setRealizedPnl(0);
+    setUnrealizedPnl(0);
+    setReward(0);
+    setImbalance(0);
+    setPriceSeries([]);
+    setSpreadSeries([]);
+    setInventorySeries([]);
+    setRewardSeries([]);
+    setTradeFlow([]);
+    setEvents([]);
+    setDepthHeatmap(nextDepthHeat(seedPrice));
+  }, [feedActive, seedPrice]);
+
+  const agentActivity = useMemo(() => {
+    if (feedActive) {
+      return nextAgentActivity(midPrice, step);
+    }
+
+    const statusMessage = !connected
+      ? 'Backend offline. Awaiting websocket reconnect.'
+      : 'Simulation paused. No policy steps are being issued.';
+
+    return {
+      marketMakerAction: !connected
+        ? 'Quote engine standing by for live market feed'
+        : 'Quote engine idle while simulation is stopped',
+      noiseAgentAction: !connected
+        ? 'Order flow generator paused with no backend session'
+        : 'Noise flow idle until simulation resumes',
+      rlAgentStatus: statusMessage,
+      recentOrders: [],
+      executionSummary: {
+        submitted: 0,
+        fills: 0,
+        cancelled: 0,
+        matchRate: 0,
+      },
+    };
+  }, [connected, feedActive, midPrice, step]);
 
   const bestBid = Number((midPrice - spread / 2).toFixed(3));
   const bestAsk = Number((midPrice + spread / 2).toFixed(3));

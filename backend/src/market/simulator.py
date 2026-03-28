@@ -7,7 +7,7 @@ from collections import deque
 
 from .kernel import EventKernel, EventType
 from .order_book import OrderBook
-from .order import Order, OrderSide, OrderType
+from .order import Order, OrderSide, OrderType, OrderStatus
 from .trade import Trade
 from ..agents.base_agent import BaseAgent
 from ..utils.logger import get_logger
@@ -84,7 +84,7 @@ class MarketSimulator:
         for agent in self.agents:
             agent.reset()
 
-            if agent.agent_type == "RL_MM":
+            if getattr(agent, "external_action_controlled", False):
                 continue
 
             first_wake = random.uniform(0.01, 1.0)
@@ -182,13 +182,47 @@ class MarketSimulator:
                         trade,
                     )
 
-    def _cancel_order(self, order_id: str) -> None:
+        self._prune_inactive_orders()
+
+    def _cancel_order(self, order_id: str) -> bool:
         """Cancel a resting order and clear its agent-side tracking."""
         cancelled = self.order_book.cancel_order(order_id)
         for agent in self.agents:
             agent.active_orders.pop(order_id, None)
         if cancelled:
             logger.debug(f"Cancelled stale order {order_id}")
+        return cancelled
+
+    def _prune_inactive_orders(self) -> None:
+        """Remove filled or cancelled resting orders from agent-side tracking."""
+        for agent in self.agents:
+            inactive_ids = [
+                order_id
+                for order_id, order in agent.active_orders.items()
+                if order.is_filled
+                or order.status == OrderStatus.CANCELLED
+                or order.remaining_quantity <= 0
+            ]
+            for order_id in inactive_ids:
+                agent.active_orders.pop(order_id, None)
+
+    def _request_agent_orders(self, agent: BaseAgent) -> None:
+        """Process an agent action cycle through the simulator's normal order path."""
+        note_cancel_result = getattr(agent, "note_cancel_result", None)
+        for order_id in agent.consume_cancellations():
+            cancelled = self._cancel_order(order_id)
+            if callable(note_cancel_result):
+                note_cancel_result(cancelled)
+
+        state = self.get_market_state()
+        orders = agent.decide_action(state)
+        for order in orders:
+            self.kernel.schedule(
+                agent.latency_seconds,
+                EventType.ORDER_ARRIVAL,
+                self._process_order,
+                order,
+            )
 
     def _agent_wakeup(self, agent: BaseAgent) -> None:
         """Trigger an agent to observe the market and submit fresh orders."""
@@ -196,19 +230,7 @@ class MarketSimulator:
             return
 
         try:
-            for order_id in agent.consume_cancellations():
-                self._cancel_order(order_id)
-
-            state = self.get_market_state()
-            orders = agent.decide_action(state)
-
-            for order in orders:
-                self.kernel.schedule(
-                    agent.latency_seconds,
-                    EventType.ORDER_ARRIVAL,
-                    self._process_order,
-                    order,
-                )
+            self._request_agent_orders(agent)
         except Exception as exc:
             logger.error(f"Agent {agent.agent_id} error: {exc}")
 
@@ -234,6 +256,13 @@ class MarketSimulator:
         if not self.running:
             self.running = True
 
+        for agent in self.agents:
+            if getattr(agent, "external_action_controlled", False):
+                try:
+                    self._request_agent_orders(agent)
+                except Exception as exc:
+                    logger.error(f"Externally controlled agent {agent.agent_id} error: {exc}")
+
         self.step_count += 1
         target_time = self.current_time + 1.0
         self.kernel.run_until(target_time)
@@ -248,6 +277,10 @@ class MarketSimulator:
         state = self.get_market_state()
         self._state_history.append(state)
         return state
+
+    def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
+        """Return the simulator agent with the requested ID, if present."""
+        return next((agent for agent in self.agents if agent.agent_id == agent_id), None)
 
     def get_market_state(self) -> Dict:
         """Return the current market state snapshot."""

@@ -24,26 +24,52 @@ class LargeOrderDetector:
         self.min_order_size = min_order_size
         self.history_length = history_length
         self._order_history: deque = deque(maxlen=history_length)
+        self._last_positions: Dict[str, int] = {}
+        self._last_timestamp: float = -1.0
+
+    def reset(self) -> None:
+        """Clear detector state between simulation runs."""
+        self._order_history.clear()
+        self._last_positions.clear()
+        self._last_timestamp = -1.0
 
     def record_order(self, order_data: Dict) -> None:
         """Record an order for pattern analysis."""
         self._order_history.append(order_data)
 
     def record_orders_from_state(self, market_state: Dict) -> None:
-        """Extract and record order information from market state."""
+        """Record changes in institutional inventory as executed slices."""
         agents = market_state.get("agents", {})
         current_time = market_state.get("current_time", 0.0)
 
+        if current_time < self._last_timestamp:
+            self.reset()
+
+        self._last_timestamp = current_time
+        active_agents = set()
+
         for agent_id, info in agents.items():
-            if info.get("type") == "Institutional":
-                position = info.get("position", 0)
-                if position != 0:
-                    self._order_history.append({
-                        "agent_id": agent_id,
-                        "side": "buy" if position > 0 else "sell",
-                        "size": abs(position),
-                        "timestamp": current_time,
-                    })
+            if info.get("type") != "Institutional":
+                continue
+
+            active_agents.add(agent_id)
+            position = int(info.get("position", 0))
+            previous_position = self._last_positions.get(agent_id, 0)
+            delta = position - previous_position
+
+            if delta != 0:
+                self._order_history.append({
+                    "agent_id": agent_id,
+                    "side": "buy" if delta > 0 else "sell",
+                    "size": abs(delta),
+                    "timestamp": current_time,
+                })
+
+            self._last_positions[agent_id] = position
+
+        stale_agents = set(self._last_positions) - active_agents
+        for agent_id in stale_agents:
+            self._last_positions.pop(agent_id, None)
 
     def detect(self, market_state: Dict) -> Optional[Dict]:
         """
@@ -114,6 +140,8 @@ class LargeOrderDetector:
 
             if size_cv < 0.1 and time_diff_std < 10:
                 estimated_size = int(size_mean * len(side_orders) * 2)
+                if estimated_size < self.min_order_size:
+                    continue
                 return {
                     "pattern": "iceberg",
                     "side": side,
@@ -161,6 +189,8 @@ class LargeOrderDetector:
             if time_cv < 0.2:
                 executed = int(np.sum(sizes))
                 estimated_size = executed * 3  # assume 1/3 complete
+                if estimated_size < self.min_order_size:
+                    continue
                 return {
                     "pattern": "twap",
                     "side": side,

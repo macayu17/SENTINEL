@@ -38,6 +38,8 @@ export interface LargeOrderDetection {
 
 export interface AgentMetric {
   total_pnl: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
   sharpe_ratio: number;
   agent_type: string;
   position: number;
