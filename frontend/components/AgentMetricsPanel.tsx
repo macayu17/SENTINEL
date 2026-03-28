@@ -12,6 +12,10 @@ const AGENT_COLORS: Record<string, string> = {
   Noise: '#666666',
 };
 
+function finiteNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 export default function AgentMetricsPanel() {
   const [expanded, setExpanded] = useState(true);
   const marketData = useMarketStore((s) => s.marketData);
@@ -21,8 +25,15 @@ export default function AgentMetricsPanel() {
     // Sort by agent type, then by PnL
     const typeComp = a[1].agent_type.localeCompare(b[1].agent_type);
     if (typeComp !== 0) return typeComp;
-    return b[1].total_pnl - a[1].total_pnl;
+    return finiteNumber(b[1].total_pnl) - finiteNumber(a[1].total_pnl);
   });
+
+  const totalPnl = agentList.reduce((sum, [, metrics]) => sum + finiteNumber(metrics.total_pnl), 0);
+  const totalAbsPosition = agentList.reduce(
+    (sum, [, metrics]) => sum + Math.abs(finiteNumber(metrics.position)),
+    0,
+  );
+  const totalTrades = agentList.reduce((sum, [, metrics]) => sum + finiteNumber(metrics.num_trades), 0);
 
   return (
     <div className="terminal-panel">
@@ -56,7 +67,11 @@ export default function AgentMetricsPanel() {
           {/* Agent rows */}
           {agentList.map(([id, metrics]) => {
             const color = AGENT_COLORS[metrics.agent_type] || '#888';
-            const pnlColor = metrics.total_pnl >= 0 ? '#00ff41' : '#ff0040';
+            const totalPnl = finiteNumber(metrics.total_pnl);
+            const sharpeRatio = finiteNumber(metrics.sharpe_ratio);
+            const position = finiteNumber(metrics.position);
+            const numTrades = finiteNumber(metrics.num_trades);
+            const pnlColor = totalPnl >= 0 ? '#00ff41' : '#ff0040';
 
             return (
               <div
@@ -68,17 +83,17 @@ export default function AgentMetricsPanel() {
                   {metrics.agent_type.substring(0, 6).toUpperCase()}
                 </div>
                 <div className="col-span-2 text-right" style={{ color: pnlColor }}>
-                  {metrics.total_pnl >= 0 ? '+' : ''}
-                  {metrics.total_pnl.toFixed(0)}
+                  {totalPnl >= 0 ? '+' : ''}
+                  {totalPnl.toFixed(0)}
                 </div>
                 <div className="col-span-2 text-right text-gray-300">
-                  {metrics.sharpe_ratio.toFixed(2)}
+                  {sharpeRatio.toFixed(2)}
                 </div>
                 <div className="col-span-2 text-right text-gray-400">
-                  {metrics.position.toLocaleString()}
+                  {position.toLocaleString()}
                 </div>
                 <div className="col-span-1 text-right text-gray-500">
-                  {metrics.num_trades}
+                  {numTrades}
                 </div>
               </div>
             );
@@ -90,16 +105,16 @@ export default function AgentMetricsPanel() {
               <div className="col-span-3 text-gray-500">TOTAL</div>
               <div className="col-span-2 text-gray-500">{agentList.length}</div>
               <div className="col-span-2 text-right" style={{
-                color: agentList.reduce((s, [, m]) => s + m.total_pnl, 0) >= 0 ? '#00ff41' : '#ff0040'
+                color: totalPnl >= 0 ? '#00ff41' : '#ff0040'
               }}>
-                {agentList.reduce((s, [, m]) => s + m.total_pnl, 0).toFixed(0)}
+                {totalPnl.toFixed(0)}
               </div>
               <div className="col-span-2 text-right text-gray-500">—</div>
               <div className="col-span-2 text-right text-gray-500">
-                {agentList.reduce((s, [, m]) => s + Math.abs(m.position), 0).toLocaleString()}
+                {totalAbsPosition.toLocaleString()}
               </div>
               <div className="col-span-1 text-right text-gray-500">
-                {agentList.reduce((s, [, m]) => s + m.num_trades, 0)}
+                {totalTrades}
               </div>
             </div>
           )}

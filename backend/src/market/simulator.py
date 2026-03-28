@@ -148,6 +148,12 @@ class MarketSimulator:
         """Exchange receives and processes an order."""
         if self.mode != "SANDBOX":
             return
+        if order.quantity <= 0:
+            logger.warning(f"Rejected non-positive order quantity from {order.agent_id}: {order.quantity}")
+            return
+        if not math.isfinite(order.price):
+            logger.warning(f"Rejected non-finite order price from {order.agent_id}: {order.price}")
+            return
 
         trades = self.order_book.add_order(order)
         self._all_trades.extend(trades)

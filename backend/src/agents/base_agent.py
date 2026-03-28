@@ -66,6 +66,9 @@ class BaseAgent(ABC):
 
     def _apply_fill(self, quantity: int, price: float, is_buy: bool) -> None:
         """Apply a fill to the position, tracking average entry and realized PnL."""
+        if not math.isfinite(price):
+            return
+
         direction = 1 if is_buy else -1
         new_qty = direction * quantity
         cash_delta = price * quantity
@@ -111,21 +114,32 @@ class BaseAgent(ABC):
         """Mark-to-market unrealized PnL."""
         if self.position == 0:
             return 0.0
+        if not math.isfinite(current_price) or not math.isfinite(self.avg_entry_price):
+            return 0.0
         return (current_price - self.avg_entry_price) * self.position
 
     def get_metrics(self, current_price: float = 0.0) -> Dict:
         """Return agent performance metrics."""
+        realized = self.realized_pnl if math.isfinite(self.realized_pnl) else 0.0
         unrealized = self.get_unrealized_pnl(current_price)
-        total_pnl = self.realized_pnl + unrealized
+        if not math.isfinite(unrealized):
+            unrealized = 0.0
+        total_pnl = realized + unrealized
+        if not math.isfinite(total_pnl):
+            total_pnl = 0.0
         return_pct = (total_pnl / self.initial_capital) * 100 if self.initial_capital else 0.0
         sharpe = self._compute_sharpe()
+        if not math.isfinite(return_pct):
+            return_pct = 0.0
+        if not math.isfinite(sharpe):
+            sharpe = 0.0
 
         return {
             "agent_id": self.agent_id,
             "agent_type": self.agent_type,
             "position": self.position,
             "total_pnl": round(total_pnl, 2),
-            "realized_pnl": round(self.realized_pnl, 2),
+            "realized_pnl": round(realized, 2),
             "unrealized_pnl": round(unrealized, 2),
             "return_pct": round(return_pct, 4),
             "sharpe_ratio": round(sharpe, 4),
@@ -134,12 +148,11 @@ class BaseAgent(ABC):
 
     def _compute_sharpe(self) -> float:
         """Compute Sharpe ratio from trade returns."""
-        if len(self._trade_returns) < 2:
+        returns = [value for value in self._trade_returns if math.isfinite(value)]
+        if len(returns) < 2:
             return 0.0
-        mean = sum(self._trade_returns) / len(self._trade_returns)
-        variance = sum((r - mean) ** 2 for r in self._trade_returns) / (
-            len(self._trade_returns) - 1
-        )
+        mean = sum(returns) / len(returns)
+        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
         std = math.sqrt(variance) if variance > 0 else 0.0
         if std == 0:
             return 0.0

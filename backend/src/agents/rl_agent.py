@@ -1,5 +1,6 @@
 """Policy-controlled RL market maker agent."""
 
+import math
 from typing import Dict, List, Optional, Sequence, Tuple
 from .base_agent import BaseAgent
 from ..market.order import Order, OrderSide, OrderType
@@ -39,7 +40,13 @@ class RLAgent(BaseAgent):
         """Set the normalized policy action for the next simulator step."""
         if len(action) != 3:
             raise ValueError(f"RL action must have exactly 3 elements, got {len(action)}")
-        self._pending_action = tuple(float(component) for component in action)
+        sanitized = []
+        for component in action:
+            value = float(component)
+            if not math.isfinite(value):
+                value = 0.0
+            sanitized.append(max(-1.0, min(1.0, value)))
+        self._pending_action = tuple(sanitized)
 
     def consume_last_cancel_count(self) -> int:
         """Return the number of successful cancellations from the last action cycle."""

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+import numpy as np
+
 from .rl_features import extract_market_maker_observation
 from .simulator import MarketSimulator
 from ..agents.rl_agent import RLAgent
@@ -73,6 +75,15 @@ class RLPolicyController:
             return None
 
         observation = extract_market_maker_observation(simulator, self.rl_agent_id)
+        if not np.isfinite(observation).all():
+            logger.warning("RL observation contained non-finite values; replacing with zeros")
+            observation = np.nan_to_num(observation, nan=0.0, posinf=0.0, neginf=0.0)
+
         action, _ = self.model.predict(observation, deterministic=True)
-        agent.set_action(action)
-        return tuple(float(value) for value in action)
+        action_array = np.asarray(action, dtype=np.float32)
+        if not np.isfinite(action_array).all():
+            logger.warning("RL policy returned non-finite action; falling back to neutral quote")
+            action_array = np.zeros(3, dtype=np.float32)
+        action_array = np.clip(action_array, -1.0, 1.0)
+        agent.set_action(action_array)
+        return tuple(float(value) for value in action_array)

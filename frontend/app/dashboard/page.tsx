@@ -21,6 +21,14 @@ import { useMarketStore } from '@/store/market-store';
 
 type MetricTone = 'positive' | 'negative' | 'warning' | 'accent' | 'neutral';
 
+function finiteNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function sumFinite<T>(items: T[], selector: (item: T) => unknown): number {
+  return items.reduce((sum, item) => sum + finiteNumber(selector(item), 0), 0);
+}
+
 function formatClock(value: number): string {
   const hours = Math.floor(value / 3600);
   const minutes = Math.floor((value % 3600) / 60);
@@ -31,6 +39,9 @@ function formatClock(value: number): string {
 }
 
 function formatSigned(value: number, digits = 2): string {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
   return `${value >= 0 ? '+' : '-'}${Math.abs(value).toFixed(digits)}`;
 }
 
@@ -446,9 +457,9 @@ export default function DashboardPage() {
       ? (bidDepth - askDepth) / (bidDepth + askDepth)
       : null;
   const liveAgentMetrics = Object.values(marketData?.agent_metrics ?? {});
-  const inventory = liveAgentMetrics.reduce((sum, agent) => sum + agent.position, 0);
-  const realizedPnl = liveAgentMetrics.reduce((sum, agent) => sum + agent.realized_pnl, 0);
-  const unrealizedPnl = liveAgentMetrics.reduce((sum, agent) => sum + agent.unrealized_pnl, 0);
+  const inventory = sumFinite(liveAgentMetrics, (agent) => agent.position);
+  const realizedPnl = sumFinite(liveAgentMetrics, (agent) => agent.realized_pnl);
+  const unrealizedPnl = sumFinite(liveAgentMetrics, (agent) => agent.unrealized_pnl);
   const totalPnl = realizedPnl + unrealizedPnl;
   const hasMarketSnapshot = marketData !== null;
   const midLabel = hasMarketSnapshot && midPrice != null ? `$${midPrice.toFixed(2)}` : '--';
