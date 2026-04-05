@@ -22,6 +22,16 @@ from ..agents.spoofing import SpoofingAgent
 from ..agents.sentiment import SentimentAgent
 from ..prediction.liquidity_shock import LiquidityShockPredictor
 from ..prediction.large_order import LargeOrderDetector
+from ..prediction.signal_engine import SignalEngine, SignalInput
+from ..data.live_feed import (
+    LiveMarketFeed,
+    BinanceLiveFeedAdapter,
+    BrokerExchangeLiveFeedAdapter,
+    BrokerAuthConfig,
+    MockLiveFeedAdapter,
+    NseLikeLiveFeedAdapter,
+    ScraperLiveFeedAdapter,
+)
 from ..utils.logger import get_logger
 from ..utils.config import config
 
@@ -31,6 +41,18 @@ logger = get_logger("api")
 simulator: Optional[MarketSimulator] = None
 liquidity_predictor = LiquidityShockPredictor()
 large_order_detector = LargeOrderDetector()
+
+# Signal engine with optional trained model
+_model_path = Path(__file__).parent.parent.parent / "models" / "signal_model.pkl"
+signal_engine: Optional[SignalEngine] = None
+
+def _initialize_signal_engine() -> SignalEngine:
+    """Initialize signal engine with trained model if available."""
+    global signal_engine
+    if signal_engine is None:
+        signal_engine = SignalEngine(model_path=_model_path if _model_path.exists() else None)
+    return signal_engine
+
 manager = ConnectionManager()
 
 # Simulation task handle
@@ -60,16 +82,25 @@ app.add_middleware(
 )
 
 
-# ── REST Endpoints ──────────────────────────────────────────────────────────
-
-
 @app.get("/api/health")
 async def health_check():
+    feed_health = _live_feed.health() if _live_feed else None
     return {
         "status": "healthy",
+        "stream_active": _stream_task is not None and not _stream_task.done(),
         "simulation_active": simulator is not None and simulator.running,
         "connected_clients": manager.client_count,
-        "mode": simulator.mode if simulator else config.simulation_mode,
+        "mode": config.simulation_mode,
+        "live_feed_connected": feed_health.connected if feed_health else False,
+        "live_feed_source": feed_health.source if feed_health else None,
+        "live_feed_provider": feed_health.provider if feed_health else config.live_feed_provider,
+        "live_feed_last_update_ts": feed_health.last_update_ts if feed_health else None,
+        "live_feed_last_update_wall_time": feed_health.last_update_wall_time if feed_health else None,
+        "live_feed_fallback_active": _live_fallback_active,
+        "live_feed_stale": feed_health.stale if feed_health else False,
+        "live_feed_latency_ms": feed_health.latency_ms if feed_health else None,
+        "live_feed_transport": feed_health.transport if feed_health else None,
+        "live_feed_message": feed_health.message if feed_health else None,
     }
 
 

@@ -1,16 +1,16 @@
-"""Informed agent — trades on randomly generated directional signals."""
+"""Informed agent — trades on directional signals with finite horizon."""
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 import random
+from collections import deque
 from .base_agent import BaseAgent
 from ..market.order import Order, OrderSide, OrderType
 
 
 class InformedAgent(BaseAgent):
     """
-    Has a small probability each step of receiving private information.
-    When informed, trades aggressively in the signal direction
-    until the signal expires.
+    Uses short-term vs long-term moving average crossovers to detect momentum,
+    then executes aggressive market orders in the signal direction.
     """
 
     def __init__(
@@ -23,52 +23,37 @@ class InformedAgent(BaseAgent):
         max_position: int = 5000,
     ) -> None:
         super().__init__(agent_id, "Informed", initial_capital, latency_seconds=0.005)
+        self.wakeup_interval = 0.6
         self.signal_probability = signal_probability
         self.signal_accuracy = signal_accuracy
         self.signal_duration = signal_duration
         self.max_position = max_position
-
-        self._active_signal: str | None = None  # "buy" or "sell"
-        self._signal_start_time: float = 0.0
+        self._short_history: deque = deque(maxlen=10)
+        self._long_history: deque = deque(maxlen=50)
 
     def decide_action(self, market_state: Dict) -> List[Order]:
-        current_time = market_state.get("current_time", 0.0)
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        self._short_history.append(price)
+        self._long_history.append(price)
         orders: List[Order] = []
 
-        # Check if current signal has expired
-        if self._active_signal and (current_time - self._signal_start_time) > self.signal_duration:
-            # Unwind position
-            if self.position != 0:
-                side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=side,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=abs(self.position),
-                    )
-                )
-            self._active_signal = None
+        if len(self._long_history) < 50:
             return orders
-
-        # Check for new signal
-        if not self._active_signal and random.random() < self.signal_probability:
-            direction = "buy" if random.random() < 0.5 else "sell"
-            # Accuracy: with signal_accuracy chance, the direction is correct
-            if random.random() > self.signal_accuracy:
-                direction = "sell" if direction == "buy" else "buy"
-            self._active_signal = direction
-            self._signal_start_time = current_time
-
-        # Trade on active signal
-        if self._active_signal:
-            side = OrderSide.BUY if self._active_signal == "buy" else OrderSide.SELL
+            
+        short_sma = sum(self._short_history) / len(self._short_history)
+        long_sma = sum(self._long_history) / len(self._long_history)
+        momentum_signal = (short_sma - long_sma) / long_sma
+        
+        if abs(momentum_signal) > 0.002:
+            side = OrderSide.BUY if momentum_signal > 0 else OrderSide.SELL
             current_pos = abs(self.position)
-
-            if current_pos < self.max_position:
-                qty = min(500, self.max_position - current_pos)
+            
+            if (self.position > 0 and side == OrderSide.SELL) or (self.position < 0 and side == OrderSide.BUY):
+                qty = current_pos + min(300, self.max_position)
+            else:
+                qty = min(300, self.max_position - current_pos)
+                
+            if qty > 0:
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
@@ -78,5 +63,4 @@ class InformedAgent(BaseAgent):
                         quantity=qty,
                     )
                 )
-
         return orders

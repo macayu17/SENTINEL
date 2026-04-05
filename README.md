@@ -133,3 +133,13 @@ Full Azure guide: [AZURE_APP_SERVICE.md](./AZURE_APP_SERVICE.md)
 ## Product Spec
 
 The full product requirements doc is in [SENTINEL_PRD.md](./SENTINEL_PRD.md).
+
+
+
+
+cd backend
+python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+
+cd frontend
+npm run dev

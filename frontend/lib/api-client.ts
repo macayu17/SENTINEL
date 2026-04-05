@@ -28,7 +28,7 @@ class SentinelAPI {
     return this.request<{ status: string }>('/api/simulation/stop', { method: 'POST' });
   }
 
-  async setSimulationMode(mode: 'SANDBOX' | 'LIVE_SHADOW') {
+  async setSimulationMode(mode: 'SIMULATION' | 'LIVE_SHADOW' | 'SANDBOX') {
     return this.request<{ status: string; mode: string }>('/api/simulation/mode', {
       method: 'POST',
       body: JSON.stringify({ mode }),
