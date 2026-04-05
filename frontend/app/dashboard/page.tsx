@@ -11,6 +11,7 @@ import DepthHeatmapPanel from '@/components/dashboard/DepthHeatmapPanel';
 import AgentActivityPanel from '@/components/dashboard/AgentActivityPanel';
 import EventLogPanel from '@/components/dashboard/EventLogPanel';
 import PredictionPanel from '@/components/dashboard/PredictionPanel';
+import ModeSwitcher from '@/components/dashboard/ModeSwitcher';
 import { useMarketWebSocket } from '@/lib/websocket';
 import { useDashboardData } from '@/lib/dashboard-data';
 
@@ -144,6 +145,7 @@ export default function DashboardPage() {
               {dashboard.error ? (
                 <p className="mt-1 text-xs text-[var(--rose)]">{dashboard.error}</p>
               ) : null}
+              <ModeSwitcher currentMode={dashboard.operatingMode} />
             </div>
           </div>
         </header>
