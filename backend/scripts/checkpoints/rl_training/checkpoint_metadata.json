@@ -1,0 +1,137 @@
+{
+  "checkpoints": {
+    "my_model_epoch_1": {
+      "model_path": "models/rl_training/my_model_ppo",
+      "epoch": 1,
+      "metrics": {
+        "state_size": 156,
+        "action_space": 3,
+        "lookback": 30,
+        "morning_minutes": 60,
+        "lot_size": 50,
+        "transaction_cost_bps": 10.0,
+        "ppo_total_timesteps": 2500000,
+        "ppo_learning_rate": 0.0003,
+        "ppo_n_steps": 1024,
+        "ppo_batch_size": 256
+      },
+      "config": {
+        "total_timesteps": 2500000,
+        "learning_rate": 0.0003,
+        "n_steps": 1024,
+        "batch_size": 256,
+        "gamma": 0.995,
+        "gae_lambda": 0.97,
+        "clip_range": 0.2,
+        "ent_coef": 0.005,
+        "vf_coef": 0.5,
+        "net_arch": [
+          256,
+          256
+        ],
+        "tensorboard_log": "./tensorboard_logs/intraday_ppo"
+      },
+      "timestamp": "2026-04-29T19:28:15.000835"
+    },
+    "improved_model_epoch_1": {
+      "model_path": "models/rl_training/improved_model_ppo",
+      "epoch": 1,
+      "metrics": {
+        "state_size": 156,
+        "action_space": 3,
+        "lookback": 30,
+        "morning_minutes": 60,
+        "lot_size": 50,
+        "transaction_cost_bps": 10.0,
+        "ppo_total_timesteps": 1000000,
+        "ppo_learning_rate": 0.0003,
+        "ppo_n_steps": 1024,
+        "ppo_batch_size": 256
+      },
+      "config": {
+        "total_timesteps": 1000000,
+        "learning_rate": 0.0003,
+        "n_steps": 1024,
+        "batch_size": 256,
+        "gamma": 0.995,
+        "gae_lambda": 0.97,
+        "clip_range": 0.2,
+        "ent_coef": 0.005,
+        "vf_coef": 0.5,
+        "net_arch": [
+          256,
+          256
+        ],
+        "tensorboard_log": "./tensorboard_logs/intraday_ppo"
+      },
+      "timestamp": "2026-04-28T13:46:17.659923"
+    },
+    "experiment_1_epoch_1": {
+      "model_path": "models/rl_training/experiment_1_ppo",
+      "epoch": 1,
+      "metrics": {
+        "state_size": 156,
+        "action_space": 3,
+        "lookback": 30,
+        "morning_minutes": 60,
+        "lot_size": 50,
+        "transaction_cost_bps": 10.0,
+        "ppo_total_timesteps": 250000,
+        "ppo_learning_rate": 0.0003,
+        "ppo_n_steps": 1024,
+        "ppo_batch_size": 256
+      },
+      "config": {
+        "total_timesteps": 250000,
+        "learning_rate": 0.0003,
+        "n_steps": 1024,
+        "batch_size": 256,
+        "gamma": 0.995,
+        "gae_lambda": 0.97,
+        "clip_range": 0.2,
+        "ent_coef": 0.005,
+        "vf_coef": 0.5,
+        "net_arch": [
+          256,
+          256
+        ],
+        "tensorboard_log": "./tensorboard_logs/intraday_ppo"
+      },
+      "timestamp": "2026-04-29T18:22:10.507491"
+    },
+    "experiment_2_epoch_1": {
+      "model_path": "models/rl_training/experiment_2_ppo",
+      "epoch": 1,
+      "metrics": {
+        "state_size": 156,
+        "action_space": 3,
+        "lookback": 30,
+        "morning_minutes": 60,
+        "lot_size": 50,
+        "transaction_cost_bps": 10.0,
+        "ppo_total_timesteps": 100000,
+        "ppo_learning_rate": 0.0003,
+        "ppo_n_steps": 1024,
+        "ppo_batch_size": 256
+      },
+      "config": {
+        "total_timesteps": 100000,
+        "learning_rate": 0.0003,
+        "n_steps": 1024,
+        "batch_size": 256,
+        "gamma": 0.995,
+        "gae_lambda": 0.97,
+        "clip_range": 0.2,
+        "ent_coef": 0.005,
+        "vf_coef": 0.5,
+        "net_arch": [
+          256,
+          256
+        ],
+        "tensorboard_log": "./tensorboard_logs/intraday_ppo"
+      },
+      "timestamp": "2026-04-29T18:33:58.257825"
+    }
+  },
+  "last_updated": "2026-04-29T19:28:15.000843"
+}

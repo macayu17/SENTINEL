@@ -1,3 +1,21 @@
+source "/Users/anindhithsankanna/CS Projects/Sentinel/venv/bin/activate"
+cd backend/scripts
+
+
+# Just train
+python3 train_backtest_rl_system.py train \
+  --csv ../data/historical_1m.csv \
+  --name my_model \
+  --algo ppo \
+  --timesteps 2500000
+
+# Just backtest (use the checkpoint from training)
+python3 train_backtest_rl_system.py backtest \
+  --csv ../data/historical_1m.csv \
+  --model ./checkpoints/rl_training/my_model_ppo/latest_model.zip \
+  --algo ppo
+
+
 # SENTINEL
 
 Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events.
