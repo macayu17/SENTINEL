@@ -1,135 +1,164 @@
-"""Main RL training script for the Sentinel Market Maker."""
+"""Train a PPO market-making policy for SENTINEL."""
 
+from __future__ import annotations
+
+import argparse
 import os
 import sys
-import gymnasium as gym
+from pathlib import Path
+
 import numpy as np
 
-# Append backend to path so we can import modules
-sys.path.append(os.path.join(os.path.dirname(__file__), 'backend', 'src'))
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.env_util import DummyVecEnv
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback, EvalCallback
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+import torch.nn as nn
 
-from backend.src.market.simulator import MarketSimulator
-from backend.src.market.rl_env import MarketMakerEnv
-from backend.src.agents.noise import NoiseAgent
-from backend.src.agents.hft_agent import HFTAgent
-from backend.src.agents.retail import RetailAgent
-from backend.src.agents.informed import InformedAgent
-from backend.src.agents.liquidity_trader import LiquidityTraderAgent
-from backend.src.agents.rl_agent import RLAgent
+from backend.src.market.training_setup import create_market_maker_env
+
 
 class MetricsLoggerCallback(BaseCallback):
-    """
-    Custom callback for logging structured market-making metrics
-    to TensorBoard over the course of training.
-    """
-    def __init__(self, verbose=0):
+    """Track the market-maker's training health in TensorBoard."""
+
+    def __init__(self, verbose: int = 0) -> None:
         super().__init__(verbose)
-        self.pnls = []
-        self.inventories = []
-        self.drawdowns = []
-        self.rewards = []
-        self.fill_rates = []
+        self.episode_rewards: list[float] = []
+        self.pnls: list[float] = []
+        self.inventories: list[float] = []
+        self.drawdowns: list[float] = []
+        self.fill_rates: list[float] = []
 
     def _on_step(self) -> bool:
-        # Extract info dict returned sequentially by our environment
         infos = self.locals.get("infos", [])
+        rewards = self.locals.get("rewards")
+        dones = self.locals.get("dones")
+
+        if rewards is not None:
+            self.episode_rewards.append(float(rewards[0]))
+
         for info in infos:
-            if info:
-                self.pnls.append(info.get("pnl", 0))
-                self.inventories.append(abs(info.get("inventory", 0)))
-                self.drawdowns.append(info.get("drawdown", 0))
-                self.fill_rates.append(info.get("fill_rate", 0))
-            rewards = self.locals.get("rewards")
-            if rewards is not None:
-                self.rewards.append(float(rewards[0]))
-                
-                # Check for end of episode
-                if self.locals.get("dones")[0]:
-                    final_pnl = self.pnls[-1]
-                    mean_inv = np.mean(self.inventories)
-                    max_dd = np.max(self.drawdowns)
-                    cum_reward = float(np.sum(self.rewards)) if self.rewards else 0.0
-                    avg_fill_rate = float(np.mean(self.fill_rates)) if self.fill_rates else 0.0
+            if not info:
+                continue
+            self.pnls.append(float(info.get("pnl", 0.0)))
+            self.inventories.append(abs(float(info.get("inventory", 0.0))))
+            self.drawdowns.append(float(info.get("drawdown", 0.0)))
+            self.fill_rates.append(float(info.get("fill_rate", 0.0)))
 
-                    pnl_series = np.array(self.pnls, dtype=float)
-                    returns = np.diff(pnl_series) if len(pnl_series) > 1 else np.array([0.0])
-                    sharpe_like = float((returns.mean() / (returns.std() + 1e-8)) * np.sqrt(252))
-                    drawdown_series = np.maximum.accumulate(pnl_series) - pnl_series if len(pnl_series) > 0 else np.array([0.0])
-                    max_drawdown = float(drawdown_series.max())
+        if dones is not None and bool(dones[0]) and self.pnls:
+            pnl_series = np.asarray(self.pnls, dtype=float)
+            reward_total = float(np.sum(self.episode_rewards))
+            drawdown_series = np.maximum.accumulate(pnl_series) - pnl_series
+            returns = np.diff(pnl_series) if len(pnl_series) > 1 else np.array([0.0])
+            sharpe_like = float((returns.mean() / (returns.std() + 1e-8)) * np.sqrt(252))
 
-                    # Approximate spread capture efficiency proxy: pnl per unit abs inventory
-                    spread_capture_eff = float(final_pnl / (np.mean(self.inventories) + 1e-6)) if self.inventories else 0.0
+            self.logger.record("market_maker/final_pnl", float(self.pnls[-1]))
+            self.logger.record("market_maker/mean_abs_inventory", float(np.mean(self.inventories)))
+            self.logger.record("market_maker/max_drawdown", float(np.max(drawdown_series)))
+            self.logger.record("market_maker/cumulative_reward", reward_total)
+            self.logger.record("market_maker/avg_fill_rate", float(np.mean(self.fill_rates)))
+            self.logger.record("market_maker/sharpe_like", sharpe_like)
 
-                    self.logger.record("market_maker/final_pnl", final_pnl)
-                    self.logger.record("market_maker/mean_abs_inventory", mean_inv)
-                    self.logger.record("market_maker/max_drawdown", max_dd)
-                    self.logger.record("market_maker/cumulative_reward", cum_reward)
-                    self.logger.record("market_maker/avg_fill_rate", avg_fill_rate)
-                    self.logger.record("market_maker/sharpe_like", sharpe_like)
-                    self.logger.record("market_maker/drawdown", max_drawdown)
-                    self.logger.record("market_maker/spread_capture_eff", spread_capture_eff)
-                    
-                    self.pnls.clear()
-                    self.inventories.clear()
-                    self.drawdowns.clear()
-                    self.rewards.clear()
-                    self.fill_rates.clear()
+            self.episode_rewards.clear()
+            self.pnls.clear()
+            self.inventories.clear()
+            self.drawdowns.clear()
+            self.fill_rates.clear()
+
         return True
 
-def create_env():
-    # 1. Initialize heterogeneous market population + RL participant
-    agents = [
-        RLAgent("RL_MM", initial_capital=100000.0),
-        HFTAgent("HFT_1", position_limit=600),
-        InformedAgent("INF_1", signal_probability=0.02, signal_accuracy=0.62),
-        LiquidityTraderAgent("LIQ_1", start_probability=0.03),
-        RetailAgent("RET_1"),
-        NoiseAgent("Noise_1", order_rate=0.35),
-        NoiseAgent("Noise_2", order_rate=0.45),
-    ]
-    
-    # 2. Build the Simulator logic
-    sim = MarketSimulator(agents=agents, initial_price=100.0, duration_seconds=1000)
-    
-    # 3. Create the Gym Environment matching wrapper
-    env = MarketMakerEnv(simulator=sim, rl_agent_id="RL_MM")
-    return env
 
-def train():
-    print("Setting up the Reinforcement Learning Market-Maker Environment...")
-    
-    # Needs to be wrapped in DummyVecEnv for SB3 compatibility
-    env = DummyVecEnv([create_env])
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train a PPO market-making policy")
+    parser.add_argument("--timesteps", type=int, default=60_000)
+    parser.add_argument("--duration-seconds", type=int, default=1_000)
+    parser.add_argument("--initial-price", type=float, default=100.0)
+    parser.add_argument("--learning-rate", type=float, default=2.5e-4)
+    parser.add_argument("--n-steps", type=int, default=2_048)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--n-envs", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--save-path", type=str, default="backend/models/ppo_market_maker")
+    parser.add_argument("--tensorboard-log", type=str, default="tensorboard_logs")
+    parser.add_argument("--eval-freq", type=int, default=10_000)
+    return parser.parse_args()
 
-    print("Initializing PPO Agent...")
-    # PPO is robust and easy to tune, standard choice for continuous action spaces.
+
+def make_env_factory(args: argparse.Namespace, rank: int):
+    def _factory():
+        env = create_market_maker_env(
+            initial_price=args.initial_price,
+            duration_seconds=args.duration_seconds,
+        )
+        env.reset(seed=args.seed + rank)
+        return Monitor(env)
+
+    return _factory
+
+
+def train(args: argparse.Namespace) -> None:
+    os.makedirs(Path(args.save_path).parent, exist_ok=True)
+    os.makedirs(args.tensorboard_log, exist_ok=True)
+
+    train_env = DummyVecEnv([make_env_factory(args, rank) for rank in range(args.n_envs)])
+    eval_env = DummyVecEnv([make_env_factory(args, 10_000)])
+
+    train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+    eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False, clip_obs=10.0, training=False)
+
+    policy_kwargs = {
+        "activation_fn": nn.Tanh,
+        "net_arch": {"pi": [128, 128], "vf": [128, 128]},
+    }
+
     model = PPO(
-        "MlpPolicy", 
-        env, 
-        verbose=1, 
-        learning_rate=3e-4, 
-        n_steps=1000, 
-        batch_size=64, 
-        tensorboard_log="./tensorboard_logs/"
+        "MlpPolicy",
+        train_env,
+        verbose=1,
+        learning_rate=args.learning_rate,
+        n_steps=args.n_steps,
+        batch_size=args.batch_size,
+        gamma=0.995,
+        gae_lambda=0.98,
+        ent_coef=0.01,
+        clip_range=0.2,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
+        tensorboard_log=args.tensorboard_log,
+        policy_kwargs=policy_kwargs,
+        seed=args.seed,
+        device="cpu",
     )
-    
-    callback = MetricsLoggerCallback()
-    
-    # Let's train for 10,000 steps roughly (10 episodes since duration is 1000)
-    TOTAL_TIMESTEPS = 10_000
-    
-    print(f"Starting Training for {TOTAL_TIMESTEPS} timesteps...")
-    model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback)
-    
-    print("Training Complete. Saving model...")
-    os.makedirs("./models", exist_ok=True)
-    model.save("./models/ppo_market_maker")
-    
-    print("Model saved to `./models/ppo_market_maker.zip`")
-    
+
+    checkpoint_callback = CheckpointCallback(
+        save_freq=max(1, args.eval_freq // max(1, args.n_envs)),
+        save_path=str(Path(args.save_path).parent / "checkpoints"),
+        name_prefix="ppo_market_maker",
+    )
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=str(Path(args.save_path).parent / "best_model"),
+        log_path=str(Path(args.save_path).parent / "eval_logs"),
+        eval_freq=max(1, args.eval_freq // max(1, args.n_envs)),
+        deterministic=True,
+        render=False,
+    )
+    metrics_callback = MetricsLoggerCallback()
+
+    model.learn(
+        total_timesteps=args.timesteps,
+        callback=CallbackList([checkpoint_callback, eval_callback, metrics_callback]),
+        progress_bar=True,
+    )
+
+    model.save(args.save_path)
+    train_env.save(f"{args.save_path}.vecnormalize.pkl")
+    print(f"Saved PPO model to {args.save_path}.zip")
+
+
 if __name__ == "__main__":
-    train()
+    train(parse_args())

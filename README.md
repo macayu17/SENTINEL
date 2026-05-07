@@ -49,9 +49,14 @@ pip install -r requirements.txt
 uvicorn src.api.main:app --reload --port 8000
 ```
 
-The backend can optionally load a trained PPO market-making policy for the live simulator.
-By default it looks for `models/ppo_market_maker.zip` and enables it automatically when
-`stable-baselines3` is installed.
+The backend can optionally load a trained market-making policy for the live simulator.
+It supports:
+
+- PPO models saved at `backend/models/ppo_market_maker.zip`
+- Genetic-programming policies saved at `backend/models/gp_market_maker.json`
+
+Use `RL_POLICY_KIND=ppo` or `RL_POLICY_KIND=gp` to choose which model format to run live.
+PPO is disabled by default for deployment speed. To enable PPO locally, install the root `requirements.txt` or `backend/requirements-rl.txt`, then set `RL_POLICY_ENABLED=true`.
 
 ### Frontend
 
@@ -83,7 +88,8 @@ Copy `backend/.env.example` to `backend/.env` and adjust values if needed.
 ```text
 SIMULATION_DURATION=23400
 INITIAL_PRICE=100.0
-RL_POLICY_ENABLED=true
+RL_POLICY_ENABLED=false
+RL_POLICY_KIND=ppo
 RL_MODEL_PATH=models/ppo_market_maker.zip
 HOST=0.0.0.0
 PORT=8000
@@ -112,6 +118,20 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000
 - `GET /api/market/snapshot`
 - `WS /ws`
 
+## Policy Training
+
+Train PPO:
+
+```bash
+python train_rl.py --timesteps 60000 --save-path backend/models/ppo_market_maker
+```
+
+Train the genetic-programming baseline:
+
+```bash
+python train_gp.py --generations 8 --population-size 24 --save-path backend/models/gp_market_maker.json
+```
+
 ## Notes About The Current Architecture
 
 - The simulator state is stored in process memory, so production should run a single backend instance unless state is externalized.
@@ -129,9 +149,9 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000
 
 ### Backend
 
-- Host on Azure App Service (Linux, custom container)
-- Use the existing `backend/Dockerfile`
-- Set `WEBSITES_PORT=8000`
+- Host on Azure App Service for Linux with the existing GitHub Actions zip workflow
+- Set the startup command to `python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000`
+- Enable App Service build automation so Azure installs `backend/requirements.txt`
 - Set `FRONTEND_URL` and `ALLOWED_ORIGINS` to your Vercel production domain
 
 Full Azure guide: [AZURE_APP_SERVICE.md](./AZURE_APP_SERVICE.md)

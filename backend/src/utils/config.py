@@ -2,12 +2,14 @@
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_UTILS_DIR = os.path.dirname(__file__)
-_REPO_ROOT = os.path.abspath(os.path.join(_UTILS_DIR, "..", "..", ".."))
+_UTILS_DIR = Path(__file__).resolve().parent
+_BACKEND_ROOT = _UTILS_DIR.parents[1]
+_PROJECT_ROOT = _UTILS_DIR.parents[2]
 
 
 def _split_csv(value: str) -> list[str]:
@@ -22,9 +24,20 @@ def _get_bool(name: str, default: bool) -> bool:
 
 
 def _resolve_repo_path(value: str) -> str:
-    if os.path.isabs(value):
-        return value
-    return os.path.abspath(os.path.join(_REPO_ROOT, value))
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+
+    candidates = [
+        Path.cwd() / path,
+        _BACKEND_ROOT / path,
+        _PROJECT_ROOT / path,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.resolve())
+
+    return str((_BACKEND_ROOT / path).resolve())
 
 
 def _default_allowed_origins() -> list[str]:
@@ -66,7 +79,8 @@ class Config:
     baseline_volatility: float = 0.02
 
     # RL policy
-    rl_policy_enabled: bool = _get_bool("RL_POLICY_ENABLED", True)
+    rl_policy_enabled: bool = _get_bool("RL_POLICY_ENABLED", False)
+    rl_policy_kind: str = os.getenv("RL_POLICY_KIND", "ppo").strip().lower()
     rl_model_path: str = _resolve_repo_path(
         os.getenv("RL_MODEL_PATH", os.path.join("models", "ppo_market_maker.zip"))
     )

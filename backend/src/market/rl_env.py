@@ -31,20 +31,24 @@ class MarketMakerEnv(gym.Env):
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
         
         # Tracking states for reward shaping
-        self.last_pnl = 0.0
+        self.last_total_pnl = 0.0
+        self.last_realized_pnl = 0.0
         self.last_position = 0
         self.max_drawdown = 0.0
         self.peak_pnl = 0.0
+        self.last_mid_price = 0.0
         
     def reset(self, seed=None, options=None) -> Tuple[np.ndarray, Dict]:
         super().reset(seed=seed)
         
         initial_state = self.simulator.reset(seed=seed)
-        self.last_pnl = 0.0
+        self.last_total_pnl = 0.0
+        self.last_realized_pnl = 0.0
         self.last_position = 0
         self.max_drawdown = 0.0
         self.peak_pnl = 0.0
-        
+        self.last_mid_price = initial_state.get("mid_price", 0.0) or 0.0
+
         return self._extract_obs(initial_state), {}
 
     def _get_rl_agent(self) -> RLAgent:
@@ -55,7 +59,7 @@ class MarketMakerEnv(gym.Env):
         
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         rl_agent = self._get_rl_agent()
-        actual_spread, actual_skew, actual_qty = rl_agent.decode_action(action)
+        quoted_spread, quoted_skew, quoted_qty = rl_agent.decode_action(action)
 
         state = self.simulator.get_market_state()
         mid = state['mid_price']
@@ -63,32 +67,61 @@ class MarketMakerEnv(gym.Env):
         rl_agent.set_action(action)
         next_state = self.simulator.step()
         num_cancels = rl_agent.consume_last_cancel_count()
-        
+        effective_spread, effective_skew, effective_qty = rl_agent.get_last_effective_action()
+
         # Compute Rewards
         current_pnl = self._get_agent_pnl()
+        current_realized = rl_agent.realized_pnl
         position = self._get_agent_inventory()
-        
-        pnl_diff = current_pnl - self.last_pnl
-        self.last_pnl = current_pnl
-        
+
+        pnl_diff = current_pnl - self.last_total_pnl
+        realized_diff = current_realized - self.last_realized_pnl
+        self.last_total_pnl = current_pnl
+        self.last_realized_pnl = current_realized
+
         # Track drawdown
         self.peak_pnl = max(self.peak_pnl, current_pnl)
         drawdown = self.peak_pnl - current_pnl
         self.max_drawdown = max(self.max_drawdown, drawdown)
-        
-        # Shaping penalties
-        inventory_penalty = 0.005 * (position ** 2) 
-        cancel_penalty = 0.01 * num_cancels
-        drawdown_penalty = 0.01 * drawdown
-        
-        # Add carry penalty so lingering inventory over time is discouraged.
-        inventory_carry_penalty = 0.0005 * abs(position)
 
-        # Spooner-like inventory-aware asymmetric reward.
-        reward = pnl_diff - inventory_penalty - inventory_carry_penalty - cancel_penalty - drawdown_penalty
-        
+        max_inventory = float(max(1, rl_agent.max_inventory))
+        inventory_ratio = position / max_inventory
+        active_quotes = sum(1 for order in rl_agent.active_orders.values() if order.remaining_quantity > 0)
+
+        pnl_scale = max(25.0, rl_agent.initial_capital * 0.0005)
+        drawdown_scale = max(50.0, rl_agent.initial_capital * 0.001)
+        next_mid = next_state.get("mid_price", mid) or mid or 0.0
+        mid_change_bps = 0.0
+        if mid and next_mid:
+            mid_change_bps = ((next_mid - mid) / mid) * 10_000.0
+
+        spread_capture_reward = realized_diff / pnl_scale
+        mark_to_market_reward = 0.5 * (pnl_diff / pnl_scale)
+        inventory_penalty = 0.35 * (inventory_ratio ** 2)
+        inventory_carry_penalty = 0.05 * abs(inventory_ratio)
+        cancel_penalty = 0.004 * num_cancels
+        drawdown_penalty = drawdown / drawdown_scale
+        adverse_selection_penalty = max(0.0, -(inventory_ratio * mid_change_bps)) * 0.01
+        closeout_penalty = 0.2 * abs(inventory_ratio) if next_state["time_to_close"] / max(1.0, self.simulator.duration_seconds) < 0.1 else 0.0
+        two_sided_bonus = 0.03 if active_quotes >= 2 else (-0.02 if active_quotes == 0 else 0.0)
+        quote_quality_bonus = 0.01 if effective_spread <= max(self._get_rl_agent().min_spread * 2.0, state.get("spread", 0.0) * 1.6) else 0.0
+
+        reward = (
+            spread_capture_reward
+            + mark_to_market_reward
+            + two_sided_bonus
+            + quote_quality_bonus
+            - inventory_penalty
+            - inventory_carry_penalty
+            - cancel_penalty
+            - drawdown_penalty
+            - adverse_selection_penalty
+            - closeout_penalty
+        )
+
         self.last_position = position
-        
+        self.last_mid_price = next_mid
+
         obs = self._extract_obs(next_state)
         done = next_state['time_to_close'] <= 0
         truncated = False 
@@ -96,19 +129,28 @@ class MarketMakerEnv(gym.Env):
         # Pass info dict for evaluation callbacks
         info = {
             "pnl": current_pnl,
+            "realized_pnl": current_realized,
             "inventory": position,
             "mid_price": mid,
             "drawdown": drawdown,
             "cancel_penalty": cancel_penalty,
             "inventory_penalty": inventory_penalty,
             "inventory_carry_penalty": inventory_carry_penalty,
-            "quoted_spread": actual_spread,
-            "quoted_skew": actual_skew,
-            "quoted_size": actual_qty,
+            "adverse_selection_penalty": adverse_selection_penalty,
+            "closeout_penalty": closeout_penalty,
+            "spread_capture_reward": spread_capture_reward,
+            "mark_to_market_reward": mark_to_market_reward,
+            "quoted_spread": quoted_spread,
+            "quoted_skew": quoted_skew,
+            "quoted_size": quoted_qty,
+            "effective_spread": effective_spread,
+            "effective_skew": effective_skew,
+            "effective_size": effective_qty,
             "fill_rate": next_state.get("fill_rate", 0.0),
             "spread": next_state.get("spread", 0.0),
+            "active_quotes": active_quotes,
         }
-        
+
         return obs, reward, done, truncated, info
 
     def _extract_obs(self, state: Dict) -> np.ndarray:

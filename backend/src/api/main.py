@@ -5,7 +5,7 @@ from typing import Optional
 import asyncio
 
 from pydantic import BaseModel
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .websocket import ConnectionManager
@@ -33,7 +33,15 @@ logger = get_logger("api")
 simulator: Optional[MarketSimulator] = None
 liquidity_predictor = LiquidityShockPredictor()
 large_order_detector = LargeOrderDetector()
-rl_policy = RLPolicyController(model_path=config.rl_model_path) if config.rl_policy_enabled else None
+rl_policy = (
+    RLPolicyController(
+        model_path=config.rl_model_path,
+        policy_kind=config.rl_policy_kind,
+        autoload=False,
+    )
+    if config.rl_policy_enabled
+    else None
+)
 manager = ConnectionManager()
 
 # Simulation task handle
@@ -74,16 +82,24 @@ async def health_check():
         "connected_clients": manager.client_count,
         "mode": simulator.mode if simulator else config.simulation_mode,
         "rl_policy_ready": rl_policy.ready if rl_policy else False,
+        "rl_policy_kind": rl_policy.loaded_policy_kind if rl_policy else None,
     }
 
 
 class ModeRequest(BaseModel):
     mode: str
 
+
+def _require_simulator() -> MarketSimulator:
+    if simulator is None:
+        raise HTTPException(status_code=409, detail="No active simulation")
+    return simulator
+
+
 @app.post("/api/simulation/mode")
 async def set_simulation_mode(request: ModeRequest):
     if request.mode not in ["SANDBOX", "LIVE_SHADOW"]:
-        return {"error": "Invalid mode"}
+        raise HTTPException(status_code=400, detail="Invalid mode")
     
     config.simulation_mode = request.mode
     if simulator:
@@ -153,36 +169,32 @@ async def stop_simulation():
 
 @app.get("/api/prediction/liquidity")
 async def get_liquidity_prediction():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     return liquidity_predictor.predict(state)
 
 
 @app.get("/api/prediction/large-order")
 async def get_large_order_detection():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     detection = large_order_detector.detect(state)
     return detection or {"pattern": None, "message": "No large orders detected"}
 
 
 @app.get("/api/agents/metrics")
 async def get_agent_metrics():
-    if simulator is None:
-        return {"error": "No active simulation"}
+    active_simulator = _require_simulator()
     metrics = {}
-    for agent in simulator.agents:
-        metrics[agent.agent_id] = agent.get_metrics(simulator.current_price)
+    for agent in active_simulator.agents:
+        metrics[agent.agent_id] = agent.get_metrics(active_simulator.current_price)
     return metrics
 
 
 @app.get("/api/market/snapshot")
 async def get_market_snapshot():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     return {
         "price": state["current_price"],
         "mid_price": state["mid_price"],
