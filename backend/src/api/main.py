@@ -5,14 +5,11 @@ from typing import Optional
 import asyncio
 
 from pydantic import BaseModel
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .websocket import ConnectionManager
-from ..market.simulator import MarketSimulator, get_sandbox_presets, create_sandbox_agents
-from ..market.oracle import OracleConfig
-from ..market.latency_model import LatencyConfig, LatencyMode
-from ..market.market_data import fetch_stock, build_oracle_path, POPULAR_TICKERS
+from ..market.simulator import MarketSimulator
 from ..agents.market_maker import MarketMakerAgent
 from ..agents.hft_agent import HFTAgent
 from ..agents.institutional import InstitutionalAgent
@@ -36,7 +33,15 @@ logger = get_logger("api")
 simulator: Optional[MarketSimulator] = None
 liquidity_predictor = LiquidityShockPredictor()
 large_order_detector = LargeOrderDetector()
-rl_policy = RLPolicyController(model_path=config.rl_model_path) if config.rl_policy_enabled else None
+rl_policy = (
+    RLPolicyController(
+        model_path=config.rl_model_path,
+        policy_kind=config.rl_policy_kind,
+        autoload=False,
+    )
+    if config.rl_policy_enabled
+    else None
+)
 manager = ConnectionManager()
 
 # Simulation task handle
@@ -77,16 +82,24 @@ async def health_check():
         "connected_clients": manager.client_count,
         "mode": simulator.mode if simulator else config.simulation_mode,
         "rl_policy_ready": rl_policy.ready if rl_policy else False,
+        "rl_policy_kind": rl_policy.loaded_policy_kind if rl_policy else None,
     }
 
 
 class ModeRequest(BaseModel):
     mode: str
 
+
+def _require_simulator() -> MarketSimulator:
+    if simulator is None:
+        raise HTTPException(status_code=409, detail="No active simulation")
+    return simulator
+
+
 @app.post("/api/simulation/mode")
 async def set_simulation_mode(request: ModeRequest):
     if request.mode not in ["SANDBOX", "LIVE_SHADOW"]:
-        return {"error": "Invalid mode"}
+        raise HTTPException(status_code=400, detail="Invalid mode")
     
     config.simulation_mode = request.mode
     if simulator:
@@ -156,36 +169,32 @@ async def stop_simulation():
 
 @app.get("/api/prediction/liquidity")
 async def get_liquidity_prediction():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     return liquidity_predictor.predict(state)
 
 
 @app.get("/api/prediction/large-order")
 async def get_large_order_detection():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     detection = large_order_detector.detect(state)
     return detection or {"pattern": None, "message": "No large orders detected"}
 
 
 @app.get("/api/agents/metrics")
 async def get_agent_metrics():
-    if simulator is None:
-        return {"error": "No active simulation"}
+    active_simulator = _require_simulator()
     metrics = {}
-    for agent in simulator.agents:
-        metrics[agent.agent_id] = agent.get_metrics(simulator.current_price)
+    for agent in active_simulator.agents:
+        metrics[agent.agent_id] = agent.get_metrics(active_simulator.current_price)
     return metrics
 
 
 @app.get("/api/market/snapshot")
 async def get_market_snapshot():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     return {
         "price": state["current_price"],
         "mid_price": state["mid_price"],
@@ -199,220 +208,6 @@ async def get_market_snapshot():
         },
         "volatility": state["volatility"],
         "step": state["step"],
-    }
-
-
-# ── Sandbox Endpoints ─────────────────────────────────────────────────────────
-
-
-@app.get("/api/sandbox/presets")
-async def list_sandbox_presets():
-    return get_sandbox_presets()
-
-
-class SandboxCreateRequest(BaseModel):
-    preset: str = "balanced"
-    initial_price: float = 100.0
-    oracle_enabled: bool = False
-    oracle_kappa: float = 0.05
-    oracle_sigma: float = 0.02
-    latency_mode: str = "deterministic"
-    speed: float = 1.0
-    custom_agents: Optional[dict] = None
-
-
-@app.post("/api/sandbox/create")
-async def create_sandbox(request: SandboxCreateRequest):
-    global simulator, _sim_task
-
-    if simulator and simulator.running:
-        simulator.stop()
-        if _sim_task:
-            _sim_task.cancel()
-
-    large_order_detector.reset()
-    if rl_policy:
-        rl_policy.reload()
-
-    # Create agents from preset or custom config
-    agents = create_sandbox_agents(request.preset, request.custom_agents)
-
-    # Add RL agent if policy is available
-    if rl_policy and rl_policy.ready:
-        agents.append(RLAgent("RL_MM", initial_capital=100000.0))
-
-    # Configure oracle
-    oracle_cfg = OracleConfig(
-        r_bar=request.initial_price,
-        kappa=request.oracle_kappa,
-        sigma_s=request.oracle_sigma,
-        enabled=request.oracle_enabled,
-    )
-
-    # Configure latency model
-    mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
-    latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
-
-    simulator = MarketSimulator(
-        agents,
-        initial_price=request.initial_price,
-        duration_seconds=config.simulation_duration,
-        mode=config.simulation_mode,
-        oracle_config=oracle_cfg,
-        latency_config=latency_cfg,
-        speed_multiplier=request.speed,
-    )
-
-    _sim_task = asyncio.create_task(_run_simulation_loop())
-
-    return {
-        "status": "started",
-        "preset": request.preset,
-        "agents": len(agents),
-        "oracle_enabled": request.oracle_enabled,
-        "latency_mode": request.latency_mode,
-        "speed": request.speed,
-    }
-
-
-class SpeedRequest(BaseModel):
-    speed: float
-
-
-@app.put("/api/sandbox/speed")
-async def set_sandbox_speed(request: SpeedRequest):
-    if simulator is None:
-        return {"error": "No active simulation"}
-    simulator.speed_multiplier = max(0.1, min(20.0, request.speed))
-    return {"speed": simulator.speed_multiplier}
-
-
-@app.get("/api/sandbox/oracle")
-async def get_oracle_data():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    return {
-        **simulator.oracle.describe(),
-        "recent_history": simulator.oracle.get_recent_history(240),
-    }
-
-
-# ── Stock Replay Endpoints ────────────────────────────────────────────────────
-
-
-@app.get("/api/sandbox/stocks/popular")
-async def list_popular_stocks():
-    """Return list of popular tickers for the UI picker."""
-    return POPULAR_TICKERS
-
-
-class StockFetchRequest(BaseModel):
-    ticker: str
-    period: str = "3mo"    # 1d 5d 1mo 3mo 6mo 1y 2y 5y
-    interval: str = "1d"   # 1m 5m 15m 1h 1d 1wk
-
-
-@app.post("/api/sandbox/stock/fetch")
-async def fetch_stock_data(request: StockFetchRequest):
-    """Fetch real OHLCV data for a ticker and return calibration stats."""
-    try:
-        info = fetch_stock(
-            ticker=request.ticker,
-            period=request.period,
-            interval=request.interval,
-        )
-        return {
-            "ticker": info.ticker,
-            "name": info.name,
-            "currency": info.currency,
-            "last_close": info.last_close,
-            "period_start": info.period_start,
-            "period_end": info.period_end,
-            "bars": info.bars,
-            "realized_vol": info.realized_vol,
-            "mean_return": info.mean_return,
-            "price_preview": info.prices[-60:],  # last 60 bars for chart preview
-        }
-    except ValueError as e:
-        return {"error": str(e)}
-    except Exception as e:
-        return {"error": f"Failed to fetch {request.ticker}: {e}"}
-
-
-class StockReplayRequest(BaseModel):
-    ticker: str
-    period: str = "3mo"
-    interval: str = "1d"
-    preset: str = "balanced"
-    custom_agents: Optional[dict] = None
-    latency_mode: str = "deterministic"
-    speed: float = 1.0
-
-
-@app.post("/api/sandbox/stock/replay")
-async def start_stock_replay(request: StockReplayRequest):
-    """Start a simulation where the oracle follows real historical prices.
-
-    The agent population trades against this real price path — you can
-    see how different market participants might have behaved during a
-    real event (e.g. earnings, crash, rally).
-    """
-    global simulator, _sim_task
-
-    try:
-        info = fetch_stock(
-            ticker=request.ticker,
-            period=request.period,
-            interval=request.interval,
-        )
-    except (ValueError, Exception) as e:
-        return {"error": str(e)}
-
-    if simulator and simulator.running:
-        simulator.stop()
-        if _sim_task:
-            _sim_task.cancel()
-
-    large_order_detector.reset()
-
-    # Build oracle path from real prices
-    oracle_path = build_oracle_path(info, target_steps=500)
-    initial_price = float(info.prices[0])
-
-    oracle_cfg = OracleConfig(
-        r_bar=initial_price,
-        kappa=0.05,
-        sigma_s=max(0.001, info.realized_vol / 252),  # calibrated daily vol
-        enabled=True,
-        replay_path=oracle_path,
-    )
-
-    mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
-    latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
-
-    agents = create_sandbox_agents(request.preset, request.custom_agents)
-
-    simulator = MarketSimulator(
-        agents,
-        initial_price=initial_price,
-        duration_seconds=config.simulation_duration,
-        mode=config.simulation_mode,
-        oracle_config=oracle_cfg,
-        latency_config=latency_cfg,
-        speed_multiplier=request.speed,
-    )
-
-    _sim_task = asyncio.create_task(_run_simulation_loop())
-
-    return {
-        "status": "started",
-        "ticker": info.ticker,
-        "name": info.name,
-        "initial_price": initial_price,
-        "bars": info.bars,
-        "realized_vol": info.realized_vol,
-        "agents": len(agents),
-        "oracle_path_length": len(oracle_path),
     }
 
 
@@ -494,20 +289,14 @@ async def _run_simulation_loop():
                 "step": state["step"],
                 "volatility": state["volatility"],
                 "mode": simulator.mode,
-                "speed": simulator.speed_multiplier,
             }
-
-            # Include oracle data if enabled
-            if "oracle" in state:
-                update["oracle"] = state["oracle"]
 
             # Broadcast to all connected clients
             if manager.client_count > 0:
                 await manager.broadcast(update)
 
-            # Speed-adjusted tick rate: base 100ms / speed_multiplier
-            sleep_time = max(0.02, 0.1 / simulator.speed_multiplier)
-            await asyncio.sleep(sleep_time)
+            # ~10 Hz: sleep 100ms between steps
+            await asyncio.sleep(0.1)
 
     except asyncio.CancelledError:
         logger.info("Simulation loop cancelled")

@@ -9,8 +9,6 @@ from .kernel import EventKernel, EventType
 from .order_book import OrderBook
 from .order import Order, OrderSide, OrderType, OrderStatus
 from .trade import Trade
-from .oracle import MeanRevertingOracle, OracleConfig
-from .latency_model import LatencyModel, LatencyConfig, LatencyMode
 from ..agents.base_agent import BaseAgent
 from ..utils.logger import get_logger
 
@@ -34,9 +32,6 @@ class MarketSimulator:
         duration_seconds: int = 23_400,
         mode: str = "SANDBOX",
         order_ttl_seconds: float = 20.0,
-        oracle_config: Optional[OracleConfig] = None,
-        latency_config: Optional[LatencyConfig] = None,
-        speed_multiplier: float = 1.0,
     ) -> None:
         self.agents = sorted(agents, key=lambda agent: agent.latency_seconds)
         self.order_book = OrderBook()
@@ -44,16 +39,6 @@ class MarketSimulator:
         self.initial_price = initial_price
         self.duration_seconds = duration_seconds
         self.order_ttl_seconds = order_ttl_seconds
-        self.speed_multiplier: float = speed_multiplier
-
-        # ABIDES-inspired oracle: hidden fundamental value
-        self.oracle = MeanRevertingOracle(
-            config=oracle_config or OracleConfig(r_bar=initial_price, enabled=False)
-        )
-        # ABIDES-inspired latency model: realistic jitter per agent type
-        self.latency_model = LatencyModel(
-            config=latency_config or LatencyConfig(mode=LatencyMode.DETERMINISTIC)
-        )
 
         self.current_price: float = initial_price
         self.step_count: int = 0
@@ -93,9 +78,6 @@ class MarketSimulator:
         self._state_history.clear()
         self._all_trades.clear()
         self._recent_volume_history.clear()
-
-        # Reset oracle to initial fundamental value
-        self.oracle.reset(seed=seed)
 
         self._seed_order_book()
 
@@ -291,9 +273,6 @@ class MarketSimulator:
         target_time = self.current_time + 1.0
         self.kernel.run_until(target_time)
 
-        # Advance the fundamental value oracle
-        self.oracle.advance(dt=1.0)
-
         self._ensure_liquidity_floor()
 
         if self.order_book.mid_price is not None:
@@ -330,7 +309,7 @@ class MarketSimulator:
         imbalance = (bid_sum - ask_sum) / max(1, bid_sum + ask_sum)
         fill_rate = len(self._all_trades) / max(1.0, self.current_time)
 
-        state = {
+        return {
             "current_time": self.current_time,
             "mid_price": self.order_book.mid_price or self.current_price,
             "best_bid": self.order_book.best_bid,
@@ -358,16 +337,6 @@ class MarketSimulator:
             },
             "step": self.step_count,
         }
-
-        # Oracle data (ABIDES-inspired fundamental value)
-        if self.oracle.enabled:
-            state["oracle"] = {
-                "fundamental_value": round(self.oracle.current_value, 4),
-                "mispricing": round(self.oracle.get_mispricing(self.current_price), 4),
-                "mispricing_pct": round(self.oracle.get_mispricing_pct(self.current_price), 4),
-            }
-
-        return state
 
     def get_results(self) -> Dict:
         """Return final simulation results."""
@@ -419,90 +388,3 @@ class MarketSimulator:
         """Stop the simulation loop."""
         self.running = False
         logger.info("Simulation stopped")
-
-
-# ── Sandbox Presets ─────────────────────────────────────────────────────────
-
-
-def get_sandbox_presets() -> Dict:
-    """Return available sandbox configuration presets."""
-    return {
-        "minimal": {
-            "name": "Minimal",
-            "description": "10 agents — quick test of core mechanics",
-            "icon": "⚡",
-            "agents": {"MarketMaker": 1, "HFT": 2, "Noise": 3, "Retail": 2, "Informed": 1, "Sentiment": 1},
-            "oracle": False,
-            "latency": "deterministic",
-        },
-        "balanced": {
-            "name": "Balanced",
-            "description": "40 agents — the default SENTINEL experience",
-            "icon": "⚖️",
-            "agents": {"MarketMaker": 3, "HFT": 2, "Institutional": 2, "Retail": 10, "Informed": 3, "Noise": 10, "Momentum": 2, "MeanReversion": 2, "Spoofing": 1, "Sentiment": 5},
-            "oracle": False,
-            "latency": "deterministic",
-        },
-        "institutional": {
-            "name": "Institutional Pressure",
-            "description": "80 agents — heavy institutional + momentum flow",
-            "icon": "🏦",
-            "agents": {"MarketMaker": 5, "HFT": 4, "Institutional": 8, "Retail": 15, "Informed": 5, "Noise": 20, "Momentum": 8, "MeanReversion": 5, "Spoofing": 2, "Sentiment": 8},
-            "oracle": True,
-            "latency": "cubic",
-        },
-        "stress_test": {
-            "name": "Stress Test",
-            "description": "200 agents — ABIDES-scale stress with noise flood",
-            "icon": "🔥",
-            "agents": {"MarketMaker": 8, "HFT": 10, "Institutional": 5, "Retail": 30, "Informed": 10, "Noise": 100, "Momentum": 12, "MeanReversion": 10, "Spoofing": 3, "Sentiment": 12},
-            "oracle": True,
-            "latency": "cubic",
-        },
-    }
-
-
-def create_sandbox_agents(preset_name: str, custom_config: Optional[Dict] = None) -> List[BaseAgent]:
-    """Create an agent population from a sandbox preset or custom config."""
-    from ..agents.market_maker import MarketMakerAgent
-    from ..agents.hft_agent import HFTAgent
-    from ..agents.institutional import InstitutionalAgent
-    from ..agents.retail import RetailAgent
-    from ..agents.informed import InformedAgent
-    from ..agents.noise import NoiseAgent
-    from ..agents.momentum import MomentumAgent
-    from ..agents.mean_reversion import MeanReversionAgent
-    from ..agents.spoofing import SpoofingAgent
-    from ..agents.sentiment import SentimentAgent
-
-    agent_classes = {
-        "MarketMaker": MarketMakerAgent,
-        "HFT": HFTAgent,
-        "Institutional": InstitutionalAgent,
-        "Retail": RetailAgent,
-        "Informed": InformedAgent,
-        "Noise": NoiseAgent,
-        "Momentum": MomentumAgent,
-        "MeanReversion": MeanReversionAgent,
-        "Spoofing": SpoofingAgent,
-        "Sentiment": SentimentAgent,
-    }
-
-    presets = get_sandbox_presets()
-    if preset_name == "custom" and custom_config:
-        agent_config = custom_config
-    elif preset_name in presets:
-        agent_config = presets[preset_name]["agents"]
-    else:
-        agent_config = presets["balanced"]["agents"]
-
-    agents: List[BaseAgent] = []
-    for agent_type, count in agent_config.items():
-        cls = agent_classes.get(agent_type)
-        if cls is None:
-            logger.warning(f"Unknown agent type in preset: {agent_type}")
-            continue
-        for i in range(count):
-            agents.append(cls(f"{agent_type.upper()[:4]}_{i}"))
-
-    return agents

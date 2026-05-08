@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from .gp_policy import GeneticPolicyModel
 from .rl_features import extract_market_maker_observation
 from .simulator import MarketSimulator
 from ..agents.rl_agent import RLAgent
@@ -23,13 +24,18 @@ class RLPolicyController:
         model_path: Optional[str] = None,
         rl_agent_id: str = "RL_MM",
         policy_model: Optional[Any] = None,
+        policy_kind: str = "ppo",
+        autoload: bool = True,
     ) -> None:
         self.model_path = os.path.abspath(model_path) if model_path else None
         self.rl_agent_id = rl_agent_id
         self.model = policy_model
+        self.policy_kind = policy_kind.strip().lower()
+        self.loaded_policy_kind = self.policy_kind if policy_model is not None else None
+        self.obs_normalizer: Optional[Any] = None
         self._external_model = policy_model is not None
 
-        if self.model is None and self.model_path:
+        if autoload and self.model is None and self.model_path:
             self._load_model()
 
     @property
@@ -43,24 +49,73 @@ class RLPolicyController:
             logger.warning(f"RL policy model not found at {self.model_path}")
             return
 
+        loader_kind = self.policy_kind
+        if loader_kind == "auto":
+            loader_kind = "gp" if self.model_path.endswith(".json") else "ppo"
+
+        if loader_kind == "gp":
+            self._load_gp_model()
+            return
+
+        self._load_ppo_model()
+
+    def _load_ppo_model(self) -> None:
+        if not self.model_path:
+            return
+
         try:
             from stable_baselines3 import PPO  # type: ignore
+            from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize  # type: ignore
         except Exception as exc:
             logger.warning(f"stable_baselines3 unavailable; RL policy disabled: {exc}")
             return
 
         try:
             self.model = PPO.load(self.model_path, device="cpu")
+            vec_path = self._default_vecnormalize_path()
+            self.obs_normalizer = None
+            if vec_path and os.path.exists(vec_path):
+                from .training_setup import create_market_maker_env
+
+                dummy_env = DummyVecEnv([lambda: create_market_maker_env(duration_seconds=10)])
+                self.obs_normalizer = VecNormalize.load(vec_path, dummy_env)
+                self.obs_normalizer.training = False
+                self.obs_normalizer.norm_reward = False
+            self.loaded_policy_kind = "ppo"
             logger.info(f"Loaded RL policy from {self.model_path}")
         except Exception as exc:
             logger.warning(f"Failed to load RL policy model: {exc}")
             self.model = None
+            self.loaded_policy_kind = None
+            self.obs_normalizer = None
+
+    def _load_gp_model(self) -> None:
+        if not self.model_path:
+            return
+
+        try:
+            self.model = GeneticPolicyModel.load(self.model_path)
+            self.loaded_policy_kind = "gp"
+            logger.info(f"Loaded GP policy from {self.model_path}")
+        except Exception as exc:
+            logger.warning(f"Failed to load GP policy model: {exc}")
+            self.model = None
+            self.loaded_policy_kind = None
+
+    def _default_vecnormalize_path(self) -> Optional[str]:
+        if not self.model_path:
+            return None
+        if self.model_path.endswith(".zip"):
+            return f"{self.model_path[:-4]}.vecnormalize.pkl"
+        return f"{self.model_path}.vecnormalize.pkl"
 
     def reload(self) -> bool:
         """Attempt to (re)load the on-disk policy model."""
         if self._external_model:
             return self.ready
         self.model = None
+        self.loaded_policy_kind = None
+        self.obs_normalizer = None
         if self.model_path:
             self._load_model()
         return self.ready
@@ -78,6 +133,8 @@ class RLPolicyController:
         if not np.isfinite(observation).all():
             logger.warning("RL observation contained non-finite values; replacing with zeros")
             observation = np.nan_to_num(observation, nan=0.0, posinf=0.0, neginf=0.0)
+        if self.obs_normalizer is not None:
+            observation = self.obs_normalizer.normalize_obs(observation.reshape(1, -1)).reshape(-1)
 
         action, _ = self.model.predict(observation, deterministic=True)
         action_array = np.asarray(action, dtype=np.float32)

@@ -1,9 +1,0 @@
-﻿{
-  "location": "centralus",
-  "kind": "app,linux",
-  "properties": {},
-  "serverFarmId": "/subscriptions/f2710b75-7afb-44bf-b919-08ac63e7c8eb/resourceGroups/sentinel-rg/providers/Microsoft.Web/serverfarms/sentinel-plan-7857",
-  "siteConfig": {
-    "linuxFxVersion": "PYTHON|3.10"
-  }
-}

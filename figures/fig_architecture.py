@@ -43,7 +43,7 @@ def draw_box_dark(x, y, w, h, color, label, fontsize=7.5, alpha=0.75):
             fontsize=fontsize, color='white', fontweight='normal')
 
 # ── Layer 1: Frontend (top) ──
-draw_box(0.5, 6.2, 9.0, 0.9, C_FRONT, 
+draw_box(0.5, 6.2, 9.0, 0.9, C_FRONT,
          'Frontend Layer — Next.js 14 + TypeScript Terminal Dashboard', fontsize=9.5)
 
 # Dashboard panels
@@ -83,7 +83,7 @@ draw_box(0.5, 0.15, 9.0, 1.5, C_SIM,
 ax.text(5.0, 1.35, 'Simulation Layer — 10 Agent Archetypes (40 Agents)', ha='center', va='center',
         fontsize=9.5, color='white', fontweight='bold')
 
-agents = ['MM\n×3', 'HFT\n×2', 'INST\n×2', 'RET\n×10', 'INF\n×3', 
+agents = ['MM\n×3', 'HFT\n×2', 'INST\n×2', 'RET\n×10', 'INF\n×3',
           'NOISE\n×10', 'MOM\n×2', 'MR\n×2', 'SPOOF\n×1', 'SENT\n×5']
 aw = 0.82
 for i, a in enumerate(agents):

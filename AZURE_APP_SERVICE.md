@@ -1,122 +1,53 @@
 # Azure Backend Deployment
 
-This project is ready to run the backend on **Azure App Service (Linux, custom container)** while keeping the frontend on **Vercel**.
+This repo is set up for a **Vercel frontend** and an **Azure App Service for Linux backend** deployed from the GitHub Actions zip workflow in `.github/workflows/main_sentinel.yml`.
 
 ## Recommended Topology
 
 - Frontend: Vercel
-- Backend: Azure App Service (Linux, custom container)
+- Backend: Azure App Service for Linux, Python 3.10
 - Frontend URL example: `https://sentinel-app.vercel.app`
 - Backend URL example: `https://sentinel-api.azurewebsites.net`
 
-This backend keeps simulation state in memory, so run it as a **single instance**.
+The backend keeps simulator state and WebSocket clients in process, so keep the backend instance count at `1`.
 
-## Why App Service
+## Azure App Settings
 
-- Works well with the existing Docker-based backend
-- Supports WebSockets on Linux apps
-- Lets you keep one always-on backend process for the in-memory simulator
-
-## Backend App Settings
-
-Set these in Azure App Service:
+Set these in Azure App Service Configuration:
 
 ```text
-WEBSITES_PORT=8000
+SCM_DO_BUILD_DURING_DEPLOYMENT=true
+ENABLE_ORYX_BUILD=true
 FRONTEND_URL=https://your-vercel-domain.vercel.app
 ALLOWED_ORIGINS=https://your-vercel-domain.vercel.app
 SIMULATION_DURATION=23400
 INITIAL_PRICE=100.0
+RL_POLICY_ENABLED=false
+RL_POLICY_KIND=ppo
+RL_MODEL_PATH=models/ppo_market_maker.zip
 ```
 
-If you use a custom Vercel domain, set `FRONTEND_URL` and `ALLOWED_ORIGINS` to that production domain instead.
+Startup command:
+
+```text
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
+
+The PPO model lives under `backend/models/ppo_market_maker.zip`, which is packaged into the backend zip as `models/ppo_market_maker.zip`. PPO stays disabled in the default Azure zip deploy because the heavy `stable-baselines3` stack is intentionally excluded from `backend/requirements.txt`; enable it only after adding that optional dependency path to your deployment build.
 
 ## Azure Portal Steps
 
-1. Create an Azure Container Registry.
-2. Build and push the backend image from `backend/`.
-3. Create an App Service using:
-   - Publish: `Container`
-   - Operating System: `Linux`
-   - Region: close to your users
-   - Plan: production plan with Always On support
-4. In Deployment Center, point the app to your container image.
-5. Add the app settings listed above.
-6. In Configuration > General settings, enable `Web sockets`.
-7. In App Service Health check, set the path to `/api/health`.
-8. Keep instance count at `1`.
-9. In Vercel, set:
-   - `NEXT_PUBLIC_API_URL=https://<your-app>.azurewebsites.net`
-   - `NEXT_PUBLIC_WS_URL=wss://<your-app>.azurewebsites.net`
-
-Use the backend origin only. Do not append `/api` or `/ws` to those Vercel values.
-
-## Azure CLI Example
-
-Replace the placeholder values before running:
-
-```bash
-az acr create \
-  --resource-group <rg> \
-  --name <acr-name> \
-  --sku Basic
-
-az acr build \
-  --registry <acr-name> \
-  --image sentinel-backend:latest \
-  ./backend
-
-az appservice plan create \
-  --resource-group <rg> \
-  --name <plan-name> \
-  --is-linux \
-  --sku B1
-
-az webapp create \
-  --resource-group <rg> \
-  --plan <plan-name> \
-  --name <app-name> \
-  --deployment-container-image-name <acr-name>.azurecr.io/sentinel-backend:latest
-
-PRINCIPAL_ID=$(az webapp identity assign \
-  --resource-group <rg> \
-  --name <app-name> \
-  --query principalId \
-  --output tsv)
-
-REGISTRY_ID=$(az acr show \
-  --resource-group <rg> \
-  --name <acr-name> \
-  --query id \
-  --output tsv)
-
-az role assignment create \
-  --assignee "$PRINCIPAL_ID" \
-  --scope "$REGISTRY_ID" \
-  --role AcrPull
-
-az webapp config set \
-  --resource-group <rg> \
-  --name <app-name> \
-  --generic-configurations '{"acrUseManagedIdentityCreds": true}'
-
-az webapp config appsettings set \
-  --resource-group <rg> \
-  --name <app-name> \
-  --settings \
-    WEBSITES_PORT=8000 \
-    FRONTEND_URL=https://your-vercel-domain.vercel.app \
-    ALLOWED_ORIGINS=https://your-vercel-domain.vercel.app \
-    SIMULATION_DURATION=23400 \
-    INITIAL_PRICE=100.0
-```
-
-After the app is created, configure:
-
-- Web sockets: enabled
-- Health check path: `/api/health`
-- Instance count: `1`
-- Always On: enabled
+1. Create an App Service:
+   - Publish: `Code`
+   - Runtime stack: `Python 3.10`
+   - Operating system: `Linux`
+2. In Configuration, add the app settings listed above.
+3. In Configuration > General settings, set the startup command shown above.
+4. Enable WebSockets.
+5. Set Health check path to `/api/health`.
+6. Keep scale-out instance count at `1`.
+7. Make sure the GitHub Actions workflow secrets referenced in `.github/workflows/main_sentinel.yml` are present.
+8. Push to `main` or run the workflow manually.
 
 ## Frontend Setup On Vercel
 
@@ -127,10 +58,14 @@ NEXT_PUBLIC_API_URL=https://<your-app>.azurewebsites.net
 NEXT_PUBLIC_WS_URL=wss://<your-app>.azurewebsites.net
 ```
 
-Do not append `/api` or `/ws` to those variables.
+Use the backend origin only. Do not append `/api` or `/ws`.
+
+## Docker
+
+`backend/Dockerfile` and `docker-compose.yml` are for local/container smoke testing. They are not the current GitHub Actions deployment path.
 
 ## Operational Notes
 
-- Do not scale out this backend horizontally unless you first move simulator state and WebSocket fanout out of process.
-- Restarting the app resets the in-memory simulation state.
-- If CORS fails, verify the exact Vercel production domain in `FRONTEND_URL` and `ALLOWED_ORIGINS`.
+- Restarting the backend resets the in-memory simulation state.
+- Scaling beyond one backend instance needs externalized simulator state and WebSocket fanout.
+- If CORS fails, verify the exact Vercel production domain in both `FRONTEND_URL` and `ALLOWED_ORIGINS`.

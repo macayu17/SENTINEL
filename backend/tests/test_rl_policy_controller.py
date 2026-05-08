@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from backend.src.agents.rl_agent import RLAgent
+from backend.src.market.gp_policy import GeneticPolicyModel, GPNode, GPPolicyGenome
 from backend.src.market.rl_policy import RLPolicyController
 from backend.src.market.simulator import MarketSimulator
 
@@ -53,3 +54,27 @@ def test_rl_policy_controller_sanitizes_non_finite_actions():
 
     assert action == (0.0, 0.0, 0.0)
     assert len(rl_agent.active_orders) == 2
+
+
+def test_rl_policy_controller_can_defer_loading_until_reload(tmp_path):
+    model_path = tmp_path / "gp_policy.json"
+    genome = GPPolicyGenome(
+        action_trees=(
+            GPNode(kind="const", value=0.0),
+            GPNode(kind="const", value=0.0),
+            GPNode(kind="const", value=0.0),
+        )
+    )
+    GeneticPolicyModel(genome).save(model_path)
+
+    controller = RLPolicyController(
+        model_path=str(model_path),
+        policy_kind="gp",
+        autoload=False,
+    )
+
+    assert not controller.ready
+    assert controller.loaded_policy_kind is None
+    assert controller.reload()
+    assert controller.ready
+    assert controller.loaded_policy_kind == "gp"

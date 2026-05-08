@@ -30,10 +30,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run backend tests
+        run: python -m pytest backend/tests -q
+
       - name: Create backend deployment zip
         run: |
           cd backend
-          zip -r ../backend-release.zip . -x ".env" ".venv/*" "__pycache__/*" "*.pyc"
+          zip -r ../backend-release.zip . -x ".env" ".venv/*" "*/__pycache__/*" "*.pyc" "tests/*"
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
@@ -67,3 +70,4 @@ jobs:
           app-name: 'Sentinel'
           slot-name: 'Production'
           package: backend-release.zip
+          startup-command: 'python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000'

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import type {
   AgentActivity,
   KernelEvent,
@@ -601,13 +600,6 @@ export default function DashboardPage() {
               <span className={connected ? 'blink text-[#00ff41]' : 'text-[#ff0040]'}>●</span>
               <span className="text-gray-500">{connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
             </div>
-
-            <Link
-              href="/sandbox"
-              className="border border-[#00bfff] bg-[rgba(0,191,255,0.08)] px-3 py-1 text-xs font-bold tracking-[0.12em] text-[#00bfff] transition-colors hover:bg-[rgba(0,191,255,0.18)]"
-            >
-              SANDBOX →
-            </Link>
 
             <button
               onClick={handleModeToggle}
