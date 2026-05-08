@@ -192,7 +192,7 @@ cmd_cleanup() {
 
   rm -rf "$BACKEND_DIR/tensorboard_logs"/*
   rm -f "$CHECKPOINTS_DIR/rl_sweep/sweep_checkpoint.json"
-  
+
   print_success "Cleanup complete!"
 }
 
@@ -217,14 +217,14 @@ Commands:
 
   train [name] [algo] [timesteps] [lr] [arch]
     Train a single RL model
-    
+
     Options:
       name        Model name (default: ppo_intraday)
       algo        Algorithm: ppo|dqn (default: ppo)
       timesteps   Training steps (default: 250000)
       lr          Learning rate (default: 3e-4)
       arch        Network arch, e.g., "256,256" (default: 256,256)
-    
+
     Examples:
       $0 train
       $0 train my_model ppo 100000 1e-4 256,256
@@ -232,12 +232,12 @@ Commands:
 
   backtest <model_name> [algo] [timeframe]
     Backtest a trained model
-    
+
     Options:
       model_name  ✓ REQUIRED: Name of trained model
       algo        Algorithm: ppo|dqn (default: ppo)
       timeframe   1min|5min|15min (default: 5min)
-    
+
     Examples:
       $0 backtest ppo_intraday
       $0 backtest my_model ppo 5min
@@ -245,10 +245,10 @@ Commands:
 
   sweep [--force-fresh]
     Run hyperparameter sweep (resumable)
-    
+
     Options:
       --force-fresh  Clear old checkpoint and restart
-    
+
     Examples:
       $0 sweep
       $0 sweep --force-fresh
@@ -258,10 +258,10 @@ Commands:
 
   tensorboard [port]
     Start tensorboard dashboard
-    
+
     Options:
       port  Port number (default: 6006)
-    
+
     Examples:
       $0 tensorboard
       $0 tensorboard 8888
@@ -277,16 +277,16 @@ Examples:
   # Quick start
   $0 train quick_test ppo 50000
   $0 backtest quick_test
-  
+
   # Full workflow
   $0 train my_model ppo 250000 3e-4 256,256
   $0 backtest my_model ppo 5min
-  
+
   # Hyperparameter search
   $0 sweep
   $0 train best_model ppo 500000 3e-4 256,256
   $0 backtest best_model ppo 5min
-  
+
   # Monitor training
   $0 tensorboard 6006
 

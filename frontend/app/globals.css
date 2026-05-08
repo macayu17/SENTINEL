@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -19,6 +19,18 @@
   --rose: #f28686;
   --gold: #ffcc70;
   --sky: #6fc4ff;
+
+  --bg-primary: #000000;
+  --bg-panel: rgba(10, 10, 10, 0.86);
+  --border-primary: rgba(127, 140, 159, 0.22);
+  --border-active: #365072;
+  --text-primary: #e3ecf8;
+  --text-secondary: #a6b5c8;
+  --green: #00ff41;
+  --red: #ff0040;
+  --amber: #ffb800;
+  --cyan: #00bfff;
+  --purple: #bf00ff;
 }
 
 * {
@@ -75,6 +87,28 @@ body {
   }
 }
 
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .sentinel-card {
   border: 1px solid var(--line-soft);
   background: linear-gradient(160deg, rgba(18, 26, 38, 0.96) 0%, rgba(14, 21, 32, 0.92) 100%);
@@ -86,9 +120,66 @@ body {
   animation: floatIn 0.35s ease-out;
 }
 
-.numeric {
-  font-family: "IBM Plex Mono", "Menlo", monospace;
+.numeric,
+table,
+th,
+td {
+  font-family: "IBM Plex Mono", "JetBrains Mono", "Menlo", monospace;
   font-variant-numeric: tabular-nums;
+}
+
+.terminal-panel {
+  background: linear-gradient(180deg, rgba(10, 10, 10, 0.9), rgba(14, 20, 28, 0.92));
+  border: 1px solid var(--border-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal-panel:hover {
+  border-color: var(--border-active);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-primary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.panel-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.stat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.stat-label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.blink {
+  animation: blink 1s infinite;
+}
+
+.animate-slideDown {
+  animation: slideDown 0.3s ease-out;
 }
 
 ::selection {
@@ -96,10 +187,13 @@ body {
   color: #f3f8ff;
 }
 
-table,
-th,
-td {
-  font-family: "IBM Plex Mono", "Menlo", monospace;
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #111 !important;
+}
+
+.recharts-tooltip-wrapper {
+  z-index: 100;
 }
 
 @media (max-width: 768px) {

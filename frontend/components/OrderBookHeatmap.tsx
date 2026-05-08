@@ -2,24 +2,63 @@
 
 import React from 'react';
 import { useMarketStore } from '@/store/market-store';
+import { OrderLevel } from '@/types/market';
+
+function buildFallbackSide(
+  side: 'bid' | 'ask',
+  midPrice: number,
+  spread: number,
+  totalDepth: number,
+): OrderLevel[] {
+  const safeSpread = spread > 0 ? spread : 0.04;
+  const halfSpread = safeSpread / 2;
+  const baseSize = Math.max(20, Math.round(totalDepth / 12) || 60);
+
+  return Array.from({ length: 8 }, (_, index) => {
+    const offset = halfSpread + index * 0.02;
+    const price =
+      side === 'bid'
+        ? Number((midPrice - offset).toFixed(2))
+        : Number((midPrice + offset).toFixed(2));
+    const taper = Math.max(0.45, 1 - index * 0.08);
+    return {
+      price,
+      size: Math.max(10, Math.round(baseSize * taper)),
+    };
+  });
+}
 
 export default function OrderBookHeatmap() {
   const marketData = useMarketStore((s) => s.marketData);
   const orderBook = marketData?.order_book;
 
-  const bids = orderBook?.bids ?? [];
-  const asks = orderBook?.asks ?? [];
+  const midPrice = marketData?.price ?? 100;
+  const spread = marketData?.spread ?? 0.04;
+  const totalDepth = marketData?.depth ?? 800;
+  const useFallback = !orderBook || orderBook.bids.length === 0 || orderBook.asks.length === 0;
+
+  const bids = useFallback
+    ? buildFallbackSide('bid', midPrice, spread, totalDepth)
+    : orderBook.bids;
+  const asks = useFallback
+    ? buildFallbackSide('ask', midPrice, spread, totalDepth)
+    : orderBook.asks;
 
   // Find max size for scaling
   const allSizes = [...bids, ...asks].map((l) => l.size);
   const maxSize = Math.max(...allSizes, 1);
 
-  const midPrice = marketData?.price ?? 100;
-
   return (
     <div className="terminal-panel">
       <div className="panel-header">
-        <span className="panel-tag">ORDER BOOK</span>
+        <div className="flex items-center gap-3">
+          <span className="panel-tag">ORDER BOOK</span>
+          {useFallback ? (
+            <span className="text-[10px] font-mono tracking-[0.14em] text-amber-500">
+              DERIVED LADDER
+            </span>
+          ) : null}
+        </div>
         <span className="text-xs font-mono text-gray-400">
           MID: <span className="text-white">${midPrice.toFixed(2)}</span>
         </span>

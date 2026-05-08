@@ -156,7 +156,7 @@ Automatic sweep ranges:
   Learning rates:    [1e-4, 3e-4, 1e-3]
   Architectures:     [(128,128), (256,256), (512,512)]
   Algorithms:        [PPO, DQN (optional)]
-  
+
 Auto-checkpoint:
   ✓ Save progress after each combo
   ✓ Resume if interrupted

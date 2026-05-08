@@ -11,9 +11,19 @@ export function useMarketWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const latestUpdateRef = useRef<MarketUpdate | null>(null);
 
   const setMarketData = useMarketStore((s) => s.setMarketData);
   const setConnected = useMarketStore((s) => s.setConnected);
+
+  const flushLatestUpdate = useCallback(() => {
+    flushTimerRef.current = null;
+    if (latestUpdateRef.current) {
+      setMarketData(latestUpdateRef.current);
+      latestUpdateRef.current = null;
+    }
+  }, [setMarketData]);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -31,7 +41,10 @@ export function useMarketWebSocket() {
         try {
           const data: MarketUpdate = JSON.parse(event.data);
           if (data.type === 'market_update') {
-            setMarketData(data);
+            latestUpdateRef.current = data;
+            if (!flushTimerRef.current) {
+              flushTimerRef.current = setTimeout(flushLatestUpdate, 250);
+            }
           }
         } catch {
           // ignore malformed messages
@@ -56,10 +69,13 @@ export function useMarketWebSocket() {
     } catch {
       setConnected(false);
     }
-  }, [setMarketData, setConnected]);
+  }, [flushLatestUpdate, setConnected]);
 
   const disconnect = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = null;
+    latestUpdateRef.current = null;
     if (wsRef.current) wsRef.current.close();
     wsRef.current = null;
     setConnected(false);

@@ -5,7 +5,7 @@ from typing import Optional
 import asyncio
 
 from pydantic import BaseModel
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .websocket import ConnectionManager
@@ -20,18 +20,10 @@ from ..agents.momentum import MomentumAgent
 from ..agents.mean_reversion import MeanReversionAgent
 from ..agents.spoofing import SpoofingAgent
 from ..agents.sentiment import SentimentAgent
+from ..agents.rl_agent import RLAgent
 from ..prediction.liquidity_shock import LiquidityShockPredictor
 from ..prediction.large_order import LargeOrderDetector
-from ..prediction.signal_engine import SignalEngine, SignalInput
-from ..data.live_feed import (
-    LiveMarketFeed,
-    BinanceLiveFeedAdapter,
-    BrokerExchangeLiveFeedAdapter,
-    BrokerAuthConfig,
-    MockLiveFeedAdapter,
-    NseLikeLiveFeedAdapter,
-    ScraperLiveFeedAdapter,
-)
+from ..market.rl_policy import RLPolicyController
 from ..utils.logger import get_logger
 from ..utils.config import config
 
@@ -41,18 +33,15 @@ logger = get_logger("api")
 simulator: Optional[MarketSimulator] = None
 liquidity_predictor = LiquidityShockPredictor()
 large_order_detector = LargeOrderDetector()
-
-# Signal engine with optional trained model
-_model_path = Path(__file__).parent.parent.parent / "models" / "signal_model.pkl"
-signal_engine: Optional[SignalEngine] = None
-
-def _initialize_signal_engine() -> SignalEngine:
-    """Initialize signal engine with trained model if available."""
-    global signal_engine
-    if signal_engine is None:
-        signal_engine = SignalEngine(model_path=_model_path if _model_path.exists() else None)
-    return signal_engine
-
+rl_policy = (
+    RLPolicyController(
+        model_path=config.rl_model_path,
+        policy_kind=config.rl_policy_kind,
+        autoload=False,
+    )
+    if config.rl_policy_enabled
+    else None
+)
 manager = ConnectionManager()
 
 # Simulation task handle
@@ -82,35 +71,35 @@ app.add_middleware(
 )
 
 
+# ── REST Endpoints ──────────────────────────────────────────────────────────
+
+
 @app.get("/api/health")
 async def health_check():
-    feed_health = _live_feed.health() if _live_feed else None
     return {
         "status": "healthy",
-        "stream_active": _stream_task is not None and not _stream_task.done(),
         "simulation_active": simulator is not None and simulator.running,
         "connected_clients": manager.client_count,
-        "mode": config.simulation_mode,
-        "live_feed_connected": feed_health.connected if feed_health else False,
-        "live_feed_source": feed_health.source if feed_health else None,
-        "live_feed_provider": feed_health.provider if feed_health else config.live_feed_provider,
-        "live_feed_last_update_ts": feed_health.last_update_ts if feed_health else None,
-        "live_feed_last_update_wall_time": feed_health.last_update_wall_time if feed_health else None,
-        "live_feed_fallback_active": _live_fallback_active,
-        "live_feed_stale": feed_health.stale if feed_health else False,
-        "live_feed_latency_ms": feed_health.latency_ms if feed_health else None,
-        "live_feed_transport": feed_health.transport if feed_health else None,
-        "live_feed_message": feed_health.message if feed_health else None,
+        "mode": simulator.mode if simulator else config.simulation_mode,
+        "rl_policy_ready": rl_policy.ready if rl_policy else False,
+        "rl_policy_kind": rl_policy.loaded_policy_kind if rl_policy else None,
     }
 
 
 class ModeRequest(BaseModel):
     mode: str
 
+
+def _require_simulator() -> MarketSimulator:
+    if simulator is None:
+        raise HTTPException(status_code=409, detail="No active simulation")
+    return simulator
+
+
 @app.post("/api/simulation/mode")
 async def set_simulation_mode(request: ModeRequest):
     if request.mode not in ["SANDBOX", "LIVE_SHADOW"]:
-        return {"error": "Invalid mode"}
+        raise HTTPException(status_code=400, detail="Invalid mode")
     
     config.simulation_mode = request.mode
     if simulator:
@@ -126,9 +115,14 @@ async def start_simulation():
     if simulator and simulator.running:
         return {"status": "already_running", "step": simulator.step_count}
 
+    large_order_detector.reset()
+    if rl_policy:
+        rl_policy.reload()
+
     # Create full agent set
     agents = (
-        [MarketMakerAgent(f"MM_{i}") for i in range(3)]
+        ([RLAgent("RL_MM", initial_capital=100000.0)] if rl_policy and rl_policy.ready else [])
+        + [MarketMakerAgent(f"MM_{i}") for i in range(3)]
         + [HFTAgent(f"HFT_{i}") for i in range(2)]
         + [InstitutionalAgent(f"INST_{i}") for i in range(2)]
         + [RetailAgent(f"RET_{i}") for i in range(10)]
@@ -154,6 +148,7 @@ async def start_simulation():
         "status": "started",
         "agents": len(agents),
         "initial_price": config.initial_price,
+        "rl_policy_active": bool(rl_policy and rl_policy.ready),
     }
 
 
@@ -167,41 +162,39 @@ async def stop_simulation():
         _sim_task.cancel()
         _sim_task = None
 
+    large_order_detector.reset()
+
     return {"status": "stopped"}
 
 
 @app.get("/api/prediction/liquidity")
 async def get_liquidity_prediction():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     return liquidity_predictor.predict(state)
 
 
 @app.get("/api/prediction/large-order")
 async def get_large_order_detection():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     detection = large_order_detector.detect(state)
     return detection or {"pattern": None, "message": "No large orders detected"}
 
 
 @app.get("/api/agents/metrics")
 async def get_agent_metrics():
-    if simulator is None:
-        return {"error": "No active simulation"}
+    active_simulator = _require_simulator()
     metrics = {}
-    for agent in simulator.agents:
-        metrics[agent.agent_id] = agent.get_metrics(simulator.current_price)
+    for agent in active_simulator.agents:
+        metrics[agent.agent_id] = agent.get_metrics(active_simulator.current_price)
     return metrics
 
 
 @app.get("/api/market/snapshot")
 async def get_market_snapshot():
-    if simulator is None:
-        return {"error": "No active simulation"}
-    state = simulator.get_market_state()
+    active_simulator = _require_simulator()
+    state = active_simulator.get_market_state()
     return {
         "price": state["current_price"],
         "mid_price": state["mid_price"],
@@ -210,8 +203,8 @@ async def get_market_snapshot():
         "best_ask": state["best_ask"],
         "depth": state["total_depth"],
         "order_book": {
-            "bids": state["bid_depth"],
-            "asks": state["ask_depth"],
+            "bids": state["bid_levels"],
+            "asks": state["ask_levels"],
         },
         "volatility": state["volatility"],
         "step": state["step"],
@@ -252,6 +245,12 @@ async def _run_simulation_loop():
 
     try:
         while simulator.running and simulator.current_time < simulator.duration_seconds:
+            if rl_policy and rl_policy.ready:
+                try:
+                    rl_policy.prepare_step(simulator)
+                except Exception as exc:
+                    logger.error(f"RL policy inference failed: {exc}")
+
             # Run a step
             state = simulator.step()
 
@@ -265,6 +264,8 @@ async def _run_simulation_loop():
                 m = agent.get_metrics(simulator.current_price)
                 agent_metrics[agent.agent_id] = {
                     "total_pnl": m["total_pnl"],
+                    "realized_pnl": m["realized_pnl"],
+                    "unrealized_pnl": m["unrealized_pnl"],
                     "sharpe_ratio": m["sharpe_ratio"],
                     "agent_type": m["agent_type"],
                     "position": m["position"],
@@ -279,8 +280,8 @@ async def _run_simulation_loop():
                 "spread": state["spread"],
                 "depth": state["total_depth"],
                 "order_book": {
-                    "bids": state["bid_depth"][:10],
-                    "asks": state["ask_depth"][:10],
+                    "bids": state["bid_levels"][:10],
+                    "asks": state["ask_levels"][:10],
                 },
                 "liquidity_prediction": liquidity_pred,
                 "large_order_detection": large_order_det,

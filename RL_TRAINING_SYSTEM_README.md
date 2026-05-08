@@ -5,7 +5,7 @@
 This directory contains a **production-grade reinforcement learning training system** for intraday trading with:
 - ✅ Model training (PPO/DQN)
 - ✅ Automatic checkpointing
-- ✅ Resumable parameter sweeps  
+- ✅ Resumable parameter sweeps
 - ✅ Multi-timeframe backtesting
 - ✅ Detailed metrics & comparison
 - ✅ Tensorboard monitoring

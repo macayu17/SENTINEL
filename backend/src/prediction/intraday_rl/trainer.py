@@ -134,10 +134,10 @@ def train_ppo(
     resume: bool = True,
 ) -> PPO:
     """Train PPO as the primary policy for constrained morning-session trading.
-    
+
     Supports automatic checkpoint resumption: if model exists, continues training.
     Checkpoints are saved periodically to enable resumption on interruption.
-    
+
     Args:
         sessions: Training data sessions
         env_config: Environment configuration
@@ -145,14 +145,14 @@ def train_ppo(
         model_output_path: Final model save path
         checkpoint_dir: Directory for periodic checkpoints (optional)
         checkpoint_save_freq: Save checkpoint every N timesteps
-    
+
     Returns:
         Trained PPO model
     """
     vec_env = DummyVecEnv([lambda: IntradayTradingEnv(sessions=sessions, config=env_config)])
 
     policy_kwargs = {"net_arch": list(train_config.net_arch)}
-    
+
     resume_path = None
     if resume:
         resume_path = _resolve_model_file(model_output_path)
@@ -211,7 +211,7 @@ def train_ppo(
     model.save(model_output_path)
     _update_latest_model_alias(model_path, checkpoint_dir)
     print(f"✅ Model training complete. Final model saved → {model_output_path}")
-    
+
     return model
 
 
@@ -225,10 +225,10 @@ def train_dqn_baseline(
     resume: bool = True,
 ) -> DQN:
     """Optional DQN baseline to compare against PPO in the same environment.
-    
+
     Supports automatic checkpoint resumption: if model exists, continues training.
     Checkpoints are saved periodically to enable resumption on interruption.
-    
+
     Args:
         sessions: Training data sessions
         env_config: Environment configuration
@@ -236,14 +236,14 @@ def train_dqn_baseline(
         model_output_path: Final model save path
         checkpoint_dir: Directory for periodic checkpoints (optional)
         checkpoint_save_freq: Save checkpoint every N timesteps
-    
+
     Returns:
         Trained DQN model
     """
     vec_env = DummyVecEnv([lambda: IntradayTradingEnv(sessions=sessions, config=env_config)])
 
     policy_kwargs = {"net_arch": list(train_config.net_arch)}
-    
+
     resume_path = None
     if resume:
         resume_path = _resolve_model_file(model_output_path)
@@ -301,7 +301,7 @@ def train_dqn_baseline(
     model.save(model_output_path)
     _update_latest_model_alias(model_path, checkpoint_dir)
     print(f"✅ Model training complete. Final model saved → {model_output_path}")
-    
+
     return model
 
 

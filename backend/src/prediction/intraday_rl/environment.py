@@ -19,7 +19,7 @@ ACTION_SELL = 2
 @dataclass
 class IntradayEnvConfig:
     """Environment hyperparameters aligned with Kadia et al. 2025 methodology.
-    
+
     Hard constraints for signal confirmation:
     - ATV uptrend REQUIRED (not optional)
     - RSI gates REQUIRED (RSI < 70 for buy, RSI > 30 for sell)

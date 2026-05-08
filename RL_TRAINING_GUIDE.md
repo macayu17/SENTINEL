@@ -106,26 +106,26 @@ Rank  Algorithm  Learning Rate   Net Arch        Return %     Win %     Sharpe  
 backend/
   data/                          # 📁 Upload historical data here
     historical_1m.csv            # OHLCV data
-  
+
   models/                        # 📁 Trained models
     rl_training/
       my_first_model_ppo         # Trained PPO model
       model2_dqn                 # Trained DQN model
     rl_sweep/
       ppo_lr1e-4_arch128_128     # Sweep results
-  
+
   checkpoints/                   # 📁 Training checkpoints
     rl_training/
       checkpoint_metadata.json   # Model metadata & metrics
       best_models.json           # Best model pointers
     rl_sweep/
       sweep_checkpoint.json      # Sweep progress (auto-resumable)
-  
+
   results/                       # 📁 Backtest results
     rl_training/
     rl_sweep/
       sweep_results_20260428.json
-  
+
   tensorboard_logs/              # 📁 Training curves
     intraday_ppo/
     intraday_dqn/

@@ -48,7 +48,7 @@ cd /Users/anindhithsankanna/CS\ Projects/Sentinel
 ./rl_train.sh train slow ppo 500000 1e-5       # Slow, thorough training
 ```
 
-### Backtest Models  
+### Backtest Models
 ```bash
 ./rl_train.sh backtest my_model                # Default: 5min bars
 ./rl_train.sh backtest my_model ppo 1min       # 1-minute bars

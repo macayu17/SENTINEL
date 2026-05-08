@@ -34,7 +34,6 @@ class InstitutionalAgent(BaseAgent):
     def decide_action(self, market_state: Dict) -> List[Order]:
         current_time = market_state.get("current_time", 0.0)
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
-        spread = market_state.get("spread", 0.05)
         orders: List[Order] = []
 
         # Already done
@@ -52,38 +51,42 @@ class InstitutionalAgent(BaseAgent):
         elapsed_since_slice = current_time - self._last_slice_time
         if elapsed_since_slice >= self.slice_interval:
             remaining = self.target_quantity - self.executed_quantity
-            
-            # VWAP/TWAP progression check
-            total_elapsed = current_time - (self._last_slice_time - elapsed_since_slice)
-            expected_executed = int((total_elapsed / self.execution_window) * self.target_quantity)
-            behind_schedule = self.executed_quantity < expected_executed
-
             num_remaining_slices = max(
                 1,
-                int((self.execution_window - total_elapsed) / self.slice_interval),
+                int((self.execution_window - (current_time - self._last_slice_time))
+                    / self.slice_interval),
             )
             slice_size = min(
                 remaining,
                 self.max_slice_size,
                 remaining // num_remaining_slices + 1,
             )
-            
             if slice_size > 0:
-                # If behind schedule, aggressively cross spread. Else, act passively
-                order_type = OrderType.MARKET if behind_schedule else OrderType.LIMIT
-                # Place near microprice
-                limit_px = round(price - (spread * 0.4) if self.side == OrderSide.BUY else price + (spread * 0.4), 2)
-                
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
                         side=self.side,
-                        order_type=order_type,
-                        price=price if behind_schedule else limit_px,
+                        order_type=OrderType.LIMIT,
+                        price=round(
+                            price * (1.001 if self.side == OrderSide.BUY else 0.999), 2
+                        ),
                         quantity=slice_size,
                     )
                 )
-                self.executed_quantity += slice_size
                 self._last_slice_time = current_time
 
         return orders
+
+    def update_position(self, trade) -> None:
+        super().update_position(trade)
+        self.executed_quantity = abs(self.position)
+
+    def reset(self) -> None:
+        super().reset()
+        self.executed_quantity = 0
+        self.side = random.choice([OrderSide.BUY, OrderSide.SELL])
+        self._last_slice_time = 0.0
+        self._started = False
+
+    def consume_cancellations(self) -> List[str]:
+        return self.cancel_all_active_orders()

@@ -215,7 +215,7 @@ class RLTrainingOrchestrator:
 
         model_path = self.output_dir / f"{config_name}_{algorithm}"
         model_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Setup checkpoint directory for this model
         model_checkpoint_dir = self.checkpoint_dir.checkpoint_dir / f"{config_name}_{algorithm}"
 
@@ -646,16 +646,16 @@ def main() -> None:
         )
 
         env_config = IntradayEnvConfig(
-            lookback=30, 
+            lookback=30,
             morning_minutes=60,
             trend_bonus=0.002,
             volume_bonus=0.002,
             invalid_action_penalty=0.0001,
         )
-        
+
         # Use 1min by default (same as training) unless specified
         timeframe = args.timeframe if args.timeframe != "5min" else "1min"
-        
+
         report = orchestrator.backtest_model(
             model_path=args.model,
             algorithm=args.algo,

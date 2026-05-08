@@ -113,3 +113,9 @@ class MomentumAgent(BaseAgent):
                 self._trough_price = price
 
         return orders
+
+    def reset(self) -> None:
+        super().reset()
+        self._price_history.clear()
+        self._peak_price = 0.0
+        self._trough_price = float("inf")

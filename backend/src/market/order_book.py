@@ -1,7 +1,6 @@
 """Order book with price-time priority matching engine."""
 
-from typing import List, Optional, Dict, Tuple
-from collections import defaultdict
+from typing import List, Optional, Dict
 from .order import Order, OrderSide, OrderType, OrderStatus
 from .trade import Trade
 from ..utils.logger import get_logger
@@ -39,7 +38,10 @@ class OrderBook:
         while order.remaining_quantity > 0 and book:
             best = book[0]
             fill_qty = min(order.remaining_quantity, best.remaining_quantity)
-            trade = self._create_trade(order, best, best.price, fill_qty)
+            if order.side == OrderSide.BUY:
+                trade = self._create_trade(order, best, best.price, fill_qty)
+            else:
+                trade = self._create_trade(best, order, best.price, fill_qty)
             trades.append(trade)
 
             if best.is_filled:

@@ -24,14 +24,12 @@ function timestampLabel(date: Date): string {
   return date.toLocaleTimeString([], { hour12: false, minute: '2-digit', second: '2-digit' });
 }
 
-function nextDepthHeat(midPrice: number, step: number = 0): DepthHeatLevel[] {
+function nextDepthHeat(midPrice: number): DepthHeatLevel[] {
   return Array.from({ length: 12 }, (_, idx) => {
     const level = idx + 1;
     const distance = Math.abs(level - 6) + 1;
     const base = 240 / distance;
-    // Deterministic noise: calculate based on step and level to avoid hydration mismatches
-    const noiseValue = ((step * 17 + level * 23) % 41) - 20.5;
-    const noise = noiseValue;
+    const noise = (Math.random() - 0.5) * 20;
     return {
       level,
       bidDepth: Math.max(20, base + noise + (midPrice % 2) * 6),
@@ -93,26 +91,18 @@ function nextAgentActivity(midPrice: number, step: number): AgentActivity {
 
   return {
     marketMakerAction: 'Refreshing two-sided quotes around microprice',
-    // Deterministic noise agent action based on step to avoid hydration mismatches
-    noiseAgentAction: (step * 7) % 2 === 0
+    noiseAgentAction: Math.random() > 0.5
       ? 'Submitting opportunistic BUY market order'
       : 'Submitting opportunistic SELL market order',
     rlAgentStatus: step % 4 === 0 ? 'Policy update pending' : 'Acting with synchronized environment step',
-    recentOrders: Array.from({ length: 6 }, (_, idx) => {
-      // Deterministic generation based on step and idx
-      const pseudoRandom1 = ((step * 13 + idx * 17) % 100) / 100;
-      const pseudoRandom2 = ((step * 19 + idx * 23) % 100) / 100;
-      const pseudoRandom3 = ((step * 29 + idx * 31) % 100) / 100;
-      
-      return {
-        id: `O-${step}-${idx}`,
-        agent: idx % 3 === 0 ? 'RL Agent' : idx % 2 === 0 ? 'Noise Agent' : 'Market Maker',
-        side: idx % 2 === 0 ? 'BUY' : 'SELL',
-        price: Number((midPrice + (pseudoRandom1 - 0.5) * 0.18).toFixed(3)),
-        quantity: Math.floor(30 + pseudoRandom2 * 220),
-        status: orderStatuses[Math.floor(pseudoRandom3 * orderStatuses.length)],
-      };
-    }),
+    recentOrders: Array.from({ length: 6 }, (_, idx) => ({
+      id: `O-${step}-${idx}`,
+      agent: idx % 3 === 0 ? 'RL Agent' : idx % 2 === 0 ? 'Noise Agent' : 'Market Maker',
+      side: idx % 2 === 0 ? 'BUY' : 'SELL',
+      price: Number((midPrice + (Math.random() - 0.5) * 0.18).toFixed(3)),
+      quantity: Math.floor(30 + Math.random() * 220),
+      status: orderStatuses[Math.floor(Math.random() * orderStatuses.length)],
+    })),
     executionSummary: {
       submitted,
       fills,
@@ -138,73 +128,63 @@ const defaultMilestones: Milestone[] = [
   {
     phase: 'Phase 3',
     title: 'Multi-Agent Realism',
-    status: 'completed',
+    status: 'in-progress',
     detail: 'Extending behavior diversity with informed and institutional style flow.',
   },
   {
     phase: 'Phase 4',
     title: 'Training, Evaluation, Deployment',
-    status: 'completed',
+    status: 'in-progress',
     detail: 'Policy training loops and deployment pathways are under active development.',
   },
 ];
 
-export function useSimulationDashboardData(options?: { enabled?: boolean }): SimulationDashboardData {
-  const enabled = options?.enabled ?? true;
+export function useSimulationDashboardData(): SimulationDashboardData {
   const marketData = useMarketStore((s) => s.marketData);
   const connected = useMarketStore((s) => s.connected);
+  const simulationRunning = useMarketStore((s) => s.simulationRunning);
+  const feedActive = connected && simulationRunning;
 
   const seedPrice = marketData?.price ?? 100;
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0);
   const [midPrice, setMidPrice] = useState(seedPrice);
-  const [spread, setSpread] = useState(0.08);
-  const [inventory, setInventory] = useState(18);
-  const [realizedPnl, setRealizedPnl] = useState(1240);
-  const [unrealizedPnl, setUnrealizedPnl] = useState(310);
-  const [reward, setReward] = useState(42);
-  const [imbalance, setImbalance] = useState(0.12);
+  const [spread, setSpread] = useState(0);
+  const [inventory, setInventory] = useState(0);
+  const [realizedPnl, setRealizedPnl] = useState(0);
+  const [unrealizedPnl, setUnrealizedPnl] = useState(0);
+  const [reward, setReward] = useState(0);
+  const [imbalance, setImbalance] = useState(0);
 
   const [priceSeries, setPriceSeries] = useState<PriceSpreadPoint[]>([]);
   const [spreadSeries, setSpreadSeries] = useState<TimeSeriesPoint[]>([]);
   const [inventorySeries, setInventorySeries] = useState<TimeSeriesPoint[]>([]);
   const [rewardSeries, setRewardSeries] = useState<TimeSeriesPoint[]>([]);
   const [tradeFlow, setTradeFlow] = useState<TradeFlowPoint[]>([]);
-  const [depthHeatmap, setDepthHeatmap] = useState<DepthHeatLevel[]>(nextDepthHeat(seedPrice, 1));
+  const [depthHeatmap, setDepthHeatmap] = useState<DepthHeatLevel[]>(nextDepthHeat(seedPrice));
   const [events, setEvents] = useState<KernelEvent[]>([]);
-  const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!feedActive) {
       return;
     }
 
-    // Delay interval start to allow React hydration to complete (avoids hydration mismatches)
-    let intervalId: NodeJS.Timeout | undefined;
-    
-    const startTimer = setTimeout(() => {
-      intervalId = setInterval(() => {
-        setStep((prev) => prev + 1);
-        setMidPrice((prev) => clamp(prev + (Math.random() - 0.5) * 0.18, 96, 106));
-        setSpread((prev) => clamp(prev + (Math.random() - 0.5) * 0.015, 0.03, 0.16));
-        setInventory((prev) => clamp(prev + Math.floor((Math.random() - 0.5) * 12), -220, 220));
-        setRealizedPnl((prev) => Number((prev + (Math.random() - 0.4) * 12).toFixed(2)));
-        setUnrealizedPnl((prev) => Number((prev + (Math.random() - 0.45) * 10).toFixed(2)));
-        setReward((prev) => Number((prev + (Math.random() - 0.4) * 2.5).toFixed(3)));
-        setImbalance((prev) => clamp(prev + (Math.random() - 0.5) * 0.14, -0.85, 0.85));
-      }, 1200);
-    }, 100);
+    const interval = setInterval(() => {
+      setStep((prev) => prev + 1);
+      setMidPrice((prev) => clamp(prev + (Math.random() - 0.5) * 0.18, 96, 106));
+      setSpread((prev) => clamp(prev + (Math.random() - 0.5) * 0.015, 0.03, 0.16));
+      setInventory((prev) => clamp(prev + Math.floor((Math.random() - 0.5) * 12), -220, 220));
+      setRealizedPnl((prev) => Number((prev + (Math.random() - 0.4) * 12).toFixed(2)));
+      setUnrealizedPnl((prev) => Number((prev + (Math.random() - 0.45) * 10).toFixed(2)));
+      setReward((prev) => Number((prev + (Math.random() - 0.4) * 2.5).toFixed(3)));
+      setImbalance((prev) => clamp(prev + (Math.random() - 0.5) * 0.14, -0.85, 0.85));
+    }, 1200);
 
-    return () => {
-      clearTimeout(startTimer);
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [enabled]);
+    return () => clearInterval(interval);
+  }, [feedActive]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!feedActive) {
       return;
     }
 
@@ -239,12 +219,58 @@ export function useSimulationDashboardData(options?: { enabled?: boolean }): Sim
       sellVolume: Math.floor(80 + Math.random() * 240),
     }));
 
-    setDepthHeatmap(nextDepthHeat(observedPrice, step));
+    setDepthHeatmap(nextDepthHeat(observedPrice));
     setEvents((prev) => [nextEvent(step, observedSpread, imbalance), ...prev].slice(0, MAX_EVENTS));
-    setLastUpdateMs(Date.now());
-  }, [enabled, step, midPrice, spread, inventory, reward, imbalance, marketData]);
+  }, [feedActive, step, midPrice, spread, inventory, reward, imbalance, marketData]);
 
-  const agentActivity = useMemo(() => nextAgentActivity(midPrice, step), [midPrice, step]);
+  useEffect(() => {
+    if (feedActive) {
+      return;
+    }
+
+    setStep(0);
+    setMidPrice(seedPrice);
+    setSpread(0);
+    setInventory(0);
+    setRealizedPnl(0);
+    setUnrealizedPnl(0);
+    setReward(0);
+    setImbalance(0);
+    setPriceSeries([]);
+    setSpreadSeries([]);
+    setInventorySeries([]);
+    setRewardSeries([]);
+    setTradeFlow([]);
+    setEvents([]);
+    setDepthHeatmap(nextDepthHeat(seedPrice));
+  }, [feedActive, seedPrice]);
+
+  const agentActivity = useMemo(() => {
+    if (feedActive) {
+      return nextAgentActivity(midPrice, step);
+    }
+
+    const statusMessage = !connected
+      ? 'Backend offline. Awaiting websocket reconnect.'
+      : 'Simulation paused. No policy steps are being issued.';
+
+    return {
+      marketMakerAction: !connected
+        ? 'Quote engine standing by for live market feed'
+        : 'Quote engine idle while simulation is stopped',
+      noiseAgentAction: !connected
+        ? 'Order flow generator paused with no backend session'
+        : 'Noise flow idle until simulation resumes',
+      rlAgentStatus: statusMessage,
+      recentOrders: [],
+      executionSummary: {
+        submitted: 0,
+        fills: 0,
+        cancelled: 0,
+        matchRate: 0,
+      },
+    };
+  }, [connected, feedActive, midPrice, step]);
 
   const bestBid = Number((midPrice - spread / 2).toFixed(3));
   const bestAsk = Number((midPrice + spread / 2).toFixed(3));
@@ -288,28 +314,6 @@ export function useSimulationDashboardData(options?: { enabled?: boolean }): Sim
     agentActivity,
     milestones: defaultMilestones,
     events,
-    prediction: {
-      signal: step % 7 === 0 ? 'HOLD' : reward > 0 ? 'BUY' : 'SELL',
-      // Keep confidence deterministic on initial render to avoid SSR hydration mismatches.
-      confidence: Number((0.55 + Math.min(0.35, (step % 8) * 0.04)).toFixed(3)),
-      explanation: 'Mock rule-based signal from momentum, imbalance, and spread penalty.',
-    },
-    operatingMode: 'SIMULATION',
-    liveMarketConnected: false,
-    liveMarketSource: 'simulation',
-    liveMarketProvider: 'simulation',
-    liveMarketFallback: false,
-    liveMarketLastUpdateTs: null,
-    liveMarketLastUpdateWallTime: null,
-    liveMarketStale: false,
-    liveMarketLatencyMs: null,
-    liveMarketTransport: null,
-    liveMarketMessage: null,
     connected,
-    dataSource: 'mock',
-    loading: false,
-    stale: false,
-    error: null,
-    lastUpdateMs,
   };
 }

@@ -82,3 +82,11 @@ class LiquidityTraderAgent(BaseAgent):
             )
 
         return orders
+
+    def reset(self) -> None:
+        super().reset()
+        self._active_side = None
+        self._remaining_parent_qty = 0
+
+    def consume_cancellations(self) -> List[str]:
+        return self.cancel_all_active_orders()

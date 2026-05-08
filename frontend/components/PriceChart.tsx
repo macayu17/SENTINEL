@@ -57,7 +57,15 @@ export default function PriceChart() {
   return (
     <div className="terminal-panel">
       <div className="panel-header">
-        <span className="panel-tag">PRICE</span>
+        <div className="flex items-center gap-3">
+          <span className="panel-tag">PRICE</span>
+          <span className="text-[10px] font-mono tracking-[0.14em] text-gray-500">
+            GREEN = MID PRICE
+          </span>
+          <span className="text-[10px] font-mono tracking-[0.14em] text-amber-500/80">
+            AMBER = BID-ASK SPREAD
+          </span>
+        </div>
         <div className="flex items-center gap-3">
           <span className="text-lg font-mono font-bold text-white">
             ${currentPrice.toFixed(2)}
@@ -102,7 +110,6 @@ export default function PriceChart() {
             />
             <Tooltip content={<TerminalTooltip />} />
 
-            {/* Spread area */}
             <Area
               yAxisId="spread"
               type="monotone"

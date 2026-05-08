@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   backend:
     build: ./backend
@@ -7,7 +6,11 @@ services:
     volumes:
       - ./backend:/app
       - ./data:/data
-    env_file: ./backend/.env
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
     command: uvicorn src.api.main:app --host 0.0.0.0 --reload
 
   frontend:

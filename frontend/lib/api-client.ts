@@ -17,7 +17,12 @@ class SentinelAPI {
   }
 
   async health() {
-    return this.request<{ status: string; simulation_active: boolean; connected_clients: number }>('/api/health');
+    return this.request<{
+      status: string;
+      simulation_active: boolean;
+      connected_clients: number;
+      mode: 'SANDBOX' | 'LIVE_SHADOW';
+    }>('/api/health');
   }
 
   async startSimulation() {
@@ -28,7 +33,7 @@ class SentinelAPI {
     return this.request<{ status: string }>('/api/simulation/stop', { method: 'POST' });
   }
 
-  async setSimulationMode(mode: 'SIMULATION' | 'LIVE_SHADOW' | 'SANDBOX') {
+  async setSimulationMode(mode: 'SANDBOX' | 'LIVE_SHADOW') {
     return this.request<{ status: string; mode: string }>('/api/simulation/mode', {
       method: 'POST',
       body: JSON.stringify({ mode }),

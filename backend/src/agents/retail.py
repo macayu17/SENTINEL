@@ -49,6 +49,7 @@ class RetailAgent(BaseAgent):
                 pnl_pct = -pnl_pct
 
             if pnl_pct <= -self.stop_loss or pnl_pct >= self.take_profit:
+                # Close position
                 side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
                 orders.append(
                     Order(
@@ -62,10 +63,12 @@ class RetailAgent(BaseAgent):
                 self._entry_price = 0.0
                 return orders
 
+        # MA crossover signals (only if no position)
         if self.position == 0:
             prev_ma20 = sum(prices[-21:-1]) / 20
             prev_ma50 = sum(prices[-51:-1]) / 50
 
+            # Bullish crossover
             if prev_ma20 <= prev_ma50 and ma20 > ma50:
                 orders.append(
                     Order(
@@ -77,6 +80,8 @@ class RetailAgent(BaseAgent):
                     )
                 )
                 self._entry_price = price
+
+            # Bearish crossover
             elif prev_ma20 >= prev_ma50 and ma20 < ma50:
                 orders.append(
                     Order(
@@ -90,3 +95,8 @@ class RetailAgent(BaseAgent):
                 self._entry_price = price
 
         return orders
+
+    def reset(self) -> None:
+        super().reset()
+        self._price_history.clear()
+        self._entry_price = 0.0

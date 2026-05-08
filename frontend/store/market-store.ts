@@ -7,18 +7,19 @@ interface MarketStore {
   connected: boolean;
   alerts: Alert[];
   simulationRunning: boolean;
-  simulationMode: 'SIMULATION' | 'LIVE_SHADOW' | 'SANDBOX';
+  simulationMode: 'SANDBOX' | 'LIVE_SHADOW';
 
   setMarketData: (data: MarketUpdate) => void;
   setConnected: (connected: boolean) => void;
   addAlert: (alert: Alert) => void;
   dismissAlert: (id: string) => void;
   clearAlerts: () => void;
+  resetSimulationData: () => void;
   setSimulationRunning: (running: boolean) => void;
-  setSimulationMode: (mode: 'SIMULATION' | 'LIVE_SHADOW' | 'SANDBOX') => void;
+  setSimulationMode: (mode: 'SANDBOX' | 'LIVE_SHADOW') => void;
 }
 
-const MAX_PRICE_HISTORY = 500;
+const MAX_PRICE_HISTORY = 240;
 
 export const useMarketStore = create<MarketStore>((set) => ({
   marketData: null,
@@ -26,7 +27,7 @@ export const useMarketStore = create<MarketStore>((set) => ({
   connected: false,
   alerts: [],
   simulationRunning: false,
-  simulationMode: 'SIMULATION',
+  simulationMode: 'SANDBOX',
 
   setMarketData: (data: MarketUpdate) =>
     set((state) => {
@@ -80,7 +81,15 @@ export const useMarketStore = create<MarketStore>((set) => ({
 
   clearAlerts: () => set({ alerts: [] }),
 
+  resetSimulationData: () =>
+    set({
+      marketData: null,
+      priceHistory: [],
+      alerts: [],
+      simulationRunning: false,
+    }),
+
   setSimulationRunning: (running: boolean) => set({ simulationRunning: running }),
 
-  setSimulationMode: (mode: 'SIMULATION' | 'LIVE_SHADOW' | 'SANDBOX') => set({ simulationMode: mode }),
+  setSimulationMode: (mode: 'SANDBOX' | 'LIVE_SHADOW') => set({ simulationMode: mode }),
 }));

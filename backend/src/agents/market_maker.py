@@ -83,3 +83,6 @@ class MarketMakerAgent(BaseAgent):
             )
         )
         return orders
+
+    def consume_cancellations(self) -> List[str]:
+        return self.cancel_all_active_orders()
