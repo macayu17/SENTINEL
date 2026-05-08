@@ -66,7 +66,7 @@ class PeriodicCheckpointCallback(BaseCallback):
             self.model.save(str(checkpoint_path))
             _update_latest_model_alias(checkpoint_path, self.checkpoint_dir)
             if self.verbose > 0:
-                print(f"\n✅ Checkpoint saved: {checkpoint_path.name}")
+                print(f"\n[ok] Checkpoint saved: {checkpoint_path.name}")
             self.last_save_step = self.num_timesteps
         return True
 
@@ -160,14 +160,14 @@ def train_ppo(
             resume_path = _find_latest_checkpoint(checkpoint_dir)
 
     if resume_path is not None:
-        print(f"📂 Loading existing model from {resume_path} to resume training...")
+        print(f"[info] Loading existing model from {resume_path} to resume training...")
         model = PPO.load(str(resume_path), env=vec_env, verbose=1)
         total_steps_to_learn = train_config.total_timesteps
         print(
             f"   Resuming from step {model.num_timesteps}. Additional: {total_steps_to_learn:,} timesteps"
         )
     else:
-        print(f"🚀 Creating new PPO model...")
+        print("[info] Creating new PPO model...")
         model = PPO(
             policy="MlpPolicy",
             env=vec_env,
@@ -194,7 +194,7 @@ def train_ppo(
             verbose=1
         )
         callbacks.append(checkpoint_callback)
-        print(f"💾 Periodic checkpoints enabled: every {checkpoint_save_freq:,} steps → {checkpoint_dir}")
+        print(f"[info] Periodic checkpoints enabled: every {checkpoint_save_freq:,} steps -> {checkpoint_dir}")
 
     callback_list = CallbackList(callbacks) if callbacks else None
 
@@ -210,7 +210,7 @@ def train_ppo(
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(model_output_path)
     _update_latest_model_alias(model_path, checkpoint_dir)
-    print(f"✅ Model training complete. Final model saved → {model_output_path}")
+    print(f"[ok] Model training complete. Final model saved -> {model_output_path}")
 
     return model
 
@@ -251,14 +251,14 @@ def train_dqn_baseline(
             resume_path = _find_latest_checkpoint(checkpoint_dir)
 
     if resume_path is not None:
-        print(f"📂 Loading existing model from {resume_path} to resume training...")
+        print(f"[info] Loading existing model from {resume_path} to resume training...")
         model = DQN.load(str(resume_path), env=vec_env, verbose=1)
         total_steps_to_learn = train_config.total_timesteps
         print(
             f"   Resuming from step {model.num_timesteps}. Additional: {total_steps_to_learn:,} timesteps"
         )
     else:
-        print(f"🚀 Creating new DQN model...")
+        print("[info] Creating new DQN model...")
         model = DQN(
             policy="MlpPolicy",
             env=vec_env,
@@ -284,7 +284,7 @@ def train_dqn_baseline(
             verbose=1
         )
         callbacks.append(checkpoint_callback)
-        print(f"💾 Periodic checkpoints enabled: every {checkpoint_save_freq:,} steps → {checkpoint_dir}")
+        print(f"[info] Periodic checkpoints enabled: every {checkpoint_save_freq:,} steps -> {checkpoint_dir}")
 
     callback_list = CallbackList(callbacks) if callbacks else None
 
@@ -300,7 +300,7 @@ def train_dqn_baseline(
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(model_output_path)
     _update_latest_model_alias(model_path, checkpoint_dir)
-    print(f"✅ Model training complete. Final model saved → {model_output_path}")
+    print(f"[ok] Model training complete. Final model saved -> {model_output_path}")
 
     return model
 

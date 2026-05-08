@@ -8,7 +8,7 @@ Copy and modify these for your specific use cases.
 #                   EXAMPLE CONFIGURATIONS
 # ============================================================
 
-# ── Environment Configuration ────────────────────────────────
+# -- Environment Configuration --------------------------------
 DEFAULT_ENV_CONFIG = {
     "lookback": 30,  # Number of historical candles to observe
     "initial_cash": 1_000_000,  # Starting capital
@@ -19,7 +19,7 @@ DEFAULT_ENV_CONFIG = {
     "random_reset": True,  # Randomize reset for training
 }
 
-# ── Training Configurations ──────────────────────────────────
+# -- Training Configurations ----------------------------------
 
 # Quick test: verify everything works
 QUICK_TEST_CONFIG = {
@@ -107,7 +107,7 @@ DQN_CONFIG = {
     "tensorboard_log": "./tensorboard_logs/dqn",
 }
 
-# ── Backtest Configurations ──────────────────────────────────
+# -- Backtest Configurations ----------------------------------
 
 BACKTEST_TIMEFRAMES = {
     "1min": "Train at 1m, test at 1m (highest frequency)",
@@ -115,7 +115,7 @@ BACKTEST_TIMEFRAMES = {
     "15min": "Train at 1m, deploy at 15m (smoother execution)",
 }
 
-# ── Sweep Configurations ──────────────────────────────────────
+# -- Sweep Configurations --------------------------------------
 
 SWEEP_LEARNING_RATES = [
     1e-4,  # Very slow
@@ -265,16 +265,16 @@ Poor model (investigate):
 To improve performance, try:
 
 1. Increase training steps:
-   250k → 500k → 1M (more learning)
+   250k -> 500k -> 1M (more learning)
 
 2. Lower learning rate:
-   3e-4 → 1e-4 (more stable)
+   3e-4 -> 1e-4 (more stable)
 
 3. Larger network:
-   256,256 → 512,512 (more capacity)
+   256,256 -> 512,512 (more capacity)
 
 4. More augmentation:
-   --augment-copies 1 → 3 (more diversity)
+   --augment-copies 1 -> 3 (more diversity)
 
 To reduce overfitting:
 
@@ -295,7 +295,7 @@ To improve Sharpe ratio:
 
 1. Optimize for consistency (smaller variance)
 2. Use PPO (more stable than DQN)
-3. Increase GAE lambda (0.97 → 0.99)
+3. Increase GAE lambda (0.97 -> 0.99)
 4. Decrease learning rate
 """
 
@@ -307,24 +307,24 @@ To improve Sharpe ratio:
 Checkpoint locations:
 
 backend/
-├── models/
-│   ├── rl_training/
-│   │   └── [model_name]_[algo]         ← Trained models
-│   └── rl_sweep/
-│       └── [combo_name]                 ← Sweep results
-│
-├── checkpoints/
-│   ├── rl_training/
-│   │   ├── checkpoint_metadata.json     ← All models metadata
-│   │   └── best_models.json             ← Best models pointer
-│   └── rl_sweep/
-│       └── sweep_checkpoint.json        ← Sweep progress (resumable)
-│
-└── results/
-    ├── rl_training/
-    │   └── backtest_results_*.json      ← Backtest metrics
-    └── rl_sweep/
-        └── sweep_results_*.json         ← Ranked parameters
++-- models/
+|   +-- rl_training/
+|   |   +-- [model_name]_[algo]         <- Trained models
+|   +-- rl_sweep/
+|       +-- [combo_name]                 <- Sweep results
+|
++-- checkpoints/
+|   +-- rl_training/
+|   |   +-- checkpoint_metadata.json     <- All models metadata
+|   |   +-- best_models.json             <- Best models pointer
+|   +-- rl_sweep/
+|       +-- sweep_checkpoint.json        <- Sweep progress (resumable)
+|
++-- results/
+    +-- rl_training/
+    |   +-- backtest_results_*.json      <- Backtest metrics
+    +-- rl_sweep/
+        +-- sweep_results_*.json         <- Ranked parameters
 
 Loading best model in code:
 

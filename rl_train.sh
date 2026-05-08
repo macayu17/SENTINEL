@@ -18,21 +18,21 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 print_header() {
-  echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}================================================================${NC}"
   echo -e "${BLUE}$1${NC}"
-  echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}================================================================${NC}"
 }
 
 print_success() {
-  echo -e "${GREEN}✅ $1${NC}"
+  echo -e "${GREEN}[ok] $1${NC}"
 }
 
 print_error() {
-  echo -e "${RED}❌ $1${NC}"
+  echo -e "${RED}[error] $1${NC}"
 }
 
 print_warning() {
-  echo -e "${YELLOW}⚠️  $1${NC}"
+  echo -e "${YELLOW}[warning] $1${NC}"
 }
 
 check_data() {
@@ -62,7 +62,7 @@ cmd_train() {
   local lr="${4:-3e-4}"
   local arch="${5:-256,256}"
 
-  print_header "🚀 Training RL Model"
+  print_header "Training RL Model"
   echo "Name: $name"
   echo "Algorithm: $algo"
   echo "Timesteps: $timesteps"
@@ -104,7 +104,7 @@ cmd_backtest() {
     return 1
   fi
 
-  print_header "📈 Backtesting Model"
+  print_header "Backtesting Model"
   echo "Model: $model_name"
   echo "Algorithm: $algo"
   echo "Timeframe: $timeframe"
@@ -126,9 +126,9 @@ cmd_backtest() {
 cmd_sweep() {
   local force_fresh="${1:---no-force}"
 
-  print_header "🔄 Hyperparameter Sweep"
+  print_header "Hyperparameter Sweep"
   echo "Sweeping learning rates and network architectures"
-  echo "Sweeps are resumable — you can safely interrupt (Ctrl+C) and re-run"
+  echo "Sweeps are resumable - you can safely interrupt (Ctrl+C) and re-run"
   echo
 
   if ! check_data; then return 1; fi
@@ -151,11 +151,11 @@ cmd_sweep() {
 }
 
 cmd_list() {
-  print_header "📋 Available Models & Results"
+  print_header "Available Models & Results"
 
   echo -e "\n${BLUE}Trained Models:${NC}"
   if [ -d "$MODELS_DIR/rl_training" ] && [ "$(ls -A "$MODELS_DIR/rl_training")" ]; then
-    ls -1 "$MODELS_DIR/rl_training/" | sed 's/^/  ✓ /'
+    ls -1 "$MODELS_DIR/rl_training/" | sed 's/^/  - /'
   else
     echo "  (none)"
   fi
@@ -169,7 +169,7 @@ cmd_list() {
 
   echo -e "\n${BLUE}Recent Results:${NC}"
   if [ -d "$RESULTS_DIR" ] && [ "$(find "$RESULTS_DIR" -type f -name '*.json' 2>/dev/null)" ]; then
-    find "$RESULTS_DIR" -type f -name '*.json' -printf "%T@ %p\n" | sort -rn | head -5 | cut -d' ' -f2- | sed 's/^/  ✓ /'
+    find "$RESULTS_DIR" -type f -name '*.json' -printf "%T@ %p\n" | sort -rn | head -5 | cut -d' ' -f2- | sed 's/^/  - /'
   else
     echo "  (no results)"
   fi
@@ -199,7 +199,7 @@ cmd_cleanup() {
 cmd_tensorboard() {
   local port="${1:-6006}"
 
-  print_header "📊 Starting Tensorboard"
+  print_header "Starting Tensorboard"
   echo "Log directory: $BACKEND_DIR/tensorboard_logs/"
   echo "View in browser: http://localhost:$port"
   echo
@@ -234,7 +234,7 @@ Commands:
     Backtest a trained model
 
     Options:
-      model_name  ✓ REQUIRED: Name of trained model
+      model_name  REQUIRED: Name of trained model
       algo        Algorithm: ppo|dqn (default: ppo)
       timeframe   1min|5min|15min (default: 5min)
 

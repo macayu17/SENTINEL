@@ -3,7 +3,6 @@
 Prepare training data by combining individual stock CSVs into a single historical_1m.csv
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -18,7 +17,7 @@ def prepare_historical_data():
     data_dir = Path(__file__).parent.parent / "data"
     output_file = data_dir / "historical_1m.csv"
 
-    print(f"📂 Looking for stock CSV files in {data_dir}")
+    print(f"[info] Looking for stock CSV files in {data_dir}")
 
     # Get all CSV files except special ones
     csv_files = sorted([
@@ -26,10 +25,10 @@ def prepare_historical_data():
         if f.name != "historical_1m.csv"
     ])
 
-    print(f"📊 Found {len(csv_files)} stock files")
+    print(f"[info] Found {len(csv_files)} stock files")
 
     if not csv_files:
-        print("❌ No CSV files found!")
+        print("[error] No CSV files found")
         return False
 
     # Use the first stock as base (e.g., RELIANCE.csv has good data)
@@ -40,7 +39,7 @@ def prepare_historical_data():
         selected_files = csv_files[:1]  # Use first if none match
 
     selected_file = selected_files[0]
-    print(f"\n📈 Using {selected_file.name} as training data")
+    print(f"\n[info] Using {selected_file.name} as training data")
 
     try:
         # Load the selected stock
@@ -79,7 +78,7 @@ def prepare_historical_data():
         # Check if we have the required columns
         missing = [c for c in required_cols if c not in df_renamed.columns]
         if missing:
-            print(f"   ⚠️  Missing columns: {missing}")
+            print(f"   [warning] Missing columns: {missing}")
             print(f"   Available: {list(df_renamed.columns)}")
             return False
 
@@ -93,7 +92,7 @@ def prepare_historical_data():
         # Save to historical_1m.csv
         df_clean.to_csv(output_file, index=False)
 
-        print(f"\n✅ Training data prepared!")
+        print("\n[ok] Training data prepared")
         print(f"   Saved to: {output_file}")
         print(f"   Rows: {len(df_clean)}")
         print(f"   Size: {output_file.stat().st_size / 1024 / 1024:.2f} MB")
@@ -101,7 +100,7 @@ def prepare_historical_data():
         return True
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[error] {e}")
         import traceback
         traceback.print_exc()
         return False

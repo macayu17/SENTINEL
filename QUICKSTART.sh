@@ -1,81 +1,55 @@
 #!/bin/bash
-# Quick-start guide for trained model + real market integration
+# Quick-start checks for the current SENTINEL tree.
 
-set -e  # Exit on error
+set -e
 
-SENTINEL_ROOT="/Users/anindhithsankanna/CS Projects/Sentinel"
-BACKEND_DIR="$SENTINEL_ROOT/backend"
-MODELS_DIR="$BACKEND_DIR/models"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$SCRIPT_DIR/backend"
+FRONTEND_DIR="$SCRIPT_DIR/frontend"
 
 echo "=========================================="
-echo "SENTINEL Signal Model Quick Start"
+echo "SENTINEL Quick Start"
 echo "=========================================="
 echo ""
 
-# Ensure models directory exists
-mkdir -p "$MODELS_DIR"
-
-# Step 1: Run integration tests
-echo "Step 1: Running integration tests..."
-echo "------------------------------------"
-cd "$BACKEND_DIR"
-python scripts/test_integration.py || {
-    echo "❌ Integration tests failed"
-    exit 1
-}
-
-echo ""
-echo "✓ Integration tests passed"
+echo "Step 1: Backend tests"
+echo "------------------------------------------"
+cd "$SCRIPT_DIR"
+python -m pytest -q backend/tests
+echo "[ok] Backend tests passed"
 echo ""
 
-# Step 2: Train signal model
-echo "Step 2: Training signal model..."
-echo "--------------------------------"
-echo "This will:"
-echo "  - Run simulator with 10 agents for ~6.5 hours of market time"
-echo "  - Generate ~4,600 training data points"
-echo "  - Train logistic regression model"
-echo "  - Save to $MODELS_DIR/signal_model.pkl"
+echo "Step 2: Frontend lint and build"
+echo "------------------------------------------"
+cd "$FRONTEND_DIR"
+npm run lint
+npm run build
+echo "[ok] Frontend checks passed"
 echo ""
-read -p "Continue? (y/n) " -n 1 -r
-echo ""
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    python scripts/train_signal_model.py --output-path "$MODELS_DIR/signal_model.pkl" || {
-        echo "❌ Training failed"
-        exit 1
-    }
-    echo ""
-    echo "✓ Model trained and saved"
+
+echo "Step 3: Optional RL setup check"
+echo "------------------------------------------"
+cd "$SCRIPT_DIR"
+if command -v bash >/dev/null 2>&1 && { command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; }; then
+  bash "$SCRIPT_DIR/verify_rl_setup.sh" || echo "[warning] Optional RL setup check did not pass; install the reported packages before training."
 else
-    echo "Skipped model training. Using rule-based fallback."
+  echo "[skip] bash/Python is not available; run verify_rl_setup.sh from Git Bash or WSL."
 fi
 
 echo ""
 echo "=========================================="
-echo "Next Steps"
+echo "Run Locally"
 echo "=========================================="
+echo "Backend:"
+echo "  cd $BACKEND_DIR"
+echo "  python -m uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000"
 echo ""
-echo "1. Start backend with trained model (SIMULATION):"
-echo "   cd $BACKEND_DIR"
-echo "   SIMULATION_MODE=SIMULATION python -m uvicorn src.api.main:app --reload"
+echo "Frontend:"
+echo "  cd $FRONTEND_DIR"
+echo "  npm run dev"
 echo ""
-echo "2. Or start with real market data (LIVE_SHADOW):"
-echo "   cd $BACKEND_DIR"
-echo "   SIMULATION_MODE=LIVE_SHADOW python -m uvicorn src.api.main:app --reload"
+echo "Dashboard:"
+echo "  http://localhost:3000/dashboard"
 echo ""
-echo "3. In another terminal, start frontend:"
-echo "   cd $SENTINEL_ROOT/frontend"
-echo "   npm run dev"
-echo ""
-echo "4. Open browser:"
-echo "   http://localhost:3000"
-echo ""
-echo "=========================================="
-echo "Model Status"
-echo "=========================================="
-if [ -f "$MODELS_DIR/signal_model.pkl" ]; then
-    ls -lh "$MODELS_DIR/signal_model.pkl"
-    echo "✓ Model file exists"
-else
-    echo "⚠ No trained model found (using rule-based fallback)"
-fi
+echo "RL training help:"
+echo "  ./rl_train.sh help"

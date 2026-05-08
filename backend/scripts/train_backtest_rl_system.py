@@ -190,13 +190,13 @@ class RLTrainingOrchestrator:
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # Load sessions once
-        print("📊 Loading and preparing training data...")
+        print("[info] Loading and preparing training data...")
         self.sessions = prepare_training_sessions(
             csv_path=csv_path,
             apply_augmentation=augment,
             copies_per_session=augment_copies,
         )
-        print(f"✅ Loaded {len(self.sessions)} sessions")
+        print(f"[ok] Loaded {len(self.sessions)} sessions")
 
     def train_single(
         self,
@@ -207,11 +207,11 @@ class RLTrainingOrchestrator:
         resume_from: Optional[str] = None,
     ) -> TrainingResult:
         """Train a single model with automatic checkpoint resumption."""
-        print(f"\n{'─'*70}")
-        print(f"  🚀 Training: {config_name}")
+        print(f"\n{'-'*70}")
+        print(f"  Training: {config_name}")
         print(f"     Algorithm: {algorithm.upper()}")
         print(f"     Timesteps: {train_config.total_timesteps:,}")
-        print(f"{'─'*70}")
+        print(f"{'-'*70}")
 
         model_path = self.output_dir / f"{config_name}_{algorithm}"
         model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,8 +245,8 @@ class RLTrainingOrchestrator:
 
             elapsed = (datetime.now() - start_time).total_seconds()
 
-            print(f"✅ Training complete in {elapsed:.1f}s")
-            print(f"   Model saved → {model_path}")
+            print(f"[ok] Training complete in {elapsed:.1f}s")
+            print(f"   Model saved -> {model_path}")
 
             # Get setup description for metrics
             setup = describe_training_setup(env_config, train_config)
@@ -272,7 +272,7 @@ class RLTrainingOrchestrator:
             return result
 
         except Exception as e:
-            print(f"❌ Training failed: {e}")
+            print(f"[error] Training failed: {e}")
             import traceback
 
             traceback.print_exc()
@@ -287,7 +287,7 @@ class RLTrainingOrchestrator:
     ) -> Dict[str, Any]:
         """Backtest a trained model."""
         resolved_model_path = resolve_model_path(model_path)
-        print(f"\n  📈 Backtesting: {resolved_model_path.name}")
+        print(f"\n  Backtesting: {resolved_model_path.name}")
 
         # Load and resample data
         raw = load_ohlcv_csv(self.csv_path)
@@ -381,7 +381,7 @@ def run_parameter_sweep(
 ) -> List[Dict[str, Any]]:
     """
     Sweep hyperparameters and track best models.
-    Progress is checkpointed — can resume mid-sweep.
+    Progress is checkpointed - can resume mid-sweep.
     """
     print("\n" + "=" * 80)
     print("RL HYPERPARAMETER SWEEP")
@@ -393,7 +393,7 @@ def run_parameter_sweep(
     algorithms = ["ppo"]  # Can add "dqn" for comparison
 
     total_combos = len(learning_rates) * len(net_architectures) * len(algorithms)
-    print(f"\n🔄 Total combinations: {total_combos}")
+    print(f"\nTotal combinations: {total_combos}")
 
     checkpoint_mgr = CheckpointManager(checkpoint_dir)
     results_file = Path(results_dir) / f"sweep_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -405,15 +405,15 @@ def run_parameter_sweep(
     results_list = []
 
     if checkpoint_path.exists() and not force_fresh:
-        print(f"📂 Resuming from checkpoint...")
+        print("[info] Resuming from checkpoint...")
         with open(checkpoint_path) as f:
             ckpt = json.load(f)
         completed_combos = ckpt.get("completed", [])
         results_list = ckpt.get("results", [])
-        print(f"   ✅ {len(completed_combos)} combinations already done")
+        print(f"   [ok] {len(completed_combos)} combinations already done")
     elif force_fresh and checkpoint_path.exists():
         os.remove(checkpoint_path)
-        print("🔄 Checkpoint cleared")
+        print("[ok] Checkpoint cleared")
 
     orchestrator = RLTrainingOrchestrator(
         csv_path=csv_path,
@@ -424,7 +424,7 @@ def run_parameter_sweep(
         augment_copies=1,
     )
 
-    print(f"\n{'─'*80}")
+    print(f"\n{'-'*80}")
 
     try:
         combo_idx = 0
@@ -435,7 +435,7 @@ def run_parameter_sweep(
                     combo_key = f"{algo}_lr{lr}_arch{arch}"
 
                     if combo_key in completed_combos:
-                        print(f"   [{combo_idx}/{total_combos}] {combo_key} — ⏭️  SKIPPED (already done)")
+                        print(f"   [{combo_idx}/{total_combos}] {combo_key} - SKIPPED (already done)")
                         continue
 
                     print(f"   [{combo_idx}/{total_combos}] {combo_key}...")
@@ -480,7 +480,7 @@ def run_parameter_sweep(
                         results_list.append(result_entry)
                         completed_combos.append(combo_key)
 
-                        print(f"      ✅ Return: {metrics['total_return']:+.2f}% | "
+                        print(f"      [ok] Return: {metrics['total_return']:+.2f}% | "
                               f"Sharpe: {metrics['sharpe']:.2f} | Win: {metrics['win_rate']:.1f}%")
 
                         # Save checkpoint
@@ -492,24 +492,24 @@ def run_parameter_sweep(
                             )
 
                     except Exception as e:
-                        print(f"      ❌ Failed: {str(e)[:80]}")
+                        print(f"      [error] Failed: {str(e)[:80]}")
                         continue
 
     except KeyboardInterrupt:
-        print(f"\n\n⏸️  Paused. {len(completed_combos)}/{total_combos} done. Re-run to resume.\n")
+        print(f"\n\nPaused. {len(completed_combos)}/{total_combos} done. Re-run to resume.\n")
 
     # Sort results by total return
     results_list.sort(key=lambda x: x["total_return"], reverse=True)
 
     # Print summary table
     print("\n" + "=" * 100)
-    print("SWEEP RESULTS — RANKED BY TOTAL RETURN")
+    print("SWEEP RESULTS - RANKED BY TOTAL RETURN")
     print("=" * 100)
     print(
         f"{'Rank':<5} {'Algorithm':<8} {'Learning Rate':<15} {'Net Arch':<15} "
         f"{'Return %':<12} {'Win %':<10} {'Sharpe':<10} {'Max DD %':<10}"
     )
-    print("─" * 100)
+    print("-" * 100)
 
     for i, r in enumerate(results_list[:10], 1):
         print(
@@ -517,17 +517,17 @@ def run_parameter_sweep(
             f"{r['total_return']:<12.2f} {r['win_rate']:<10.1f} {r['sharpe']:<10.2f} "
             f"{abs(r['max_drawdown']):<10.2f}"
         )
-    print("─" * 100)
+    print("-" * 100)
 
     # Save results
     with open(results_file, "w") as f:
         json.dump(results_list, f, indent=2)
-    print(f"\n✅ Results saved → {results_file}")
+    print(f"\n[ok] Results saved -> {results_file}")
 
     # Cleanup checkpoint
     if checkpoint_path.exists():
         os.remove(checkpoint_path)
-        print("✅ Checkpoint cleaned up")
+        print("[ok] Checkpoint cleaned up")
 
     return results_list
 
@@ -634,7 +634,7 @@ def main() -> None:
             train_config=train_config,
         )
 
-        print(f"\n✅ Training complete!")
+        print("\n[ok] Training complete")
         print(f"   Model: {result.model_path}")
         print(f"   Time: {result.training_time:.1f}s")
 
@@ -676,7 +676,7 @@ def main() -> None:
             force_fresh=args.force_fresh,
         )
 
-        print(f"\n✅ Sweep complete! Best model:")
+        print("\n[ok] Sweep complete. Best model:")
         print(f"   {results[0]['combo']}")
         print(f"   Return: {results[0]['total_return']:.2f}%")
 

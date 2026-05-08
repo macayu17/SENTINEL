@@ -5,6 +5,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
+SETUP_OK=1
 
 # Colors
 GREEN='\033[0;32m'
@@ -13,22 +14,26 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}================================================================${NC}"
 echo -e "${BLUE}RL Training System - Setup Verification${NC}"
-echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}\n"
+echo -e "${BLUE}================================================================${NC}\n"
 
 # Check Python
-echo -n "✓ Checking Python3... "
-if command -v python3 &> /dev/null; then
-    PYTHON_VERSION=$(python3 --version 2>&1)
-    echo -e "${GREEN}$PYTHON_VERSION${NC}"
+echo -n "[check] Python... "
+if command -v python &> /dev/null; then
+    PYTHON_BIN="python"
+elif command -v python3 &> /dev/null; then
+    PYTHON_BIN="python3"
 else
     echo -e "${RED}NOT FOUND${NC}"
     exit 1
 fi
 
+PYTHON_VERSION=$("$PYTHON_BIN" --version 2>&1)
+echo -e "${GREEN}$PYTHON_VERSION${NC}"
+
 # Check required files
-echo -n "✓ Checking main training script... "
+echo -n "[check] Main training script... "
 if [ -f "$BACKEND_DIR/scripts/train_backtest_rl_system.py" ]; then
     echo -e "${GREEN}Found${NC}"
 else
@@ -36,7 +41,7 @@ else
     exit 1
 fi
 
-echo -n "✓ Checking bash wrapper... "
+echo -n "[check] Bash wrapper... "
 if [ -f "$SCRIPT_DIR/rl_train.sh" ] && [ -x "$SCRIPT_DIR/rl_train.sh" ]; then
     echo -e "${GREEN}Found (executable)${NC}"
 else
@@ -45,7 +50,7 @@ else
 fi
 
 # Check documentation
-echo -n "✓ Checking documentation... "
+echo -n "[check] Documentation... "
 DOCS=("RL_QUICK_START.md" "RL_TRAINING_GUIDE.md" "SETUP_RL_TRAINING.md")
 MISSING=()
 for doc in "${DOCS[@]}"; do
@@ -61,8 +66,8 @@ else
 fi
 
 # Check Python syntax
-echo -n "✓ Checking Python syntax... "
-if python3 -m py_compile "$BACKEND_DIR/scripts/train_backtest_rl_system.py" 2>/dev/null; then
+echo -n "[check] Python syntax... "
+if "$PYTHON_BIN" -m py_compile "$BACKEND_DIR/scripts/train_backtest_rl_system.py" 2>/dev/null; then
     echo -e "${GREEN}Valid${NC}"
 else
     echo -e "${RED}SYNTAX ERROR${NC}"
@@ -70,7 +75,7 @@ else
 fi
 
 # Check directories
-echo -n "✓ Checking/creating directories... "
+echo -n "[check] Checking/creating directories... "
 mkdir -p "$BACKEND_DIR/data"
 mkdir -p "$BACKEND_DIR/models/rl_training"
 mkdir -p "$BACKEND_DIR/checkpoints/rl_training"
@@ -79,11 +84,11 @@ mkdir -p "$BACKEND_DIR/tensorboard_logs"
 echo -e "${GREEN}OK${NC}"
 
 # Check imports
-echo -n "✓ Checking required Python packages... "
+echo -n "[check] Required Python packages... "
 PACKAGES=("stable_baselines3" "gymnasium" "pandas" "numpy")
 MISSING_PACKAGES=()
 for pkg in "${PACKAGES[@]}"; do
-    if ! python3 -c "import $pkg" 2>/dev/null; then
+    if ! "$PYTHON_BIN" -c "import $pkg" 2>/dev/null; then
         MISSING_PACKAGES+=("$pkg")
     fi
 done
@@ -92,12 +97,17 @@ if [ ${#MISSING_PACKAGES[@]} -eq 0 ]; then
     echo -e "${GREEN}All found${NC}"
 else
     echo -e "${YELLOW}Missing: ${MISSING_PACKAGES[*]}${NC}"
-    echo "Install with: pip install ${MISSING_PACKAGES[*]}"
+    echo "Install with: $PYTHON_BIN -m pip install ${MISSING_PACKAGES[*]}"
+    SETUP_OK=0
 fi
 
 # Summary
-echo -e "\n${BLUE}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}✅ Setup verification complete!${NC}\n"
+echo -e "\n${BLUE}================================================================${NC}"
+if [ "$SETUP_OK" -eq 1 ]; then
+    echo -e "${GREEN}[ok] Setup verification complete${NC}\n"
+else
+    echo -e "${YELLOW}[warning] Setup verification found missing dependencies${NC}\n"
+fi
 
 echo "Directory structure:"
 echo "  Data dir:          $BACKEND_DIR/data/"
@@ -113,10 +123,15 @@ echo "  3. Backtest:    $SCRIPT_DIR/rl_train.sh backtest test"
 echo "  4. Help:        $SCRIPT_DIR/rl_train.sh help"
 
 echo -e "\n${BLUE}Documentation:${NC}"
-echo "  • Quick Reference:  $SCRIPT_DIR/RL_QUICK_START.md"
-echo "  • Setup Guide:      $SCRIPT_DIR/SETUP_RL_TRAINING.md"
-echo "  • Full Manual:      $SCRIPT_DIR/RL_TRAINING_GUIDE.md"
-echo "  • Summary:          $SCRIPT_DIR/RL_SYSTEM_SUMMARY.md"
+echo "  - Quick Reference:  $SCRIPT_DIR/RL_QUICK_START.md"
+echo "  - Setup Guide:      $SCRIPT_DIR/SETUP_RL_TRAINING.md"
+echo "  - Full Manual:      $SCRIPT_DIR/RL_TRAINING_GUIDE.md"
+echo "  - Summary:          $SCRIPT_DIR/RL_SYSTEM_SUMMARY.md"
 
-echo -e "\n${BLUE}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}Ready to start training!${NC}\n"
+echo -e "\n${BLUE}================================================================${NC}"
+if [ "$SETUP_OK" -eq 1 ]; then
+    echo -e "${GREEN}Ready to start training!${NC}\n"
+else
+    echo -e "${YELLOW}Install the missing packages before training.${NC}\n"
+    exit 1
+fi

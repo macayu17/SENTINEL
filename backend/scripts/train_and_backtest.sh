@@ -7,15 +7,15 @@ MODEL_NAME="${1:-experiment_1}"
 TIMESTEPS="${2:-250000}"
 CSV_PATH="../data/historical_1m.csv"
 
-echo "🚀 Starting train → backtest workflow..."
+echo "Starting train -> backtest workflow..."
 echo "   Model: $MODEL_NAME"
 echo "   Timesteps: $TIMESTEPS"
 echo ""
 
 # Step 1: Train
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📚 STEP 1: Training..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------"
+echo "STEP 1: Training..."
+echo "------------------------------------------------------------------"
 python3 train_backtest_rl_system.py train \
   --csv "$CSV_PATH" \
   --name "$MODEL_NAME" \
@@ -23,18 +23,18 @@ python3 train_backtest_rl_system.py train \
   --timesteps "$TIMESTEPS"
 
 if [ $? -ne 0 ]; then
-  echo "❌ Training failed!"
+  echo "[error] Training failed"
   exit 1
 fi
 
 echo ""
-echo "✅ Training complete!"
+echo "[ok] Training complete"
 echo ""
 
 # Step 2: Find the latest checkpoint (or latest_model alias)
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🔍 STEP 2: Finding latest checkpoint..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------"
+echo "STEP 2: Finding latest checkpoint..."
+echo "------------------------------------------------------------------"
 
 LATEST_CHECKPOINT="./checkpoints/rl_training/${MODEL_NAME}_ppo/latest_model.zip"
 if [ ! -f "$LATEST_CHECKPOINT" ]; then
@@ -42,17 +42,17 @@ if [ ! -f "$LATEST_CHECKPOINT" ]; then
 fi
 
 if [ -z "$LATEST_CHECKPOINT" ]; then
-  echo "❌ No checkpoint found!"
+  echo "[error] No checkpoint found"
   exit 1
 fi
 
-echo "📁 Latest checkpoint: $LATEST_CHECKPOINT"
+echo "Latest checkpoint: $LATEST_CHECKPOINT"
 echo ""
 
 # Step 3: Backtest
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📈 STEP 3: Backtesting..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "------------------------------------------------------------------"
+echo "STEP 3: Backtesting..."
+echo "------------------------------------------------------------------"
 
 python3 train_backtest_rl_system.py backtest \
   --csv "$CSV_PATH" \
@@ -60,9 +60,9 @@ python3 train_backtest_rl_system.py backtest \
   --algo ppo
 
 if [ $? -ne 0 ]; then
-  echo "❌ Backtest failed!"
+  echo "[error] Backtest failed"
   exit 1
 fi
 
 echo ""
-echo "✅ All done! Train → Backtest workflow complete!"
+echo "[ok] All done. Train -> backtest workflow complete."
