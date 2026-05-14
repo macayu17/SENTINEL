@@ -9,6 +9,8 @@ from .kernel import EventKernel, EventType
 from .order_book import OrderBook
 from .order import Order, OrderSide, OrderType, OrderStatus
 from .trade import Trade
+from .oracle import MeanRevertingOracle, OracleConfig
+from .latency_model import LatencyModel, LatencyConfig, LatencyMode
 from ..agents.base_agent import BaseAgent
 from ..utils.logger import get_logger
 
@@ -32,6 +34,9 @@ class MarketSimulator:
         duration_seconds: int = 23_400,
         mode: str = "SANDBOX",
         order_ttl_seconds: float = 20.0,
+        oracle_config: Optional[OracleConfig] = None,
+        latency_config: Optional[LatencyConfig] = None,
+        speed_multiplier: float = 1.0,
     ) -> None:
         self.agents = sorted(agents, key=lambda agent: agent.latency_seconds)
         self.order_book = OrderBook()
@@ -39,6 +44,11 @@ class MarketSimulator:
         self.initial_price = initial_price
         self.duration_seconds = duration_seconds
         self.order_ttl_seconds = order_ttl_seconds
+        self.speed_multiplier = speed_multiplier
+
+        # Oracle & latency
+        self.oracle = MeanRevertingOracle(oracle_config)
+        self.latency_model = LatencyModel(latency_config)
 
         self.current_price: float = initial_price
         self.step_count: int = 0
@@ -273,6 +283,10 @@ class MarketSimulator:
         target_time = self.current_time + 1.0
         self.kernel.run_until(target_time)
 
+        # Advance oracle
+        if self.oracle.enabled:
+            self.oracle.advance(dt=1.0)
+
         self._ensure_liquidity_floor()
 
         if self.order_book.mid_price is not None:
@@ -281,6 +295,11 @@ class MarketSimulator:
         self._price_history.append(self.current_price)
 
         state = self.get_market_state()
+
+        # Add oracle data to state
+        if self.oracle.enabled:
+            state["oracle"] = self.oracle.get_mispricing(self.current_price)
+
         self._state_history.append(state)
         return state
 
@@ -388,3 +407,70 @@ class MarketSimulator:
         """Stop the simulation loop."""
         self.running = False
         logger.info("Simulation stopped")
+
+
+# ── Sandbox Presets ─────────────────────────────────────────────────────────
+
+def get_sandbox_presets() -> Dict:
+    """Return available sandbox configuration presets."""
+    return {
+        "minimal": {
+            "name": "Minimal", "description": "10 agents — fast iteration", "icon": "⚡",
+            "agents": {"MarketMaker": 1, "HFT": 2, "Noise": 3, "Retail": 2, "Informed": 1, "Sentiment": 1},
+            "oracle": False, "latency": "deterministic",
+        },
+        "balanced": {
+            "name": "Balanced", "description": "40 agents — realistic mix", "icon": "⚖️",
+            "agents": {"MarketMaker": 3, "HFT": 2, "Institutional": 2, "Retail": 10, "Informed": 3,
+                       "Noise": 10, "Momentum": 2, "MeanReversion": 2, "Spoofing": 1, "Sentiment": 5},
+            "oracle": False, "latency": "deterministic",
+        },
+        "institutional": {
+            "name": "Institutional", "description": "80 agents — deep market", "icon": "🏦",
+            "agents": {"MarketMaker": 5, "HFT": 4, "Institutional": 8, "Retail": 15, "Informed": 5,
+                       "Noise": 20, "Momentum": 8, "MeanReversion": 5, "Spoofing": 2, "Sentiment": 8},
+            "oracle": True, "latency": "cubic",
+        },
+        "stress_test": {
+            "name": "Stress Test", "description": "200 agents — chaos mode", "icon": "🔥",
+            "agents": {"MarketMaker": 8, "HFT": 10, "Institutional": 5, "Retail": 30, "Informed": 10,
+                       "Noise": 100, "Momentum": 12, "MeanReversion": 10, "Spoofing": 3, "Sentiment": 12},
+            "oracle": True, "latency": "cubic",
+        },
+    }
+
+
+def create_sandbox_agents(preset: str = "balanced", custom_agents: Optional[Dict] = None) -> List:
+    """Create agents from a preset name or custom dict."""
+    from ..agents.market_maker import MarketMakerAgent
+    from ..agents.hft_agent import HFTAgent
+    from ..agents.institutional import InstitutionalAgent
+    from ..agents.retail import RetailAgent
+    from ..agents.informed import InformedAgent
+    from ..agents.noise import NoiseAgent
+    from ..agents.momentum import MomentumAgent
+    from ..agents.mean_reversion import MeanReversionAgent
+    from ..agents.spoofing import SpoofingAgent
+    from ..agents.sentiment import SentimentAgent
+
+    AGENT_MAP = {
+        "MarketMaker": MarketMakerAgent, "HFT": HFTAgent, "Institutional": InstitutionalAgent,
+        "Retail": RetailAgent, "Informed": InformedAgent, "Noise": NoiseAgent,
+        "Momentum": MomentumAgent, "MeanReversion": MeanReversionAgent,
+        "Spoofing": SpoofingAgent, "Sentiment": SentimentAgent,
+    }
+
+    if custom_agents and any(v > 0 for v in custom_agents.values()):
+        agent_counts = custom_agents
+    else:
+        presets = get_sandbox_presets()
+        cfg = presets.get(preset, presets["balanced"])
+        agent_counts = cfg["agents"]
+
+    agents = []
+    for agent_type, count in agent_counts.items():
+        cls = AGENT_MAP.get(agent_type)
+        if cls and count > 0:
+            for i in range(int(count)):
+                agents.append(cls(f"{agent_type}_{i}"))
+    return agents
