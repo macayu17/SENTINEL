@@ -32,10 +32,14 @@ class AbidesSimulation:
     def set_exchange(self, exchange: ExchangeAgent) -> None:
         self.exchange = exchange
         exchange.bind(self.kernel, self)
+        for agent in self.agents.values():
+            agent.last_mid = exchange.last_price
 
     def register_agent(self, agent: Agent) -> None:
         self.agents[agent.agent_id] = agent
         agent.bind(self.kernel, self)
+        if self.exchange is not None:
+            agent.last_mid = self.exchange.last_price
 
     def initialize(self) -> None:
         if self.exchange is None:

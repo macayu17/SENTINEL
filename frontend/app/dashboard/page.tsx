@@ -14,6 +14,7 @@ import LiquidityGauge from '@/components/LiquidityGauge';
 import LargeOrderDetector from '@/components/LargeOrderDetector';
 import OrderBookHeatmap from '@/components/OrderBookHeatmap';
 import AgentMetricsPanel from '@/components/AgentMetricsPanel';
+import SandboxControlPanel from '@/components/dashboard/SandboxControlPanel';
 import { useMarketWebSocket } from '@/lib/websocket';
 import { useSimulationDashboardData } from '@/lib/mock-simulation';
 import { api } from '@/lib/api-client';
@@ -643,6 +644,10 @@ export default function DashboardPage() {
       </section>
 
       <main className="grid min-h-[calc(100vh-116px)] grid-cols-12 gap-2 p-2 pb-12">
+        <div className="col-span-12">
+          <SandboxControlPanel />
+        </div>
+
         <div className="col-span-12 xl:col-span-8">
           <PriceChart />
         </div>

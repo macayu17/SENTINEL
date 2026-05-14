@@ -47,18 +47,25 @@ export interface AgentMetric {
 }
 
 export interface MarketUpdate {
-  type: "market_update";
+  type: "market_update" | "abides_update";
   timestamp: number;
   price: number;
   spread: number;
   depth: number;
   order_book: OrderBook;
-  liquidity_prediction: LiquidityPrediction;
+  liquidity_prediction: LiquidityPrediction | null;
   large_order_detection: LargeOrderDetection | null;
   agent_metrics: Record<string, AgentMetric>;
   step: number;
   volatility: number;
   mode: "SANDBOX" | "LIVE_SHADOW";
+  engine?: "ABIDES";
+  oracle?: {
+    fundamental_value?: number;
+    observed_value?: number;
+    mispricing?: number;
+    relative_mispricing?: number;
+  } | null;
 }
 
 export interface Alert {

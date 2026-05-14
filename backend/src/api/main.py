@@ -347,7 +347,7 @@ async def create_abides_sandbox(request: AbidesSandboxCreateRequest):
         latency_config=latency_cfg,
         speed_multiplier=request.speed,
     )
-    exchange = AbidesExchangeAgent()
+    exchange = AbidesExchangeAgent(initial_price=request.initial_price)
     abides_simulator.set_exchange(exchange)
 
     for idx in range(max(0, request.market_makers)):

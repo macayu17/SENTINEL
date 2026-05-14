@@ -7,6 +7,29 @@ import { getWsBaseUrl } from '@/lib/runtime-config';
 
 const MAX_RETRIES = 5;
 
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeMarketUpdate(data: Partial<MarketUpdate>): MarketUpdate {
+  return {
+    type: data.type === 'abides_update' ? 'abides_update' : 'market_update',
+    timestamp: finiteNumber(data.timestamp, 0),
+    price: finiteNumber(data.price, 0),
+    spread: finiteNumber(data.spread, 0),
+    depth: finiteNumber(data.depth, 0),
+    order_book: data.order_book ?? { bids: [], asks: [] },
+    liquidity_prediction: data.liquidity_prediction ?? null,
+    large_order_detection: data.large_order_detection ?? null,
+    agent_metrics: data.agent_metrics ?? {},
+    step: finiteNumber(data.step, 0),
+    volatility: finiteNumber(data.volatility, 0),
+    mode: data.mode ?? 'SANDBOX',
+    engine: data.engine,
+    oracle: data.oracle,
+  };
+}
+
 export function useMarketWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
@@ -39,9 +62,9 @@ export function useMarketWebSocket() {
 
       ws.onmessage = (event) => {
         try {
-          const data: MarketUpdate = JSON.parse(event.data);
-          if (data.type === 'market_update') {
-            latestUpdateRef.current = data;
+          const data = JSON.parse(event.data) as Partial<MarketUpdate>;
+          if (data.type === 'market_update' || data.type === 'abides_update') {
+            latestUpdateRef.current = normalizeMarketUpdate(data);
             if (!flushTimerRef.current) {
               flushTimerRef.current = setTimeout(flushLatestUpdate, 250);
             }

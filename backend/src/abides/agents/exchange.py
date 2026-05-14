@@ -11,12 +11,12 @@ from ...market.trade import Trade
 
 
 class ExchangeAgent:
-    def __init__(self, exchange_id: str = "EXCHANGE") -> None:
+    def __init__(self, exchange_id: str = "EXCHANGE", initial_price: float = 100.0) -> None:
         self.exchange_id = exchange_id
         self.order_book = AbidesOrderBook()
         self.kernel = None
         self.simulation = None
-        self.last_price: float = 100.0
+        self.last_price: float = initial_price
 
     def bind(self, kernel, simulation) -> None:
         self.kernel = kernel

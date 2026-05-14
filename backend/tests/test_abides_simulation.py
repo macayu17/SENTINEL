@@ -10,12 +10,14 @@ from src.market.oracle import OracleConfig
 
 def test_abides_simulation_runs():
     sim = AbidesSimulation(oracle_config=OracleConfig(enabled=True))
-    exchange = ExchangeAgent()
+    exchange = ExchangeAgent(initial_price=125.0)
     sim.set_exchange(exchange)
 
     sim.register_agent(MarketMakerAgent("MM_1", wakeup_interval=0.5))
     sim.register_agent(NoiseAgent("NOISE_1", wakeup_interval=0.2, order_rate=1.0))
     sim.register_agent(InformedAgent("INF_1", wakeup_interval=0.6, mispricing_threshold=0.05))
+
+    assert sim.agents["MM_1"].last_mid == 125.0
 
     sim.run(duration_seconds=2.0)
 
