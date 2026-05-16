@@ -28,6 +28,7 @@ class Agent:
         self.cash: float = initial_cash
         self.last_mid: float = 100.0
         self.last_oracle: Optional[dict] = None
+        self.num_trades: int = 0
 
     def bind(self, kernel: EventKernel, simulation) -> None:
         self.kernel = kernel
@@ -54,9 +55,11 @@ class Agent:
         if self.agent_id == message.buyer_id:
             self.position += message.quantity
             self.cash -= message.price * message.quantity
+            self.num_trades += 1
         elif self.agent_id == message.seller_id:
             self.position -= message.quantity
             self.cash += message.price * message.quantity
+            self.num_trades += 1
 
     def get_metrics(self, current_price: float) -> dict:
         mark = current_price * self.position
@@ -69,5 +72,5 @@ class Agent:
             "realized_pnl": round(self.cash - self.initial_cash, 4),
             "unrealized_pnl": round(mark, 4),
             "sharpe_ratio": 0.0,
-            "num_trades": 0,
+            "num_trades": self.num_trades,
         }

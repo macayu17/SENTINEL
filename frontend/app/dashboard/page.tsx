@@ -223,7 +223,7 @@ function TerminalTradeFlowPanel({
           </div>
         ) : (
           rows.map((row) => (
-            <div key={row.time} className="space-y-1 border border-gray-900 bg-black/30 p-2">
+            <div key={row.id} className="space-y-1 border border-gray-900 bg-black/30 p-2">
               <div className="flex items-center justify-between text-[10px] tracking-[0.14em] text-gray-500">
                 <span>{row.time}</span>
                 <span>

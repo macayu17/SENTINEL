@@ -214,6 +214,7 @@ export function useSimulationDashboardData(): SimulationDashboardData {
     }));
 
     setTradeFlow((prev) => pushPoint(prev, {
+      id: `tf-${marketData?.step ?? step}-${prev.length}-${Date.now()}`,
       time: now,
       buyVolume: Math.floor(100 + Math.random() * 260),
       sellVolume: Math.floor(80 + Math.random() * 240),

@@ -101,6 +101,7 @@ class SentinelAPI {
       status: string;
       engine: 'ABIDES';
       oracle_enabled: boolean;
+      oracle_auto_enabled: boolean;
       speed: number;
       agents: number;
     }>('/api/sandbox/abides/create', {

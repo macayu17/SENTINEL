@@ -24,6 +24,7 @@ export interface PriceSpreadPoint {
 }
 
 export interface TradeFlowPoint {
+  id: string;
   time: string;
   buyVolume: number;
   sellVolume: number;

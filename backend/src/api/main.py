@@ -333,11 +333,17 @@ async def create_abides_sandbox(request: AbidesSandboxCreateRequest):
         if _sim_task:
             _sim_task.cancel()
 
+    market_maker_count = max(0, request.market_makers)
+    noise_agent_count = max(0, request.noise_agents)
+    informed_agent_count = max(0, request.informed_agents)
+    oracle_auto_enabled = not request.oracle_enabled and informed_agent_count > 0
+    abides_oracle_enabled = request.oracle_enabled or oracle_auto_enabled
+
     oracle_cfg = OracleConfig(
         r_bar=request.initial_price,
         kappa=request.oracle_kappa,
         sigma_s=request.oracle_sigma,
-        enabled=request.oracle_enabled,
+        enabled=abides_oracle_enabled,
     )
     mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
     latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
@@ -350,18 +356,19 @@ async def create_abides_sandbox(request: AbidesSandboxCreateRequest):
     exchange = AbidesExchangeAgent(initial_price=request.initial_price)
     abides_simulator.set_exchange(exchange)
 
-    for idx in range(max(0, request.market_makers)):
+    for idx in range(market_maker_count):
         abides_simulator.register_agent(AbidesMarketMakerAgent(f"AB_MM_{idx+1}", wakeup_interval=0.5))
-    for idx in range(max(0, request.noise_agents)):
+    for idx in range(noise_agent_count):
         abides_simulator.register_agent(AbidesNoiseAgent(f"AB_NOISE_{idx+1}", wakeup_interval=0.4, order_rate=0.8))
-    for idx in range(max(0, request.informed_agents)):
+    for idx in range(informed_agent_count):
         abides_simulator.register_agent(AbidesInformedAgent(f"AB_INF_{idx+1}", wakeup_interval=0.7, mispricing_threshold=0.15))
 
     _abides_task = asyncio.create_task(_run_abides_loop())
     return {
         "status": "started",
         "engine": "ABIDES",
-        "oracle_enabled": request.oracle_enabled,
+        "oracle_enabled": abides_oracle_enabled,
+        "oracle_auto_enabled": oracle_auto_enabled,
         "speed": request.speed,
         "agents": len(abides_simulator.agents),
     }

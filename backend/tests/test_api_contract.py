@@ -67,3 +67,45 @@ def test_abides_api_loop_initializes_agents_before_steps():
     finally:
         api_main.abides_simulator = None
         api_main._abides_task = None
+
+
+def test_abides_create_enables_oracle_when_informed_agents_requested():
+    if not api_main.ABIDES_AVAILABLE:
+        pytest.skip("ABIDES module is not available")
+
+    request = api_main.AbidesSandboxCreateRequest(
+        initial_price=100.0,
+        oracle_enabled=False,
+        oracle_kappa=0.05,
+        oracle_sigma=0.02,
+        latency_mode="deterministic",
+        speed=10.0,
+        market_makers=1,
+        noise_agents=1,
+        informed_agents=2,
+    )
+
+    async def create_sandbox():
+        response = await api_main.create_abides_sandbox(request)
+        if api_main.abides_simulator:
+            api_main.abides_simulator.running = False
+        if api_main._abides_task:
+            api_main._abides_task.cancel()
+            try:
+                await api_main._abides_task
+            except asyncio.CancelledError:
+                pass
+            api_main._abides_task = None
+        return response
+
+    try:
+        response = asyncio.run(create_sandbox())
+        assert response["oracle_enabled"] is True
+        assert response["oracle_auto_enabled"] is True
+        assert api_main.abides_simulator is not None
+        assert api_main.abides_simulator.oracle.enabled is True
+    finally:
+        if api_main.abides_simulator:
+            api_main.abides_simulator.running = False
+        api_main.abides_simulator = None
+        api_main._abides_task = None

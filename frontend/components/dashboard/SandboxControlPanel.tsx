@@ -274,7 +274,12 @@ export default function SandboxControlPanel() {
           noise_agents: toFiniteNumber(noiseAgents, 2, 0, 300),
           informed_agents: toFiniteNumber(informedAgents, 1, 0, 100),
         });
-        setCommandMessage(`ABIDES online / ${response.agents} agents / speed ${response.speed}x`);
+        setOracleEnabled(response.oracle_enabled);
+        setCommandMessage(
+          `ABIDES online / ${response.agents} agents / speed ${response.speed}x${
+            response.oracle_auto_enabled ? ' / oracle signal' : ''
+          }`,
+        );
       } else if (!sandboxApiAvailable) {
         const response = await api.startSimulation();
         setActiveEngine('sentinel');
