@@ -11,6 +11,7 @@ import { useMarketStore } from '@/store/market-store';
 
 type SandboxEngine = 'sentinel' | 'abides';
 type CommandState = 'idle' | 'loading' | 'success' | 'error';
+type AbidesCapability = 'available' | 'disabled' | 'unverified';
 
 const AGENT_ORDER = [
   'MarketMaker',
@@ -67,12 +68,21 @@ function commandText(
   connected: boolean,
   running: boolean,
   sandboxApiAvailable: boolean,
+  engine: SandboxEngine,
+  abidesCapability: AbidesCapability,
 ): string {
   if (state === 'loading') return 'COMMAND PENDING';
   if (state === 'error') return 'COMMAND REJECTED';
+  if (engine === 'abides' && abidesCapability !== 'disabled' && !sandboxApiAvailable) return 'ABIDES PROBE';
   if (!sandboxApiAvailable) return 'LEGACY API';
   if (running) return 'SANDBOX RUNNING';
   return connected ? 'READY' : 'BACKEND OFFLINE';
+}
+
+function abidesCapabilityText(capability: AbidesCapability): string {
+  if (capability === 'available') return 'ABIDES MODULE AVAILABLE';
+  if (capability === 'disabled') return 'ABIDES MODULE DISABLED';
+  return 'ABIDES MODULE UNVERIFIED';
 }
 
 function NumericField({
@@ -148,7 +158,7 @@ export default function SandboxControlPanel() {
   const [presets, setPresets] = useState<Record<string, SandboxPreset>>(FALLBACK_PRESETS);
   const [preset, setPreset] = useState('balanced');
   const [sandboxApiAvailable, setSandboxApiAvailable] = useState(true);
-  const [abidesAvailable, setAbidesAvailable] = useState(true);
+  const [abidesCapability, setAbidesCapability] = useState<AbidesCapability>('unverified');
   const [customAgentsEnabled, setCustomAgentsEnabled] = useState(false);
   const [agentCounts, setAgentCounts] = useState<Record<string, number>>(DEFAULT_AGENT_COUNTS);
   const [initialPrice, setInitialPrice] = useState(100);
@@ -164,6 +174,7 @@ export default function SandboxControlPanel() {
   const [commandMessage, setCommandMessage] = useState('Preset controls synced with backend.');
 
   const selectedPreset = presets[preset] ?? presets.balanced ?? FALLBACK_PRESETS.balanced;
+  const abidesAvailable = abidesCapability !== 'disabled';
   const selectedAgentCounts = customAgentsEnabled ? agentCounts : selectedPreset.agents;
   const totalAgents = useMemo(
     () => Object.values(selectedAgentCounts).reduce((sum, count) => sum + Math.max(0, count), 0),
@@ -175,29 +186,41 @@ export default function SandboxControlPanel() {
     let cancelled = false;
 
     const loadSandboxMetadata = async () => {
-      try {
-        const [nextPresets, capabilities] = await Promise.all([
-          api.getSandboxPresets(),
-          api.getSandboxCapabilities(),
-        ]);
-        if (cancelled) return;
+      const [presetsResult, capabilitiesResult] = await Promise.allSettled([
+        api.getSandboxPresets(),
+        api.getSandboxCapabilities(),
+      ]);
+      if (cancelled) return;
 
+      if (presetsResult.status === 'fulfilled') {
+        const nextPresets = presetsResult.value;
         setSandboxApiAvailable(true);
         setPresets(nextPresets);
-        setAbidesAvailable(capabilities.abides);
         const backendPreset = nextPresets[preset] ?? nextPresets.balanced;
         if (backendPreset) {
           setAgentCounts(backendPreset.agents);
           setOracleEnabled(backendPreset.oracle);
           setLatencyMode(backendPreset.latency);
         }
-      } catch {
-        if (cancelled) return;
+      } else {
         setSandboxApiAvailable(false);
-        setAbidesAvailable(false);
-        setEngine('sentinel');
-        setCommandState('idle');
-        setCommandMessage('Legacy backend detected. Launch starts the default simulation until sandbox endpoints deploy.');
+      }
+
+      if (capabilitiesResult.status === 'fulfilled') {
+        setAbidesCapability(capabilitiesResult.value.abides ? 'available' : 'disabled');
+      } else {
+        setAbidesCapability('unverified');
+      }
+
+      setCommandState('idle');
+      if (presetsResult.status === 'fulfilled' && capabilitiesResult.status === 'fulfilled') {
+        setCommandMessage('Preset controls synced with backend.');
+      } else if (capabilitiesResult.status === 'fulfilled' && capabilitiesResult.value.abides) {
+        setCommandMessage('ABIDES endpoint detected. SENTINEL preset metadata is unavailable.');
+      } else if (capabilitiesResult.status === 'fulfilled' && !capabilitiesResult.value.abides) {
+        setCommandMessage('ABIDES module is disabled on this backend.');
+      } else {
+        setCommandMessage('Sandbox metadata unavailable. ABIDES launch will probe the backend directly.');
       }
     };
 
@@ -236,16 +259,6 @@ export default function SandboxControlPanel() {
       resetSimulationData();
       await api.setSimulationMode('SANDBOX');
 
-      if (!sandboxApiAvailable) {
-        const response = await api.startSimulation();
-        setActiveEngine('sentinel');
-        setSimulationMode('SANDBOX');
-        setSimulationRunning(true);
-        setCommandState('success');
-        setCommandMessage(`Default simulation online / ${response.agents} agents.`);
-        return;
-      }
-
       if (engine === 'abides') {
         if (!abidesAvailable) {
           throw new Error('ABIDES endpoints are not deployed on this backend.');
@@ -262,6 +275,14 @@ export default function SandboxControlPanel() {
           informed_agents: toFiniteNumber(informedAgents, 1, 0, 100),
         });
         setCommandMessage(`ABIDES online / ${response.agents} agents / speed ${response.speed}x`);
+      } else if (!sandboxApiAvailable) {
+        const response = await api.startSimulation();
+        setActiveEngine('sentinel');
+        setSimulationMode('SANDBOX');
+        setSimulationRunning(true);
+        setCommandState('success');
+        setCommandMessage(`Default simulation online / ${response.agents} agents.`);
+        return;
       } else {
         const response = await api.createSandbox({
           preset,
@@ -345,7 +366,7 @@ export default function SandboxControlPanel() {
                 : 'text-gray-500'
           }`}
         >
-          {commandText(commandState, connected, simulationRunning, sandboxApiAvailable)}
+          {commandText(commandState, connected, simulationRunning, sandboxApiAvailable, engine, abidesCapability)}
         </span>
       </div>
 
@@ -357,7 +378,7 @@ export default function SandboxControlPanel() {
             </ToggleButton>
             <ToggleButton
               active={engine === 'abides'}
-              disabled={!sandboxApiAvailable || !abidesAvailable}
+              disabled={!abidesAvailable}
               onClick={() => setEngine('abides')}
             >
               ABIDES
@@ -383,8 +404,16 @@ export default function SandboxControlPanel() {
           ) : (
             <div className="border border-gray-900 bg-black/40 p-2 text-xs text-gray-400">
               <div className="text-[10px] tracking-[0.14em] text-gray-500">CAPABILITY</div>
-              <div className={abidesAvailable ? 'mt-1 text-[#00ff41]' : 'mt-1 text-[#ff0040]'}>
-                {abidesAvailable ? 'ABIDES MODULE AVAILABLE' : 'ABIDES MODULE DISABLED'}
+              <div
+                className={`mt-1 ${
+                  abidesCapability === 'disabled'
+                    ? 'text-[#ff0040]'
+                    : abidesCapability === 'available'
+                      ? 'text-[#00ff41]'
+                      : 'text-[#ffb800]'
+                }`}
+              >
+                {abidesCapabilityText(abidesCapability)}
               </div>
             </div>
           )}
@@ -533,7 +562,7 @@ export default function SandboxControlPanel() {
             onClick={launchSandbox}
             disabled={
               commandState === 'loading'
-              || (engine === 'abides' && (!sandboxApiAvailable || !abidesAvailable))
+              || (engine === 'abides' && !abidesAvailable)
             }
             className="inline-flex items-center gap-2 border border-[#00ff41] bg-[#00ff41]/10 px-3 py-1.5 text-xs font-bold tracking-[0.12em] text-[#00ff41] disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
           >

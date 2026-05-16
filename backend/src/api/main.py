@@ -578,7 +578,8 @@ async def _run_abides_loop():
     if abides_simulator is None:
         return
 
-    abides_simulator.running = True
+    if not abides_simulator.running:
+        abides_simulator.initialize()
     logger.info("ABIDES loop started")
 
     try:
