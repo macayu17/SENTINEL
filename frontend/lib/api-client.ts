@@ -35,6 +35,51 @@ export interface AbidesSandboxCreateRequest {
   informed_agents: number;
 }
 
+export interface GrowwReplayRequest {
+  groww_symbol: string;
+  exchange: string;
+  segment: string;
+  start_time: string;
+  end_time: string;
+  candle_interval: string;
+  preset?: string;
+  custom_agents?: Record<string, number> | null;
+  latency_mode?: LatencyMode;
+  speed: number;
+}
+
+export interface UpstoxReplayRequest {
+  instrument_key: string;
+  unit: string;
+  interval: string;
+  from_date?: string | null;
+  to_date: string;
+  preset?: string;
+  custom_agents?: Record<string, number> | null;
+  latency_mode?: LatencyMode;
+  speed: number;
+}
+
+export interface UpstoxLiveRequest {
+  instrument_key: string;
+  preset?: string;
+  custom_agents?: Record<string, number> | null;
+  latency_mode?: LatencyMode;
+  speed: number;
+  poll_interval_seconds: number;
+}
+
+export interface UpstoxInstrumentResult {
+  instrument_key: string;
+  trading_symbol: string;
+  name: string;
+  exchange: string;
+  segment: string;
+  instrument_type: string;
+  isin?: string | null;
+  short_name?: string | null;
+}
+
 class SentinelAPI {
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
     const url = `${getApiBaseUrl()}${path}`;
@@ -46,7 +91,14 @@ class SentinelAPI {
       },
     });
     if (!response.ok) {
-      throw new Error(`API error: ${response.status} ${response.statusText} (${url})`);
+      let detail = `${response.status} ${response.statusText}`;
+      try {
+        const payload = await response.json() as { detail?: string; error?: string };
+        detail = payload.detail ?? payload.error ?? detail;
+      } catch {
+        // keep status text fallback
+      }
+      throw new Error(`API error: ${detail}`);
     }
     return response.json();
   }
@@ -105,6 +157,136 @@ class SentinelAPI {
       speed: number;
       agents: number;
     }>('/api/sandbox/abides/create', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async fetchGrowwHistorical(config: GrowwReplayRequest) {
+    return this.request<{
+      provider: 'groww';
+      source: 'historical';
+      status: string;
+      mode: SimulationMode;
+      groww_symbol: string;
+      name: string;
+      currency: string;
+      last_close: number;
+      bars: number;
+      price_preview: number[];
+    }>('/api/live-shadow/groww/fetch', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async startGrowwReplay(config: GrowwReplayRequest) {
+    return this.request<{
+      status: string;
+      mode: 'LIVE_SHADOW';
+      provider: 'groww';
+      source: 'historical_replay';
+      groww_symbol: string;
+      initial_price: number;
+      bars: number;
+      realized_vol: number;
+      agents: number;
+      speed: number;
+    }>('/api/live-shadow/groww/replay', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async fetchUpstoxHistorical(config: UpstoxReplayRequest) {
+    return this.request<{
+      provider: 'upstox';
+      source: 'historical';
+      status: string;
+      mode: SimulationMode;
+      instrument_key: string;
+      name: string;
+      currency: string;
+      last_close: number;
+      bars: number;
+      price_preview: number[];
+    }>('/api/live-shadow/upstox/fetch', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async searchUpstoxInstruments(config: {
+    query: string;
+    exchanges?: string;
+    segments?: string;
+    page_number?: number;
+    records?: number;
+  }) {
+    const params = new URLSearchParams({
+      query: config.query,
+      exchanges: config.exchanges ?? 'NSE',
+      segments: config.segments ?? 'EQ',
+      page_number: String(config.page_number ?? 1),
+      records: String(config.records ?? 10),
+    });
+    return this.request<{
+      provider: 'upstox';
+      source: 'instrument_search';
+      status: string;
+      query: string;
+      results: UpstoxInstrumentResult[];
+    }>(`/api/live-shadow/upstox/instruments?${params.toString()}`);
+  }
+
+  async fetchUpstoxLtp(config: { instrument_key: string }) {
+    return this.request<{
+      provider: 'upstox';
+      source: 'live_ltp';
+      status: string;
+      mode: 'LIVE_SHADOW';
+      instrument_key: string;
+      last_price: number;
+      ltq?: number | null;
+      volume?: number | null;
+      previous_close?: number | null;
+    }>('/api/live-shadow/upstox/ltp', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async startUpstoxLive(config: UpstoxLiveRequest) {
+    return this.request<{
+      status: string;
+      mode: 'LIVE_SHADOW';
+      provider: 'upstox';
+      source: 'live_ltp';
+      instrument_key: string;
+      initial_price: number;
+      last_price: number;
+      poll_interval_seconds: number;
+      agents: number;
+      speed: number;
+    }>('/api/live-shadow/upstox/live', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async startUpstoxReplay(config: UpstoxReplayRequest) {
+    return this.request<{
+      status: string;
+      mode: 'LIVE_SHADOW';
+      provider: 'upstox';
+      source: 'historical_replay';
+      instrument_key: string;
+      initial_price: number;
+      bars: number;
+      realized_vol: number;
+      agents: number;
+      speed: number;
+    }>('/api/live-shadow/upstox/replay', {
       method: 'POST',
       body: JSON.stringify(config),
     });

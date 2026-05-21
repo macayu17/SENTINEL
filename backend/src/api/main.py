@@ -1,6 +1,7 @@
 """FastAPI application — REST endpoints and WebSocket for SENTINEL."""
 
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from typing import Optional
 import asyncio
 
@@ -13,6 +14,21 @@ from ..market.simulator import MarketSimulator, get_sandbox_presets, create_sand
 from ..market.oracle import OracleConfig
 from ..market.latency_model import LatencyConfig, LatencyMode
 from ..market.market_data import fetch_stock, build_oracle_path, POPULAR_TICKERS
+from ..data.groww_provider import (
+    GrowwProviderError,
+    GrowwCredentialsError,
+    GrowwSdkMissingError,
+    fetch_groww_historical_stock,
+    normalize_groww_symbol,
+)
+from ..data.upstox_provider import (
+    UpstoxProviderError,
+    UpstoxCredentialsError,
+    fetch_upstox_ltp_quote,
+    fetch_upstox_historical_stock,
+    normalize_upstox_instrument_key,
+    search_upstox_instruments,
+)
 from ..agents.market_maker import MarketMakerAgent
 from ..agents.hft_agent import HFTAgent
 from ..agents.institutional import InstitutionalAgent
@@ -453,6 +469,49 @@ class StockReplayRequest(BaseModel):
     speed: float = 1.0
 
 
+class GrowwFetchRequest(BaseModel):
+    groww_symbol: str = "NSE-RELIANCE"
+    exchange: str = "NSE"
+    segment: str = "CASH"
+    start_time: str = "2025-09-24 09:15:00"
+    end_time: str = "2025-09-24 15:30:00"
+    candle_interval: str = "MIN_30"
+
+
+class GrowwReplayRequest(GrowwFetchRequest):
+    preset: str = "balanced"
+    custom_agents: Optional[dict] = None
+    latency_mode: str = "deterministic"
+    speed: float = 1.0
+
+
+class UpstoxFetchRequest(BaseModel):
+    instrument_key: str = "NSE_EQ|INE002A01018"
+    unit: str = "minutes"
+    interval: str = "30"
+    from_date: Optional[str] = "2025-01-01"
+    to_date: str = "2025-01-01"
+
+
+class UpstoxReplayRequest(UpstoxFetchRequest):
+    preset: str = "balanced"
+    custom_agents: Optional[dict] = None
+    latency_mode: str = "deterministic"
+    speed: float = 1.0
+
+
+class UpstoxLtpRequest(BaseModel):
+    instrument_key: str = "NSE_EQ|INE002A01018"
+
+
+class UpstoxLiveRequest(UpstoxLtpRequest):
+    preset: str = "balanced"
+    custom_agents: Optional[dict] = None
+    latency_mode: str = "deterministic"
+    speed: float = 1.0
+    poll_interval_seconds: int = 5
+
+
 @app.post("/api/sandbox/stock/replay")
 async def start_stock_replay(request: StockReplayRequest):
     global simulator, _sim_task
@@ -488,6 +547,355 @@ async def start_stock_replay(request: StockReplayRequest):
             "realized_vol": info.realized_vol, "agents": len(agents)}
 
 
+@app.post("/api/live-shadow/groww/fetch")
+async def fetch_groww_data(request: GrowwFetchRequest):
+    try:
+        symbol = normalize_groww_symbol(request.exchange, request.groww_symbol)
+        info = fetch_groww_historical_stock(
+            exchange=request.exchange,
+            segment=request.segment,
+            groww_symbol=symbol,
+            start_time=request.start_time,
+            end_time=request.end_time,
+            candle_interval=request.candle_interval,
+        )
+        return {
+            "provider": "groww",
+            "source": "historical",
+            "status": "connected",
+            "mode": "LIVE_SHADOW",
+            "groww_symbol": info.ticker,
+            "name": info.name,
+            "currency": info.currency,
+            "last_close": info.last_close,
+            "period_start": info.period_start,
+            "period_end": info.period_end,
+            "bars": info.bars,
+            "realized_vol": info.realized_vol,
+            "mean_return": info.mean_return,
+            "price_preview": info.prices[-60:],
+        }
+    except (GrowwCredentialsError, GrowwSdkMissingError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GrowwProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Groww historical fetch failed: {exc}") from exc
+
+
+@app.post("/api/live-shadow/groww/replay")
+async def start_groww_replay(request: GrowwReplayRequest):
+    global simulator, _sim_task
+
+    try:
+        symbol = normalize_groww_symbol(request.exchange, request.groww_symbol)
+        info = fetch_groww_historical_stock(
+            exchange=request.exchange,
+            segment=request.segment,
+            groww_symbol=symbol,
+            start_time=request.start_time,
+            end_time=request.end_time,
+            candle_interval=request.candle_interval,
+        )
+    except (GrowwCredentialsError, GrowwSdkMissingError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GrowwProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Groww historical replay failed: {exc}") from exc
+
+    if simulator and simulator.running:
+        simulator.stop()
+        if _sim_task:
+            _sim_task.cancel()
+    _stop_abides()
+    large_order_detector.reset()
+
+    config.simulation_mode = "LIVE_SHADOW"
+    oracle_path = build_oracle_path(info, target_steps=500)
+    initial_price = float(info.prices[0])
+    oracle_cfg = OracleConfig(
+        r_bar=initial_price,
+        kappa=0.05,
+        sigma_s=max(0.001, info.realized_vol / 252),
+        enabled=True,
+        replay_path=oracle_path,
+    )
+    mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
+    latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
+    agents = create_sandbox_agents(request.preset, request.custom_agents)
+
+    simulator = MarketSimulator(
+        agents,
+        initial_price=initial_price,
+        duration_seconds=config.simulation_duration,
+        mode="LIVE_SHADOW",
+        oracle_config=oracle_cfg,
+        latency_config=latency_cfg,
+        speed_multiplier=request.speed,
+    )
+    simulator.data_source = {
+        "provider": "groww",
+        "source": "historical_replay",
+        "status": "connected",
+        "groww_symbol": info.ticker,
+        "exchange": request.exchange.upper(),
+        "segment": request.segment.upper(),
+        "candle_interval": request.candle_interval,
+        "bars": info.bars,
+        "period_start": info.period_start,
+        "period_end": info.period_end,
+    }
+    _sim_task = asyncio.create_task(_run_simulation_loop())
+    return {
+        "status": "started",
+        "mode": "LIVE_SHADOW",
+        "provider": "groww",
+        "source": "historical_replay",
+        "groww_symbol": info.ticker,
+        "initial_price": initial_price,
+        "bars": info.bars,
+        "realized_vol": info.realized_vol,
+        "agents": len(agents),
+        "speed": request.speed,
+    }
+
+
+@app.post("/api/live-shadow/upstox/fetch")
+async def fetch_upstox_data(request: UpstoxFetchRequest):
+    try:
+        instrument_key = normalize_upstox_instrument_key(request.instrument_key)
+        info = fetch_upstox_historical_stock(
+            instrument_key=instrument_key,
+            unit=request.unit,
+            interval=request.interval,
+            from_date=request.from_date,
+            to_date=request.to_date,
+        )
+        return {
+            "provider": "upstox",
+            "source": "historical",
+            "status": "connected",
+            "mode": "LIVE_SHADOW",
+            "instrument_key": info.ticker,
+            "name": info.name,
+            "currency": info.currency,
+            "last_close": info.last_close,
+            "period_start": info.period_start,
+            "period_end": info.period_end,
+            "bars": info.bars,
+            "realized_vol": info.realized_vol,
+            "mean_return": info.mean_return,
+            "price_preview": info.prices[-60:],
+        }
+    except UpstoxCredentialsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UpstoxProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upstox historical fetch failed: {exc}") from exc
+
+
+@app.post("/api/live-shadow/upstox/replay")
+async def start_upstox_replay(request: UpstoxReplayRequest):
+    global simulator, _sim_task
+
+    try:
+        instrument_key = normalize_upstox_instrument_key(request.instrument_key)
+        info = fetch_upstox_historical_stock(
+            instrument_key=instrument_key,
+            unit=request.unit,
+            interval=request.interval,
+            from_date=request.from_date,
+            to_date=request.to_date,
+        )
+    except UpstoxCredentialsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UpstoxProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upstox historical replay failed: {exc}") from exc
+
+    if simulator and simulator.running:
+        simulator.stop()
+        if _sim_task:
+            _sim_task.cancel()
+    _stop_abides()
+    large_order_detector.reset()
+
+    config.simulation_mode = "LIVE_SHADOW"
+    oracle_path = build_oracle_path(info, target_steps=500)
+    initial_price = float(info.prices[0])
+    oracle_cfg = OracleConfig(
+        r_bar=initial_price,
+        kappa=0.05,
+        sigma_s=max(0.001, info.realized_vol / 252),
+        enabled=True,
+        replay_path=oracle_path,
+    )
+    mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
+    latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
+    agents = create_sandbox_agents(request.preset, request.custom_agents)
+
+    simulator = MarketSimulator(
+        agents,
+        initial_price=initial_price,
+        duration_seconds=config.simulation_duration,
+        mode="LIVE_SHADOW",
+        oracle_config=oracle_cfg,
+        latency_config=latency_cfg,
+        speed_multiplier=request.speed,
+    )
+    simulator.data_source = {
+        "provider": "upstox",
+        "source": "historical_replay",
+        "status": "connected",
+        "instrument_key": info.ticker,
+        "unit": request.unit.lower(),
+        "interval": request.interval,
+        "bars": info.bars,
+        "period_start": info.period_start,
+        "period_end": info.period_end,
+    }
+    _sim_task = asyncio.create_task(_run_simulation_loop())
+    return {
+        "status": "started",
+        "mode": "LIVE_SHADOW",
+        "provider": "upstox",
+        "source": "historical_replay",
+        "instrument_key": info.ticker,
+        "initial_price": initial_price,
+        "bars": info.bars,
+        "realized_vol": info.realized_vol,
+        "agents": len(agents),
+        "speed": request.speed,
+    }
+
+
+@app.get("/api/live-shadow/upstox/instruments")
+async def search_upstox_instrument_data(
+    query: str,
+    exchanges: str = "NSE",
+    segments: str = "EQ",
+    page_number: int = 1,
+    records: int = 10,
+):
+    try:
+        instruments = search_upstox_instruments(
+            query=query,
+            exchanges=exchanges,
+            segments=segments,
+            page_number=page_number,
+            records=records,
+        )
+    except UpstoxCredentialsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UpstoxProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upstox instrument search failed: {exc}") from exc
+
+    return {
+        "provider": "upstox",
+        "source": "instrument_search",
+        "status": "connected",
+        "query": query,
+        "results": [asdict(instrument) for instrument in instruments],
+    }
+
+
+@app.post("/api/live-shadow/upstox/ltp")
+async def fetch_upstox_ltp_data(request: UpstoxLtpRequest):
+    try:
+        instrument_key = normalize_upstox_instrument_key(request.instrument_key)
+        quote = fetch_upstox_ltp_quote(instrument_key=instrument_key)
+    except UpstoxCredentialsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UpstoxProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upstox LTP fetch failed: {exc}") from exc
+
+    return {
+        "provider": "upstox",
+        "source": "live_ltp",
+        "status": "connected",
+        "mode": "LIVE_SHADOW",
+        **asdict(quote),
+    }
+
+
+@app.post("/api/live-shadow/upstox/live")
+async def start_upstox_live_shadow(request: UpstoxLiveRequest):
+    global simulator, _sim_task
+
+    try:
+        instrument_key = normalize_upstox_instrument_key(request.instrument_key)
+        initial_quote = fetch_upstox_ltp_quote(instrument_key=instrument_key)
+    except UpstoxCredentialsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UpstoxProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upstox live LTP start failed: {exc}") from exc
+
+    if simulator and simulator.running:
+        simulator.stop()
+        if _sim_task:
+            _sim_task.cancel()
+    _stop_abides()
+    large_order_detector.reset()
+
+    config.simulation_mode = "LIVE_SHADOW"
+    initial_price = float(initial_quote.last_price)
+    oracle_cfg = OracleConfig(r_bar=initial_price, enabled=False)
+    mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
+    latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
+    agents = create_sandbox_agents(request.preset, request.custom_agents)
+    poll_interval = min(60, max(1, int(request.poll_interval_seconds)))
+
+    simulator = MarketSimulator(
+        agents,
+        initial_price=initial_price,
+        duration_seconds=config.simulation_duration,
+        mode="LIVE_SHADOW",
+        oracle_config=oracle_cfg,
+        latency_config=latency_cfg,
+        speed_multiplier=request.speed,
+    )
+    simulator.data_source = {
+        "provider": "upstox",
+        "source": "live_ltp",
+        "status": "connected",
+        "instrument_key": initial_quote.instrument_key,
+        "last_price": initial_quote.last_price,
+        "ltq": initial_quote.ltq,
+        "volume": initial_quote.volume,
+        "previous_close": initial_quote.previous_close,
+        "poll_interval_seconds": poll_interval,
+    }
+
+    def _upstox_live_quote_provider():
+        quote = fetch_upstox_ltp_quote(instrument_key=instrument_key)
+        return asdict(quote)
+
+    simulator.set_external_price_provider(_upstox_live_quote_provider, poll_interval_steps=poll_interval)
+    _sim_task = asyncio.create_task(_run_simulation_loop())
+
+    return {
+        "status": "started",
+        "mode": "LIVE_SHADOW",
+        "provider": "upstox",
+        "source": "live_ltp",
+        "instrument_key": initial_quote.instrument_key,
+        "initial_price": initial_price,
+        "last_price": initial_quote.last_price,
+        "poll_interval_seconds": poll_interval,
+        "agents": len(agents),
+        "speed": request.speed,
+    }
+
+
 # ── WebSocket ───────────────────────────────────────────────────────────────
 
 
@@ -508,6 +916,40 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # ── Simulation Loop ─────────────────────────────────────────────────────────
+
+
+def _build_market_update(
+    *,
+    state: dict,
+    liquidity_prediction: Optional[dict],
+    large_order_detection: Optional[dict],
+    agent_metrics: dict,
+    active_simulator: MarketSimulator,
+) -> dict:
+    update = {
+        "type": "market_update",
+        "timestamp": state["current_time"],
+        "price": state["current_price"],
+        "spread": state["spread"],
+        "depth": state["total_depth"],
+        "order_book": {"bids": state["bid_levels"][:10], "asks": state["ask_levels"][:10]},
+        "liquidity_prediction": liquidity_prediction,
+        "large_order_detection": large_order_detection,
+        "agent_metrics": agent_metrics,
+        "step": state["step"],
+        "volatility": state["volatility"],
+        "mode": active_simulator.mode,
+        "speed": getattr(active_simulator, "speed_multiplier", 1.0),
+    }
+
+    if "oracle" in state:
+        update["oracle"] = state["oracle"]
+
+    data_source = getattr(active_simulator, "data_source", None)
+    if data_source:
+        update["data_source"] = data_source
+
+    return update
 
 
 async def _run_simulation_loop():
@@ -543,24 +985,13 @@ async def _run_simulation_loop():
                     "num_trades": m["num_trades"],
                 }
 
-            update = {
-                "type": "market_update",
-                "timestamp": state["current_time"],
-                "price": state["current_price"],
-                "spread": state["spread"],
-                "depth": state["total_depth"],
-                "order_book": {"bids": state["bid_levels"][:10], "asks": state["ask_levels"][:10]},
-                "liquidity_prediction": liquidity_pred,
-                "large_order_detection": large_order_det,
-                "agent_metrics": agent_metrics,
-                "step": state["step"],
-                "volatility": state["volatility"],
-                "mode": simulator.mode,
-                "speed": getattr(simulator, 'speed_multiplier', 1.0),
-            }
-
-            if "oracle" in state:
-                update["oracle"] = state["oracle"]
+            update = _build_market_update(
+                state=state,
+                liquidity_prediction=liquidity_pred,
+                large_order_detection=large_order_det,
+                agent_metrics=agent_metrics,
+                active_simulator=simulator,
+            )
 
             if manager.client_count > 0:
                 await manager.broadcast(update)

@@ -1,6 +1,6 @@
 """Market simulator — orchestrates agents, order book, and state tracking using a discrete event kernel."""
 
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 import math
 import random
 from collections import deque
@@ -54,6 +54,10 @@ class MarketSimulator:
         self.step_count: int = 0
         self.running: bool = False
         self.mode: str = mode
+        self.data_source: Optional[Dict[str, Any]] = None
+        self._external_price_provider: Optional[Callable[[], Any]] = None
+        self._external_price_poll_interval_steps: int = 1
+        self._external_price_last_poll_step: int = -1_000_000
 
         self._price_history: deque[float] = deque(maxlen=1_000)
         self._state_history: List[Dict] = []
@@ -102,22 +106,23 @@ class MarketSimulator:
 
         return self.get_market_state()
 
-    def _seed_order_book(self) -> None:
+    def _seed_order_book(self, anchor: Optional[float] = None) -> None:
         """Place initial resting orders to bootstrap the book."""
+        reference_price = self.initial_price if anchor is None else anchor
         for i in range(10):
             offset = (i + 1) * 0.01
             bid = Order(
                 agent_id="SEED",
                 side=OrderSide.BUY,
                 order_type=OrderType.LIMIT,
-                price=round(self.initial_price - offset, 2),
+                price=round(reference_price - offset, 2),
                 quantity=500,
             )
             ask = Order(
                 agent_id="SEED",
                 side=OrderSide.SELL,
                 order_type=OrderType.LIMIT,
-                price=round(self.initial_price + offset, 2),
+                price=round(reference_price + offset, 2),
                 quantity=500,
             )
             self.order_book.add_order(bid)
@@ -153,6 +158,73 @@ class MarketSimulator:
             )
             self.order_book.add_order(bid)
             self.order_book.add_order(ask)
+
+    def set_external_price_provider(
+        self,
+        provider: Callable[[], Any],
+        poll_interval_steps: int = 1,
+    ) -> None:
+        """Attach a read-only price source for LIVE_SHADOW mode."""
+        self._external_price_provider = provider
+        self._external_price_poll_interval_steps = max(1, int(poll_interval_steps))
+        self._external_price_last_poll_step = -1_000_000
+
+    def _poll_external_price(self) -> bool:
+        if self._external_price_provider is None:
+            return False
+        if (self.step_count - self._external_price_last_poll_step) < self._external_price_poll_interval_steps:
+            return False
+
+        self._external_price_last_poll_step = self.step_count
+        try:
+            quote = self._external_price_provider()
+        except Exception as exc:
+            logger.warning(f"LIVE_SHADOW price provider failed: {exc}")
+            if isinstance(self.data_source, dict):
+                self.data_source["status"] = "error"
+                self.data_source["error"] = str(exc)
+                self.data_source["last_update_step"] = self.step_count
+            return False
+
+        metadata: Dict[str, Any]
+        if isinstance(quote, dict):
+            metadata = dict(quote)
+        else:
+            metadata = {
+                key: getattr(quote, key)
+                for key in ("instrument_key", "last_price", "ltq", "volume", "previous_close")
+                if hasattr(quote, key)
+            }
+
+        price_value = (
+            metadata.get("last_price")
+            if "last_price" in metadata
+            else metadata.get("price", metadata.get("current_price"))
+        )
+        try:
+            price = float(price_value)
+        except (TypeError, ValueError):
+            if isinstance(self.data_source, dict):
+                self.data_source["status"] = "error"
+                self.data_source["error"] = "External price provider returned a non-numeric price."
+                self.data_source["last_update_step"] = self.step_count
+            return False
+        if not math.isfinite(price) or price <= 0:
+            if isinstance(self.data_source, dict):
+                self.data_source["status"] = "error"
+                self.data_source["error"] = "External price provider returned an invalid price."
+                self.data_source["last_update_step"] = self.step_count
+            return False
+
+        self.current_price = price
+        if isinstance(self.data_source, dict):
+            for key, value in metadata.items():
+                if value is not None:
+                    self.data_source[key] = value
+            self.data_source["status"] = "connected"
+            self.data_source.pop("error", None)
+            self.data_source["last_update_step"] = self.step_count
+        return True
 
     def _process_order(self, order: Order) -> None:
         """Exchange receives and processes an order."""
@@ -284,12 +356,27 @@ class MarketSimulator:
         self.kernel.run_until(target_time)
 
         # Advance oracle
+        oracle_value = None
         if self.oracle.enabled:
-            self.oracle.advance(dt=1.0)
+            oracle_value = self.oracle.advance(dt=1.0)
 
-        self._ensure_liquidity_floor()
+        replay_drives_price = self.mode == "LIVE_SHADOW" and bool(self.oracle.config.replay_path)
+        external_drives_price = False
+        if replay_drives_price and oracle_value is not None:
+            self.current_price = float(oracle_value)
+            self.order_book = OrderBook()
+            self._seed_order_book(anchor=self.current_price)
+        elif self.mode == "LIVE_SHADOW" and self._external_price_provider is not None:
+            external_drives_price = self._poll_external_price()
+            if external_drives_price:
+                self.order_book = OrderBook()
+                self._seed_order_book(anchor=self.current_price)
+            else:
+                self._ensure_liquidity_floor()
+        else:
+            self._ensure_liquidity_floor()
 
-        if self.order_book.mid_price is not None:
+        if self.order_book.mid_price is not None and not replay_drives_price and not external_drives_price:
             self.current_price = self.order_book.mid_price
 
         self._price_history.append(self.current_price)

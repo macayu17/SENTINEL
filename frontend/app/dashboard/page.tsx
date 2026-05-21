@@ -72,6 +72,23 @@ function feedStateLabel(connected: boolean, simulationRunning: boolean, activeLa
   return activeLabel;
 }
 
+function sourceBadgeLabel(
+  connected: boolean,
+  simulationMode: 'SANDBOX' | 'LIVE_SHADOW',
+  provider?: string,
+  source?: string,
+): string {
+  if (!connected) return 'SOURCE: DISCONNECTED';
+  if (provider === 'groww') {
+    return source === 'historical_replay' ? 'SOURCE: GROWW HISTORICAL' : 'SOURCE: GROWW DATA';
+  }
+  if (provider === 'upstox') {
+    if (source === 'live_ltp') return 'SOURCE: UPSTOX LIVE';
+    return source === 'historical_replay' ? 'SOURCE: UPSTOX HISTORICAL' : 'SOURCE: UPSTOX DATA';
+  }
+  return simulationMode === 'LIVE_SHADOW' ? 'SOURCE: WAITING' : 'SOURCE: SYNTHETIC';
+}
+
 function TerminalOverviewPanel({ overview }: { overview: ProjectOverview }) {
   return (
     <div className="terminal-panel h-full">
@@ -465,6 +482,19 @@ export default function DashboardPage() {
   const hasMarketSnapshot = marketData !== null;
   const midLabel = hasMarketSnapshot && midPrice != null ? `$${midPrice.toFixed(2)}` : '--';
   const depthLabel = hasMarketSnapshot && depth != null ? depth.toLocaleString() : '—';
+  const dataSource = marketData?.data_source ?? null;
+  const sourceLabel = sourceBadgeLabel(
+    connected,
+    simulationMode,
+    dataSource?.provider,
+    dataSource?.source,
+  );
+  const sourceTone =
+    dataSource?.status === 'connected'
+      ? 'border-[#00ff41] text-[#00ff41]'
+      : simulationMode === 'LIVE_SHADOW'
+        ? 'border-[#ffb800] text-[#ffb800]'
+        : 'border-gray-800 text-cyan-400';
 
   const metricCells = useMemo(
     () => [
@@ -572,6 +602,9 @@ export default function DashboardPage() {
             </span>
             <span className="border border-gray-800 px-2 py-0.5 text-[10px] tracking-[0.16em] text-cyan-400">
               {dashboard.projectOverview.currentStage.toUpperCase()}
+            </span>
+            <span className={`border px-2 py-0.5 text-[10px] tracking-[0.16em] ${sourceTone}`}>
+              {sourceLabel}
             </span>
           </div>
 

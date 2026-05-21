@@ -46,6 +46,29 @@ export interface AgentMetric {
   num_trades: number;
 }
 
+export interface MarketDataSource {
+  provider: string;
+  source: string;
+  status: "connected" | "loading" | "error" | "disconnected" | string;
+  groww_symbol?: string;
+  instrument_key?: string;
+  exchange?: string;
+  segment?: string;
+  candle_interval?: string;
+  unit?: string;
+  interval?: string;
+  bars?: number;
+  period_start?: string;
+  period_end?: string;
+  last_price?: number;
+  ltq?: number | null;
+  volume?: number | null;
+  previous_close?: number | null;
+  poll_interval_seconds?: number;
+  last_update_step?: number;
+  error?: string;
+}
+
 export interface MarketUpdate {
   type: "market_update" | "abides_update";
   timestamp: number;
@@ -60,6 +83,7 @@ export interface MarketUpdate {
   volatility: number;
   mode: "SANDBOX" | "LIVE_SHADOW";
   engine?: "ABIDES";
+  data_source?: MarketDataSource | null;
   oracle?: {
     fundamental_value?: number;
     observed_value?: number;

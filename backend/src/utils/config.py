@@ -5,11 +5,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
-
 _UTILS_DIR = Path(__file__).resolve().parent
 _BACKEND_ROOT = _UTILS_DIR.parents[1]
 _PROJECT_ROOT = _UTILS_DIR.parents[2]
+
+
+def _load_environment_files(backend_root: Path = _BACKEND_ROOT, project_root: Path = _PROJECT_ROOT) -> None:
+    """Load dotenv files from stable repo locations, independent of cwd."""
+    for env_file in (backend_root / ".env", project_root / ".env"):
+        if env_file.exists():
+            load_dotenv(env_file, override=False)
+
+
+_load_environment_files()
 
 
 def _split_csv(value: str) -> list[str]:
@@ -44,6 +52,10 @@ def _default_allowed_origins() -> list[str]:
     origins = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
     ]
 
     frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")

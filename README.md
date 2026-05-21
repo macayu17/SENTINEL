@@ -7,7 +7,7 @@ SENTINEL is a real-time market microstructure simulator with a FastAPI backend a
 ## Stack
 
 - Backend: Python 3.10, FastAPI, WebSockets
-- Frontend: Next.js 14, TypeScript, Tailwind CSS, Zustand, Recharts
+- Frontend: Next.js 15.5, TypeScript, Tailwind CSS, Zustand, Recharts
 - Simulation: Multi-agent order-book engine with market maker, HFT, institutional, retail, informed, and noise agents
 - Prediction: Liquidity shock scoring and large-order pattern detection
 - Deployment: Vercel frontend + Azure App Service backend
@@ -94,8 +94,20 @@ RL_MODEL_PATH=models/ppo_market_maker.zip
 HOST=0.0.0.0
 PORT=8000
 FRONTEND_URL=http://localhost:3000
-ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
+GROWW_API_AUTH_TOKEN=
+GROWW_API_KEY=
+GROWW_API_SECRET=
+GROWW_API_TOTP=
+UPSTOX_ACCESS_TOKEN=
+UPSTOX_ANALYTICS_TOKEN=
+UPSTOX_BASE_URL=https://api.upstox.com/v3
+UPSTOX_V2_BASE_URL=https://api.upstox.com/v2
 ```
+
+For LIVE_SHADOW replay, keep Groww and Upstox credentials only in `backend/.env`.
+Upstox historical candles, instrument search, and live LTP polling can use either a standard OAuth access token or a read-only Analytics Token:
+set `UPSTOX_ACCESS_TOKEN` or `UPSTOX_ANALYTICS_TOKEN`, then use the Upstox tab to search/select an instrument key such as `NSE_EQ|INE002A01018`.
 
 ### Frontend
 
@@ -116,6 +128,13 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000
 - `GET /api/prediction/large-order`
 - `GET /api/agents/metrics`
 - `GET /api/market/snapshot`
+- `POST /api/live-shadow/groww/fetch`
+- `POST /api/live-shadow/groww/replay`
+- `POST /api/live-shadow/upstox/fetch`
+- `POST /api/live-shadow/upstox/replay`
+- `GET /api/live-shadow/upstox/instruments`
+- `POST /api/live-shadow/upstox/ltp`
+- `POST /api/live-shadow/upstox/live`
 - `WS /ws`
 
 ## Policy Training

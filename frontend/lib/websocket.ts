@@ -26,6 +26,7 @@ function normalizeMarketUpdate(data: Partial<MarketUpdate>): MarketUpdate {
     volatility: finiteNumber(data.volatility, 0),
     mode: data.mode ?? 'SANDBOX',
     engine: data.engine,
+    data_source: data.data_source ?? null,
     oracle: data.oracle,
   };
 }
