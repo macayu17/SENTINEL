@@ -3,6 +3,7 @@
 from typing import List, Dict
 import random
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -31,6 +32,14 @@ class InformedAgent(BaseAgent):
 
         self._active_signal: str | None = None  # "buy" or "sell"
         self._signal_start_time: float = 0.0
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=max_position,
+            base_order_size=500,
+            min_order_size=25,
+            participation_rate=0.08,
+            max_active_orders=2,
+            stale_ticks=3,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         current_time = market_state.get("current_time", 0.0)
@@ -38,6 +47,8 @@ class InformedAgent(BaseAgent):
         flow = market_state.get("recent_signed_volume", 0.0)
         imbalance = market_state.get("order_book_imbalance", 0.0)
         trend = market_state.get("recent_price_change", 0.0)
+        spread = float(market_state.get("spread", 0.05) or 0.05)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         orders: List[Order] = []
 
         # Check if current signal has expired
@@ -77,13 +88,22 @@ class InformedAgent(BaseAgent):
             current_pos = abs(self.position)
 
             if current_pos < self.max_position:
-                qty = min(500, self.max_position - current_pos)
+                qty = self.risk_profile.target_size(
+                    side=side,
+                    position=self.position,
+                    available_depth=displayed_depth_for_side(market_state, side),
+                    volatility=volatility,
+                    aggression=1.3,
+                )
+                if qty <= 0:
+                    return orders
+                order_type = OrderType.MARKET if spread <= 0.05 else OrderType.LIMIT
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
                         side=side,
-                        order_type=OrderType.MARKET,
-                        price=price,
+                        order_type=order_type,
+                        price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
                         quantity=qty,
                     )
                 )

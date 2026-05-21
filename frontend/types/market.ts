@@ -55,6 +55,7 @@ export interface MarketDataSource {
   exchange?: string;
   segment?: string;
   candle_interval?: string;
+  scenario?: string;
   unit?: string;
   interval?: string;
   bars?: number;
@@ -65,6 +66,11 @@ export interface MarketDataSource {
   ltq?: number | null;
   volume?: number | null;
   previous_close?: number | null;
+  timestamp?: string | null;
+  total_buy_quantity?: number | null;
+  total_sell_quantity?: number | null;
+  depth_source?: string | null;
+  order_book?: OrderBook | null;
   poll_interval_seconds?: number;
   last_update_step?: number;
   error?: string;

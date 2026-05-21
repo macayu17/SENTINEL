@@ -3,6 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -27,9 +28,18 @@ class RetailAgent(BaseAgent):
         self.order_size = order_size
         self._price_history: deque = deque(maxlen=60)
         self._entry_price: float = 0.0
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=max(500, order_size * 10),
+            base_order_size=order_size,
+            min_order_size=max(1, order_size // 5),
+            participation_rate=0.02,
+            max_active_orders=1,
+            stale_ticks=5,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         self._price_history.append(price)
         orders: List[Order] = []
 
@@ -70,26 +80,44 @@ class RetailAgent(BaseAgent):
 
             # Bullish crossover
             if prev_ma20 <= prev_ma50 and ma20 > ma50:
+                qty = self.risk_profile.target_size(
+                    side=OrderSide.BUY,
+                    position=self.position,
+                    available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                    volatility=volatility,
+                    aggression=0.7,
+                )
+                if qty <= 0:
+                    return orders
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
                         side=OrderSide.BUY,
                         order_type=OrderType.MARKET,
                         price=price,
-                        quantity=self.order_size,
+                        quantity=qty,
                     )
                 )
                 self._entry_price = price
 
             # Bearish crossover
             elif prev_ma20 >= prev_ma50 and ma20 < ma50:
+                qty = self.risk_profile.target_size(
+                    side=OrderSide.SELL,
+                    position=self.position,
+                    available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                    volatility=volatility,
+                    aggression=0.7,
+                )
+                if qty <= 0:
+                    return orders
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
                         side=OrderSide.SELL,
                         order_type=OrderType.MARKET,
                         price=price,
-                        quantity=self.order_size,
+                        quantity=qty,
                     )
                 )
                 self._entry_price = price

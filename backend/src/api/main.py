@@ -14,16 +14,19 @@ from ..market.simulator import MarketSimulator, get_sandbox_presets, create_sand
 from ..market.oracle import OracleConfig
 from ..market.latency_model import LatencyConfig, LatencyMode
 from ..market.market_data import fetch_stock, build_oracle_path, POPULAR_TICKERS
+from ..market.scenario import get_scenario_config, list_scenarios
 from ..data.groww_provider import (
     GrowwProviderError,
     GrowwCredentialsError,
     GrowwSdkMissingError,
     fetch_groww_historical_stock,
+    fetch_groww_quote,
     normalize_groww_symbol,
 )
 from ..data.upstox_provider import (
     UpstoxProviderError,
     UpstoxCredentialsError,
+    fetch_upstox_full_quote,
     fetch_upstox_ltp_quote,
     fetch_upstox_historical_stock,
     normalize_upstox_instrument_key,
@@ -82,6 +85,7 @@ manager = ConnectionManager()
 # Simulation task handle
 _sim_task: Optional[asyncio.Task] = None
 _abides_task: Optional[asyncio.Task] = None
+_warning_timeline: list[dict] = []
 
 
 @asynccontextmanager
@@ -141,6 +145,27 @@ def _stop_abides() -> None:
         _abides_task = None
 
 
+def _depth_profile_from_stock_info(info) -> dict:
+    volumes = [float(value) for value in getattr(info, "volumes", []) if value is not None]
+    avg_volume = sum(volumes) / max(1, len(volumes)) if volumes else 50_000.0
+    level_size = max(50, min(5_000, int(avg_volume * 0.002)))
+    return {
+        "source": "ohlcv",
+        "levels": 10,
+        "level_size": level_size,
+        "tick_spacing": 0.01,
+        "spread_multiplier": 1.0,
+        "avg_volume": round(avg_volume, 2),
+        "method": "synthetic depth calibrated from OHLCV volume; not historical L2",
+    }
+
+
+def _record_warning_event(event: dict) -> None:
+    _warning_timeline.append(event)
+    if len(_warning_timeline) > 500:
+        del _warning_timeline[:-500]
+
+
 @app.post("/api/simulation/mode")
 async def set_simulation_mode(request: ModeRequest):
     if request.mode not in ["SANDBOX", "LIVE_SHADOW"]:
@@ -166,19 +191,10 @@ async def start_simulation():
     if rl_policy:
         rl_policy.reload()
 
-    # Create full agent set
+    scenario = get_scenario_config("normal")
     agents = (
         ([RLAgent("RL_MM", initial_capital=100000.0)] if rl_policy and rl_policy.ready else [])
-        + [MarketMakerAgent(f"MM_{i}") for i in range(3)]
-        + [HFTAgent(f"HFT_{i}") for i in range(2)]
-        + [InstitutionalAgent(f"INST_{i}") for i in range(2)]
-        + [RetailAgent(f"RET_{i}") for i in range(10)]
-        + [InformedAgent(f"INF_{i}") for i in range(3)]
-        + [NoiseAgent(f"NOISE_{i}") for i in range(10)]
-        + [MomentumAgent(f"MOM_{i}") for i in range(2)]
-        + [MeanReversionAgent(f"MR_{i}") for i in range(2)]
-        + [SpoofingAgent(f"SPOOF_0")]
-        + [SentimentAgent(f"SENT_{i}") for i in range(5)]
+        + create_sandbox_agents("balanced", scenario=scenario)
     )
 
     simulator = MarketSimulator(
@@ -186,6 +202,7 @@ async def start_simulation():
         initial_price=config.initial_price,
         duration_seconds=config.simulation_duration,
         mode=config.simulation_mode,
+        scenario=scenario.name,
     )
 
     # Run simulation in background task
@@ -201,7 +218,7 @@ async def start_simulation():
 
 @app.post("/api/simulation/stop")
 async def stop_simulation():
-    global simulator, _sim_task
+    global simulator, _sim_task, _warning_timeline
 
     if simulator:
         simulator.stop()
@@ -212,6 +229,7 @@ async def stop_simulation():
     _stop_abides()
 
     large_order_detector.reset()
+    _warning_timeline = []
 
     return {"status": "stopped"}
 
@@ -260,12 +278,23 @@ async def get_market_snapshot():
     }
 
 
+@app.get("/api/simulation/export")
+async def export_simulation_run():
+    active_simulator = _require_simulator()
+    return active_simulator.get_export_snapshot(_warning_timeline)
+
+
 # ── Sandbox Endpoints ──────────────────────────────────────────────────────
 
 
 @app.get("/api/sandbox/presets")
 async def list_sandbox_presets():
     return get_sandbox_presets()
+
+
+@app.get("/api/sandbox/scenarios")
+async def list_sandbox_scenarios():
+    return {"scenarios": list_scenarios()}
 
 
 @app.get("/api/sandbox/capabilities")
@@ -282,6 +311,7 @@ class SandboxCreateRequest(BaseModel):
     latency_mode: str = "deterministic"
     speed: float = 1.0
     custom_agents: Optional[dict] = None
+    scenario: str = "normal"
 
 
 class AbidesSandboxCreateRequest(BaseModel):
@@ -311,13 +341,15 @@ async def create_sandbox(request: SandboxCreateRequest):
     if rl_policy:
         rl_policy.reload()
 
-    agents = create_sandbox_agents(request.preset, request.custom_agents)
+    scenario = get_scenario_config(request.scenario)
+    agents = create_sandbox_agents(request.preset, request.custom_agents, scenario=scenario)
     if rl_policy and rl_policy.ready:
         agents.append(RLAgent("RL_MM", initial_capital=100000.0))
 
     oracle_cfg = OracleConfig(
         r_bar=request.initial_price, kappa=request.oracle_kappa,
-        sigma_s=request.oracle_sigma, enabled=request.oracle_enabled,
+        sigma_s=request.oracle_sigma * scenario.oracle_sigma_multiplier,
+        enabled=request.oracle_enabled,
     )
     mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
     latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
@@ -326,10 +358,12 @@ async def create_sandbox(request: SandboxCreateRequest):
         agents, initial_price=request.initial_price,
         duration_seconds=config.simulation_duration, mode=config.simulation_mode,
         oracle_config=oracle_cfg, latency_config=latency_cfg, speed_multiplier=request.speed,
+        scenario=scenario.name,
     )
     _sim_task = asyncio.create_task(_run_simulation_loop())
     return {"status": "started", "preset": request.preset, "agents": len(agents),
-            "oracle_enabled": request.oracle_enabled, "speed": request.speed}
+            "oracle_enabled": request.oracle_enabled, "speed": request.speed,
+            "scenario": scenario.name}
 
 
 @app.post("/api/sandbox/abides/create")
@@ -467,6 +501,7 @@ class StockReplayRequest(BaseModel):
     custom_agents: Optional[dict] = None
     latency_mode: str = "deterministic"
     speed: float = 1.0
+    scenario: str = "normal"
 
 
 class GrowwFetchRequest(BaseModel):
@@ -483,6 +518,22 @@ class GrowwReplayRequest(GrowwFetchRequest):
     custom_agents: Optional[dict] = None
     latency_mode: str = "deterministic"
     speed: float = 1.0
+    scenario: str = "normal"
+
+
+class GrowwQuoteRequest(BaseModel):
+    groww_symbol: str = "NSE-RELIANCE"
+    exchange: str = "NSE"
+    segment: str = "CASH"
+
+
+class GrowwLiveRequest(GrowwQuoteRequest):
+    preset: str = "balanced"
+    custom_agents: Optional[dict] = None
+    latency_mode: str = "deterministic"
+    speed: float = 1.0
+    poll_interval_seconds: int = 5
+    scenario: str = "normal"
 
 
 class UpstoxFetchRequest(BaseModel):
@@ -498,6 +549,7 @@ class UpstoxReplayRequest(UpstoxFetchRequest):
     custom_agents: Optional[dict] = None
     latency_mode: str = "deterministic"
     speed: float = 1.0
+    scenario: str = "normal"
 
 
 class UpstoxLtpRequest(BaseModel):
@@ -510,6 +562,7 @@ class UpstoxLiveRequest(UpstoxLtpRequest):
     latency_mode: str = "deterministic"
     speed: float = 1.0
     poll_interval_seconds: int = 5
+    scenario: str = "normal"
 
 
 @app.post("/api/sandbox/stock/replay")
@@ -529,22 +582,25 @@ async def start_stock_replay(request: StockReplayRequest):
 
     oracle_path = build_oracle_path(info, target_steps=500)
     initial_price = float(info.prices[0])
+    scenario = get_scenario_config(request.scenario)
+    depth_profile = _depth_profile_from_stock_info(info)
     oracle_cfg = OracleConfig(r_bar=initial_price, kappa=0.05,
-                              sigma_s=max(0.001, info.realized_vol / 252),
+                              sigma_s=max(0.001, info.realized_vol / 252) * scenario.oracle_sigma_multiplier,
                               enabled=True, replay_path=oracle_path)
     mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
     latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
-    agents = create_sandbox_agents(request.preset, request.custom_agents)
+    agents = create_sandbox_agents(request.preset, request.custom_agents, scenario=scenario)
 
     simulator = MarketSimulator(
         agents, initial_price=initial_price, duration_seconds=config.simulation_duration,
         mode=config.simulation_mode, oracle_config=oracle_cfg, latency_config=latency_cfg,
-        speed_multiplier=request.speed,
+        speed_multiplier=request.speed, scenario=scenario.name, depth_profile=depth_profile,
     )
     _sim_task = asyncio.create_task(_run_simulation_loop())
     return {"status": "started", "ticker": info.ticker, "name": info.name,
             "initial_price": initial_price, "bars": info.bars,
-            "realized_vol": info.realized_vol, "agents": len(agents)}
+            "realized_vol": info.realized_vol, "agents": len(agents),
+            "scenario": scenario.name}
 
 
 @app.post("/api/live-shadow/groww/fetch")
@@ -612,18 +668,20 @@ async def start_groww_replay(request: GrowwReplayRequest):
     large_order_detector.reset()
 
     config.simulation_mode = "LIVE_SHADOW"
+    scenario = get_scenario_config(request.scenario)
+    depth_profile = _depth_profile_from_stock_info(info)
     oracle_path = build_oracle_path(info, target_steps=500)
     initial_price = float(info.prices[0])
     oracle_cfg = OracleConfig(
         r_bar=initial_price,
         kappa=0.05,
-        sigma_s=max(0.001, info.realized_vol / 252),
+        sigma_s=max(0.001, info.realized_vol / 252) * scenario.oracle_sigma_multiplier,
         enabled=True,
         replay_path=oracle_path,
     )
     mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
     latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
-    agents = create_sandbox_agents(request.preset, request.custom_agents)
+    agents = create_sandbox_agents(request.preset, request.custom_agents, scenario=scenario)
 
     simulator = MarketSimulator(
         agents,
@@ -633,6 +691,8 @@ async def start_groww_replay(request: GrowwReplayRequest):
         oracle_config=oracle_cfg,
         latency_config=latency_cfg,
         speed_multiplier=request.speed,
+        scenario=scenario.name,
+        depth_profile=depth_profile,
     )
     replay_steps = len(oracle_path)
     simulator.data_source = {
@@ -643,6 +703,9 @@ async def start_groww_replay(request: GrowwReplayRequest):
         "exchange": request.exchange.upper(),
         "segment": request.segment.upper(),
         "candle_interval": request.candle_interval,
+        "depth_source": "calibrated_from_ohlcv",
+        "depth_model": depth_profile,
+        "scenario": scenario.name,
         "bars": info.bars,
         "replay_steps": replay_steps,
         "period_start": info.period_start,
@@ -661,6 +724,112 @@ async def start_groww_replay(request: GrowwReplayRequest):
         "realized_vol": info.realized_vol,
         "agents": len(agents),
         "speed": request.speed,
+        "scenario": scenario.name,
+    }
+
+
+@app.post("/api/live-shadow/groww/quote")
+async def fetch_groww_quote_data(request: GrowwQuoteRequest):
+    try:
+        symbol = normalize_groww_symbol(request.exchange, request.groww_symbol)
+        quote = fetch_groww_quote(
+            exchange=request.exchange,
+            segment=request.segment,
+            groww_symbol=symbol,
+        )
+    except (GrowwCredentialsError, GrowwSdkMissingError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GrowwProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Groww live quote fetch failed: {exc}") from exc
+
+    return {
+        "provider": "groww",
+        "source": "live_depth",
+        "status": "connected",
+        "mode": "LIVE_SHADOW",
+        **asdict(quote),
+    }
+
+
+@app.post("/api/live-shadow/groww/live")
+async def start_groww_live_shadow(request: GrowwLiveRequest):
+    global simulator, _sim_task
+
+    try:
+        symbol = normalize_groww_symbol(request.exchange, request.groww_symbol)
+        initial_quote = fetch_groww_quote(
+            exchange=request.exchange,
+            segment=request.segment,
+            groww_symbol=symbol,
+        )
+    except (GrowwCredentialsError, GrowwSdkMissingError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GrowwProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Groww live quote start failed: {exc}") from exc
+
+    if simulator and simulator.running:
+        simulator.stop()
+        if _sim_task:
+            _sim_task.cancel()
+    _stop_abides()
+    large_order_detector.reset()
+
+    config.simulation_mode = "LIVE_SHADOW"
+    initial_price = float(initial_quote.last_price)
+    scenario = get_scenario_config(request.scenario)
+    oracle_cfg = OracleConfig(r_bar=initial_price, enabled=False)
+    mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
+    latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
+    agents = create_sandbox_agents(request.preset, request.custom_agents, scenario=scenario)
+    poll_interval = min(60, max(1, int(request.poll_interval_seconds)))
+
+    simulator = MarketSimulator(
+        agents,
+        initial_price=initial_price,
+        duration_seconds=config.simulation_duration,
+        mode="LIVE_SHADOW",
+        oracle_config=oracle_cfg,
+        latency_config=latency_cfg,
+        speed_multiplier=request.speed,
+        scenario=scenario.name,
+    )
+    simulator.data_source = {
+        "provider": "groww",
+        "source": "live_depth",
+        "status": "connected",
+        "poll_interval_seconds": poll_interval,
+        "scenario": scenario.name,
+        **asdict(initial_quote),
+    }
+
+    def _groww_live_quote_provider():
+        quote = fetch_groww_quote(
+            exchange=request.exchange,
+            segment=request.segment,
+            groww_symbol=symbol,
+        )
+        return asdict(quote)
+
+    simulator.set_external_price_provider(_groww_live_quote_provider, poll_interval_steps=poll_interval)
+    _sim_task = asyncio.create_task(_run_simulation_loop())
+
+    return {
+        "status": "started",
+        "mode": "LIVE_SHADOW",
+        "provider": "groww",
+        "source": "live_depth",
+        "groww_symbol": initial_quote.groww_symbol,
+        "initial_price": initial_price,
+        "last_price": initial_quote.last_price,
+        "depth_source": initial_quote.depth_source or "synthetic_fallback",
+        "poll_interval_seconds": poll_interval,
+        "agents": len(agents),
+        "speed": request.speed,
+        "scenario": scenario.name,
     }
 
 
@@ -727,18 +896,20 @@ async def start_upstox_replay(request: UpstoxReplayRequest):
     large_order_detector.reset()
 
     config.simulation_mode = "LIVE_SHADOW"
+    scenario = get_scenario_config(request.scenario)
+    depth_profile = _depth_profile_from_stock_info(info)
     oracle_path = build_oracle_path(info, target_steps=500)
     initial_price = float(info.prices[0])
     oracle_cfg = OracleConfig(
         r_bar=initial_price,
         kappa=0.05,
-        sigma_s=max(0.001, info.realized_vol / 252),
+        sigma_s=max(0.001, info.realized_vol / 252) * scenario.oracle_sigma_multiplier,
         enabled=True,
         replay_path=oracle_path,
     )
     mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
     latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
-    agents = create_sandbox_agents(request.preset, request.custom_agents)
+    agents = create_sandbox_agents(request.preset, request.custom_agents, scenario=scenario)
 
     simulator = MarketSimulator(
         agents,
@@ -748,6 +919,8 @@ async def start_upstox_replay(request: UpstoxReplayRequest):
         oracle_config=oracle_cfg,
         latency_config=latency_cfg,
         speed_multiplier=request.speed,
+        scenario=scenario.name,
+        depth_profile=depth_profile,
     )
     replay_steps = len(oracle_path)
     simulator.data_source = {
@@ -757,6 +930,9 @@ async def start_upstox_replay(request: UpstoxReplayRequest):
         "instrument_key": info.ticker,
         "unit": request.unit.lower(),
         "interval": request.interval,
+        "depth_source": "calibrated_from_ohlcv",
+        "depth_model": depth_profile,
+        "scenario": scenario.name,
         "bars": info.bars,
         "replay_steps": replay_steps,
         "period_start": info.period_start,
@@ -775,6 +951,7 @@ async def start_upstox_replay(request: UpstoxReplayRequest):
         "realized_vol": info.realized_vol,
         "agents": len(agents),
         "speed": request.speed,
+        "scenario": scenario.name,
     }
 
 
@@ -837,13 +1014,13 @@ async def start_upstox_live_shadow(request: UpstoxLiveRequest):
 
     try:
         instrument_key = normalize_upstox_instrument_key(request.instrument_key)
-        initial_quote = fetch_upstox_ltp_quote(instrument_key=instrument_key)
+        initial_quote = fetch_upstox_full_quote(instrument_key=instrument_key)
     except UpstoxCredentialsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except UpstoxProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Upstox live LTP start failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"Upstox live depth start failed: {exc}") from exc
 
     if simulator and simulator.running:
         simulator.stop()
@@ -854,10 +1031,11 @@ async def start_upstox_live_shadow(request: UpstoxLiveRequest):
 
     config.simulation_mode = "LIVE_SHADOW"
     initial_price = float(initial_quote.last_price)
+    scenario = get_scenario_config(request.scenario)
     oracle_cfg = OracleConfig(r_bar=initial_price, enabled=False)
     mode_map = {"zero": LatencyMode.ZERO, "deterministic": LatencyMode.DETERMINISTIC, "cubic": LatencyMode.CUBIC}
     latency_cfg = LatencyConfig(mode=mode_map.get(request.latency_mode, LatencyMode.DETERMINISTIC))
-    agents = create_sandbox_agents(request.preset, request.custom_agents)
+    agents = create_sandbox_agents(request.preset, request.custom_agents, scenario=scenario)
     poll_interval = min(60, max(1, int(request.poll_interval_seconds)))
 
     simulator = MarketSimulator(
@@ -868,21 +1046,19 @@ async def start_upstox_live_shadow(request: UpstoxLiveRequest):
         oracle_config=oracle_cfg,
         latency_config=latency_cfg,
         speed_multiplier=request.speed,
+        scenario=scenario.name,
     )
     simulator.data_source = {
         "provider": "upstox",
-        "source": "live_ltp",
+        "source": "live_depth",
         "status": "connected",
-        "instrument_key": initial_quote.instrument_key,
-        "last_price": initial_quote.last_price,
-        "ltq": initial_quote.ltq,
-        "volume": initial_quote.volume,
-        "previous_close": initial_quote.previous_close,
         "poll_interval_seconds": poll_interval,
+        "scenario": scenario.name,
+        **asdict(initial_quote),
     }
 
     def _upstox_live_quote_provider():
-        quote = fetch_upstox_ltp_quote(instrument_key=instrument_key)
+        quote = fetch_upstox_full_quote(instrument_key=instrument_key)
         return asdict(quote)
 
     simulator.set_external_price_provider(_upstox_live_quote_provider, poll_interval_steps=poll_interval)
@@ -892,13 +1068,15 @@ async def start_upstox_live_shadow(request: UpstoxLiveRequest):
         "status": "started",
         "mode": "LIVE_SHADOW",
         "provider": "upstox",
-        "source": "live_ltp",
+        "source": "live_depth",
         "instrument_key": initial_quote.instrument_key,
         "initial_price": initial_price,
         "last_price": initial_quote.last_price,
+        "depth_source": initial_quote.depth_source or "synthetic_fallback",
         "poll_interval_seconds": poll_interval,
         "agents": len(agents),
         "speed": request.speed,
+        "scenario": scenario.name,
     }
 
 
@@ -980,6 +1158,25 @@ async def _run_simulation_loop():
 
             liquidity_pred = liquidity_predictor.predict(state)
             large_order_det = large_order_detector.detect(state)
+            if liquidity_pred and liquidity_pred.get("warning_level") not in {None, "safe"}:
+                _record_warning_event({
+                    "timestamp": state.get("current_time", 0.0),
+                    "detector": "liquidity_shock",
+                    "warning_level": liquidity_pred.get("warning_level"),
+                    "probability": liquidity_pred.get("probability"),
+                    "health_score": liquidity_pred.get("health_score"),
+                    "scenario": state.get("scenario", {}).get("name"),
+                })
+            if large_order_det:
+                _record_warning_event({
+                    "timestamp": state.get("current_time", 0.0),
+                    "detector": "large_order",
+                    "pattern": large_order_det.get("pattern"),
+                    "side": large_order_det.get("side"),
+                    "confidence": large_order_det.get("confidence"),
+                    "estimated_size": large_order_det.get("estimated_size"),
+                    "scenario": state.get("scenario", {}).get("name"),
+                })
 
             agent_metrics = {}
             for agent in simulator.agents:

@@ -87,14 +87,18 @@ function sourceBadgeLabel(
   simulationMode: 'SANDBOX' | 'LIVE_SHADOW',
   provider?: string,
   source?: string,
+  depthSource?: string | null,
 ): string {
   if (!connected) return 'SOURCE: DISCONNECTED';
+  const liveDepthLabel = depthSource === 'provider_live' ? 'LIVE BOOK' : 'LIVE QUOTE';
+  const historicalDepthLabel = depthSource === 'calibrated_from_ohlcv' ? 'SYNTH DEPTH' : 'HISTORICAL';
   if (provider === 'groww') {
-    return source === 'historical_replay' ? 'SOURCE: GROWW HISTORICAL' : 'SOURCE: GROWW DATA';
+    if (source === 'live_depth') return `SOURCE: GROWW ${liveDepthLabel}`;
+    return source === 'historical_replay' ? `SOURCE: GROWW ${historicalDepthLabel}` : 'SOURCE: GROWW DATA';
   }
   if (provider === 'upstox') {
-    if (source === 'live_ltp') return 'SOURCE: UPSTOX LIVE';
-    return source === 'historical_replay' ? 'SOURCE: UPSTOX HISTORICAL' : 'SOURCE: UPSTOX DATA';
+    if (source === 'live_depth' || source === 'live_ltp') return `SOURCE: UPSTOX ${liveDepthLabel}`;
+    return source === 'historical_replay' ? `SOURCE: UPSTOX ${historicalDepthLabel}` : 'SOURCE: UPSTOX DATA';
   }
   return simulationMode === 'LIVE_SHADOW' ? 'SOURCE: WAITING' : 'SOURCE: SYNTHETIC';
 }
@@ -498,6 +502,7 @@ export default function DashboardPage() {
     simulationMode,
     dataSource?.provider,
     dataSource?.source,
+    dataSource?.depth_source,
   );
   const sourceTone =
     dataSource?.status === 'connected'

@@ -3,6 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -30,9 +31,18 @@ class MomentumAgent(BaseAgent):
         self._price_history: deque = deque(maxlen=channel_length + 1)
         self._peak_price: float = 0.0  # tracks high-water mark for trailing stop
         self._trough_price: float = float("inf")  # tracks low-water mark for short trailing stop
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=position_limit,
+            base_order_size=order_size,
+            min_order_size=max(10, order_size // 10),
+            participation_rate=0.05,
+            max_active_orders=2,
+            stale_ticks=3,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         self._price_history.append(price)
         orders: List[Order] = []
 
@@ -86,7 +96,15 @@ class MomentumAgent(BaseAgent):
         if self.position == 0:
             # Breakout above channel high → go long
             if price > channel_high:
-                qty = min(self.order_size, self.position_limit)
+                qty = self.risk_profile.target_size(
+                    side=OrderSide.BUY,
+                    position=self.position,
+                    available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                    volatility=volatility,
+                    aggression=1.2,
+                )
+                if qty <= 0:
+                    return orders
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
@@ -100,7 +118,15 @@ class MomentumAgent(BaseAgent):
 
             # Breakout below channel low → go short
             elif price < channel_low:
-                qty = min(self.order_size, self.position_limit)
+                qty = self.risk_profile.target_size(
+                    side=OrderSide.SELL,
+                    position=self.position,
+                    available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                    volatility=volatility,
+                    aggression=1.2,
+                )
+                if qty <= 0:
+                    return orders
                 orders.append(
                     Order(
                         agent_id=self.agent_id,

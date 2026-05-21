@@ -14,8 +14,10 @@ from backend.src.data.groww_provider import (
     GrowwCredentialsError,
     GrowwHistoricalProvider,
     _resolve_interval_constant,
+    fetch_groww_quote,
     groww_candles_to_stock_info,
     normalize_groww_candles,
+    normalize_groww_quote,
 )
 
 
@@ -101,3 +103,83 @@ def test_groww_interval_aliases_match_sdk_constants():
     assert _resolve_interval_constant(client, "DAY_1") == "1day"
     assert _resolve_interval_constant(client, "WEEK_1") == "1week"
     assert _resolve_interval_constant(client, "MONTH_1") == "1month"
+
+
+def test_groww_quote_normalizes_live_depth_payload():
+    payload = {
+        "last_price": 149.5,
+        "last_trade_quantity": 500,
+        "volume": 10000,
+        "ohlc": {"close": 149.5},
+        "total_buy_quantity": 5000,
+        "total_sell_quantity": 4000,
+        "depth": {
+            "buy": [
+                {"price": 149.4, "quantity": 1000},
+                {"price": 149.35, "quantity": 700},
+            ],
+            "sell": [
+                {"price": 149.6, "quantity": 900},
+                {"price": 149.65, "quantity": 600},
+            ],
+        },
+    }
+
+    quote = normalize_groww_quote(
+        payload,
+        exchange="NSE",
+        segment="CASH",
+        groww_symbol="RELIANCE",
+    )
+
+    assert quote.groww_symbol == "NSE-RELIANCE"
+    assert quote.last_price == 149.5
+    assert quote.ltq == 500
+    assert quote.total_buy_quantity == 5000
+    assert quote.total_sell_quantity == 4000
+    assert quote.depth_source == "provider_live"
+    assert quote.order_book == {
+        "bids": [
+            {"price": 149.4, "size": 1000},
+            {"price": 149.35, "size": 700},
+        ],
+        "asks": [
+            {"price": 149.6, "size": 900},
+            {"price": 149.65, "size": 600},
+        ],
+    }
+
+
+def test_groww_provider_fetches_live_quote_with_trading_symbol():
+    class FakeGrowwClient:
+        EXCHANGE_NSE = "NSE"
+        SEGMENT_CASH = "CASH"
+
+        def __init__(self):
+            self.calls = []
+
+        def get_quote(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "last_price": 149.5,
+                "depth": {
+                    "buy": [{"price": 149.4, "quantity": 1000}],
+                    "sell": [{"price": 149.6, "quantity": 900}],
+                },
+            }
+
+    client = FakeGrowwClient()
+    provider = GrowwHistoricalProvider(client=client)
+
+    quote = fetch_groww_quote(
+        exchange="NSE",
+        segment="CASH",
+        groww_symbol="NSE-RELIANCE",
+        provider=provider,
+    )
+
+    assert quote.last_price == 149.5
+    assert quote.order_book["asks"][0]["price"] == 149.6
+    assert client.calls == [
+        {"exchange": "NSE", "segment": "CASH", "trading_symbol": "RELIANCE"}
+    ]

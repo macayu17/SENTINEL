@@ -3,6 +3,7 @@
 from typing import List, Dict
 import random
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -37,21 +38,43 @@ class LiquidityTraderAgent(BaseAgent):
 
         self._active_side: OrderSide | None = None
         self._remaining_parent_qty: int = 0
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=max_parent_qty,
+            base_order_size=max_child_qty,
+            min_order_size=min_child_qty,
+            participation_rate=0.12,
+            max_active_orders=2,
+            stale_ticks=4,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         orders: List[Order] = []
         mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
 
         if self._remaining_parent_qty <= 0:
             if random.random() < self.start_probability:
                 self._active_side = random.choice([OrderSide.BUY, OrderSide.SELL])
                 self._remaining_parent_qty = random.randint(self.min_parent_qty, self.max_parent_qty)
             return orders
+        if self._active_side is None:
+            self._remaining_parent_qty = 0
+            return orders
 
+        depth_limited_qty = self.risk_profile.target_size(
+            side=self._active_side,
+            position=self.position,
+            available_depth=displayed_depth_for_side(market_state, self._active_side),
+            volatility=volatility,
+            aggression=1.1,
+        )
         child_qty = min(
             self._remaining_parent_qty,
             random.randint(self.min_child_qty, self.max_child_qty),
+            depth_limited_qty,
         )
+        if child_qty <= 0:
+            return orders
         self._remaining_parent_qty -= child_qty
 
         # More aggressive when spread is tight, otherwise lean to passive near-touch limits.
@@ -69,8 +92,7 @@ class LiquidityTraderAgent(BaseAgent):
                 )
             )
         else:
-            tick = 0.01
-            px = mid - tick if self._active_side == OrderSide.BUY else mid + tick
+            px = near_touch_price(mid, self._active_side, spread)
             orders.append(
                 Order(
                     agent_id=self.agent_id,

@@ -3,6 +3,7 @@
 from typing import List, Dict, Optional
 import random
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -55,22 +56,38 @@ class SpoofingAgent(BaseAgent):
         self._cooldown_target: int = 0
         self._spoof_order_id: Optional[str] = None
         self._pending_cancellations: List[str] = []
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=position_limit,
+            base_order_size=real_order_size,
+            min_order_size=max(10, real_order_size // 10),
+            participation_rate=0.06,
+            max_active_orders=1,
+            stale_ticks=1,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         orders: List[Order] = []
         self._steps_in_state += 1
 
         # ── Flatten if over position limit ──────────────────────────────
         if abs(self.position) >= self.position_limit:
             side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
+            qty = self.risk_profile.target_size(
+                side=side,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, side),
+                volatility=volatility,
+                aggression=1.5,
+            )
             orders.append(
                 Order(
                     agent_id=self.agent_id,
                     side=side,
                     order_type=OrderType.MARKET,
                     price=price,
-                    quantity=min(self.real_order_size, abs(self.position)),
+                    quantity=max(1, min(abs(self.position), qty or self.real_order_size)),
                 )
             )
             return orders
@@ -115,13 +132,22 @@ class SpoofingAgent(BaseAgent):
 
             # Trade in the OPPOSITE direction of the spoof
             real_side = OrderSide.SELL if self._spoof_side == OrderSide.BUY else OrderSide.BUY
+            real_size = self.risk_profile.target_size(
+                side=real_side,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, real_side),
+                volatility=volatility,
+                aggression=1.2,
+            )
+            if real_size <= 0:
+                return orders
             orders.append(
                 Order(
                     agent_id=self.agent_id,
                     side=real_side,
                     order_type=OrderType.MARKET,
                     price=price,
-                    quantity=self.real_order_size,
+                    quantity=real_size,
                 )
             )
             # Enter cooldown

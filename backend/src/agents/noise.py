@@ -3,6 +3,7 @@
 from typing import List, Dict
 import random
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -25,6 +26,14 @@ class NoiseAgent(BaseAgent):
         self.order_rate = order_rate
         self.min_size = min_size
         self.max_size = max_size
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=max(1_000, max_size * 10),
+            base_order_size=max_size,
+            min_order_size=min_size,
+            participation_rate=0.03,
+            max_active_orders=2,
+            stale_ticks=5,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
@@ -34,7 +43,17 @@ class NoiseAgent(BaseAgent):
             return orders
 
         side = random.choice([OrderSide.BUY, OrderSide.SELL])
-        size = random.randint(self.min_size, self.max_size)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
+        max_child = self.risk_profile.target_size(
+            side=side,
+            position=self.position,
+            available_depth=displayed_depth_for_side(market_state, side),
+            volatility=volatility,
+            aggression=random.uniform(0.4, 1.0),
+        )
+        if max_child <= 0:
+            return orders
+        size = min(random.randint(self.min_size, self.max_size), max_child)
 
         # 50% market, 50% limit
         if random.random() < 0.5:

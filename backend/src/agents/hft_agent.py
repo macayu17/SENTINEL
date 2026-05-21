@@ -3,6 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -28,11 +29,20 @@ class HFTAgent(BaseAgent):
         self.z_threshold = z_threshold
         self.momentum_threshold = momentum_threshold
         self._price_history: deque = deque(maxlen=lookback)
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=position_limit,
+            base_order_size=120,
+            min_order_size=10,
+            participation_rate=0.04,
+            max_active_orders=3,
+            stale_ticks=1,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
         imbalance = market_state.get("order_book_imbalance", 0.0)
         spread = market_state.get("spread", 0.05)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         self._price_history.append(price)
         orders: List[Order] = []
 
@@ -54,7 +64,13 @@ class HFTAgent(BaseAgent):
 
         # Mean reversion signal
         if z_score > self.z_threshold and self.position > -self.position_limit:
-            qty = min(200, self.position_limit + self.position)
+            qty = self.risk_profile.target_size(
+                side=OrderSide.SELL,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                volatility=volatility,
+                aggression=min(1.6, abs(z_score) / self.z_threshold),
+            )
             if qty > 0:
                 orders.append(
                     Order(
@@ -66,7 +82,13 @@ class HFTAgent(BaseAgent):
                     )
                 )
         elif z_score < -self.z_threshold and self.position < self.position_limit:
-            qty = min(200, self.position_limit - self.position)
+            qty = self.risk_profile.target_size(
+                side=OrderSide.BUY,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                volatility=volatility,
+                aggression=min(1.6, abs(z_score) / self.z_threshold),
+            )
             if qty > 0:
                 orders.append(
                     Order(
@@ -81,15 +103,22 @@ class HFTAgent(BaseAgent):
         # Momentum override
         if abs(momentum) > self.momentum_threshold:
             side = OrderSide.BUY if momentum > 0 else OrderSide.SELL
-            if (side == OrderSide.BUY and self.position < self.position_limit) or \
-               (side == OrderSide.SELL and self.position > -self.position_limit):
+            qty = self.risk_profile.target_size(
+                side=side,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, side),
+                volatility=volatility,
+                aggression=min(1.5, abs(momentum) / self.momentum_threshold),
+            )
+            if qty > 0:
+                order_type = OrderType.MARKET if spread <= 0.03 and volatility < 0.04 else OrderType.LIMIT
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
                         side=side,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=50,
+                        order_type=order_type,
+                        price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
+                        quantity=qty,
                     )
                 )
 
@@ -97,13 +126,22 @@ class HFTAgent(BaseAgent):
         if spread >= 0.02 and abs(imbalance) > 0.2:
             quote_side = OrderSide.BUY if imbalance > 0 else OrderSide.SELL
             quote_px = round(price - 0.01, 2) if quote_side == OrderSide.BUY else round(price + 0.01, 2)
+            qty = self.risk_profile.target_size(
+                side=quote_side,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, quote_side),
+                volatility=volatility,
+                aggression=0.3,
+            )
+            if qty <= 0:
+                return orders
             orders.append(
                 Order(
                     agent_id=self.agent_id,
                     side=quote_side,
                     order_type=OrderType.LIMIT,
                     price=quote_px,
-                    quantity=25,
+                    quantity=qty,
                 )
             )
         return orders

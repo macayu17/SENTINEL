@@ -2,6 +2,7 @@
 
 from typing import List, Dict
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, passive_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -25,10 +26,20 @@ class MarketMakerAgent(BaseAgent):
         self.base_spread = base_spread
         self.quote_size = quote_size
         self.max_inventory = max_inventory
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=max_inventory,
+            base_order_size=quote_size,
+            min_order_size=max(1, quote_size // 10),
+            participation_rate=0.08,
+            max_active_orders=2,
+            stale_ticks=2,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
         time_to_close = market_state.get("time_to_close", float("inf"))
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
+        imbalance = float(market_state.get("order_book_imbalance", 0.0) or 0.0)
         orders: List[Order] = []
 
         # Flatten near close
@@ -48,40 +59,40 @@ class MarketMakerAgent(BaseAgent):
         # Inventory ratio determines quoting behaviour
         inv_ratio = abs(self.position) / self.max_inventory if self.max_inventory else 0
 
-        # Stop quoting at 90% capacity
-        if inv_ratio >= 0.9:
-            return orders
+        # Inventory and volatility widen quotes; imbalance shifts reservation price.
+        vol_multiplier = 1.0 + min(4.0, volatility * 40.0)
+        imbalance_multiplier = 1.0 + min(0.5, abs(imbalance) * 0.5)
+        half_spread = max(0.01, (self.base_spread * mid) / 2 * vol_multiplier * imbalance_multiplier)
+        inventory_skew = (self.position / self.max_inventory) * half_spread * 2 if self.max_inventory else 0.0
+        reservation = mid - inventory_skew
 
-        # Determine quote size
-        size = self.quote_size
-        if inv_ratio > 0.5:
-            size = self.quote_size // 2
+        bid_price = round(reservation - half_spread, 2)
+        ask_price = round(reservation + half_spread, 2)
 
-        # Inventory skew: shift quotes away from the side we're overweight on
-        skew = (self.position / self.max_inventory) * self.base_spread * mid
-        half_spread = (self.base_spread * mid) / 2
-
-        bid_price = round(mid - half_spread - skew, 2)
-        ask_price = round(mid + half_spread - skew, 2)
-
-        orders.append(
-            Order(
-                agent_id=self.agent_id,
-                side=OrderSide.BUY,
-                order_type=OrderType.LIMIT,
-                price=bid_price,
-                quantity=size,
+        quote_specs = [
+            (OrderSide.BUY, bid_price, self.position <= 0.85 * self.max_inventory),
+            (OrderSide.SELL, ask_price, self.position >= -0.85 * self.max_inventory),
+        ]
+        for side, price, enabled in quote_specs:
+            if not enabled:
+                continue
+            size = self.risk_profile.target_size(
+                side=side,
+                position=self.position,
+                available_depth=passive_depth_for_side(market_state, side),
+                volatility=volatility,
+                aggression=0.7 if inv_ratio > 0.5 else 1.0,
             )
-        )
-        orders.append(
-            Order(
-                agent_id=self.agent_id,
-                side=OrderSide.SELL,
-                order_type=OrderType.LIMIT,
-                price=ask_price,
-                quantity=size,
-            )
-        )
+            if size > 0:
+                orders.append(
+                    Order(
+                        agent_id=self.agent_id,
+                        side=side,
+                        order_type=OrderType.LIMIT,
+                        price=price,
+                        quantity=size,
+                    )
+                )
         return orders
 
     def consume_cancellations(self) -> List[str]:

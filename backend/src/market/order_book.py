@@ -1,5 +1,6 @@
 """Order book with price-time priority matching engine."""
 
+import math
 from typing import List, Optional, Dict
 from .order import Order, OrderSide, OrderType, OrderStatus
 from .trade import Trade
@@ -172,6 +173,26 @@ class OrderBook:
         ask_total = sum(level["size"] for level in depth["asks"])
         return bid_total + ask_total
 
+    def replace_depth(
+        self,
+        bids: List[Dict[str, float]],
+        asks: List[Dict[str, float]],
+        agent_id: str = "EXTERNAL_DEPTH",
+    ) -> None:
+        """Replace the book with already-aggregated market-depth levels."""
+        self.bids = [
+            self._depth_level_to_order(level, OrderSide.BUY, agent_id)
+            for level in bids
+            if self._valid_depth_level(level)
+        ]
+        self.asks = [
+            self._depth_level_to_order(level, OrderSide.SELL, agent_id)
+            for level in asks
+            if self._valid_depth_level(level)
+        ]
+        self.bids.sort(key=lambda order: order.price, reverse=True)
+        self.asks.sort(key=lambda order: order.price)
+
     def _aggregate_levels(
         self, orders: List[Order], levels: int
     ) -> List[Dict[str, float]]:
@@ -186,6 +207,29 @@ class OrderBook:
         return [
             {"price": price, "size": size} for price, size in level_map.items()
         ]
+
+    @staticmethod
+    def _valid_depth_level(level: Dict[str, float]) -> bool:
+        try:
+            price = float(level.get("price"))
+            size = int(float(level.get("size")))
+        except (TypeError, ValueError):
+            return False
+        return math.isfinite(price) and price > 0 and size > 0
+
+    @staticmethod
+    def _depth_level_to_order(
+        level: Dict[str, float],
+        side: OrderSide,
+        agent_id: str,
+    ) -> Order:
+        return Order(
+            agent_id=agent_id,
+            side=side,
+            order_type=OrderType.LIMIT,
+            price=round(float(level["price"]), 2),
+            quantity=max(1, int(float(level["size"]))),
+        )
 
     def __repr__(self) -> str:
         return (

@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from backend.src.api import main as api_main
 from backend.src.data import groww_provider, upstox_provider
+from backend.src.data.groww_provider import GrowwQuote
 from backend.src.data.upstox_provider import UpstoxCredentialsError, UpstoxInstrument, UpstoxQuote
 from backend.src.market.market_data import StockInfo
 
@@ -130,6 +131,54 @@ def test_abides_create_enables_oracle_when_informed_agents_requested():
         api_main._abides_task = None
 
 
+def test_sandbox_scenarios_endpoint_exposes_regimes():
+    client = TestClient(api_main.app)
+
+    response = client.get("/api/sandbox/scenarios")
+
+    assert response.status_code == 200
+    names = {scenario["name"] for scenario in response.json()["scenarios"]}
+    assert "normal" in names
+    assert "spoofing_stress" in names
+    assert "liquidity_shock" in names
+
+
+def test_sandbox_create_applies_selected_scenario():
+    request = api_main.SandboxCreateRequest(
+        preset="balanced",
+        initial_price=100.0,
+        oracle_enabled=False,
+        oracle_kappa=0.05,
+        oracle_sigma=0.02,
+        latency_mode="deterministic",
+        speed=10.0,
+        scenario="spoofing_stress",
+    )
+
+    async def create_sandbox():
+        response = await api_main.create_sandbox(request)
+        if api_main._sim_task:
+            api_main._sim_task.cancel()
+            try:
+                await api_main._sim_task
+            except asyncio.CancelledError:
+                pass
+            api_main._sim_task = None
+        return response
+
+    try:
+        response = asyncio.run(create_sandbox())
+        assert response["scenario"] == "spoofing_stress"
+        assert api_main.simulator is not None
+        assert api_main.simulator.scenario.name == "spoofing_stress"
+        assert any(agent.agent_type == "Spoofing" for agent in api_main.simulator.agents)
+    finally:
+        if api_main.simulator:
+            api_main.simulator.stop()
+        api_main.simulator = None
+        api_main._sim_task = None
+
+
 def test_groww_live_shadow_replay_starts_oracle_path(monkeypatch):
     sample = StockInfo(
         ticker="NSE-WIPRO",
@@ -185,6 +234,8 @@ def test_groww_live_shadow_replay_starts_oracle_path(monkeypatch):
         assert api_main.simulator.oracle.enabled is True
         assert api_main.simulator.oracle.config.replay_path[:3] == sample.prices
         assert api_main.simulator.data_source["provider"] == "groww"
+        assert api_main.simulator.data_source["depth_source"] == "calibrated_from_ohlcv"
+        assert api_main.simulator.depth_profile["source"] == "ohlcv"
     finally:
         if api_main.simulator:
             api_main.simulator.stop()
@@ -248,6 +299,8 @@ def test_upstox_live_shadow_replay_starts_oracle_path(monkeypatch):
         assert api_main.simulator.oracle.config.replay_path[:3] == sample.prices
         assert api_main.simulator.data_source["provider"] == "upstox"
         assert api_main.simulator.data_source["instrument_key"] == sample.ticker
+        assert api_main.simulator.data_source["depth_source"] == "calibrated_from_ohlcv"
+        assert api_main.simulator.depth_profile["source"] == "ohlcv"
     finally:
         if api_main.simulator:
             api_main.simulator.stop()
@@ -331,7 +384,7 @@ def test_upstox_instrument_search_endpoint_returns_matches(monkeypatch):
     assert response.json()["results"][0]["trading_symbol"] == "RELIANCE"
 
 
-def test_upstox_live_ltp_starts_after_successful_provider_fetch(monkeypatch):
+def test_upstox_live_depth_starts_after_successful_provider_fetch(monkeypatch):
     quotes = [
         UpstoxQuote(
             instrument_key="NSE_EQ|INE002A01018",
@@ -339,6 +392,11 @@ def test_upstox_live_ltp_starts_after_successful_provider_fetch(monkeypatch):
             ltq=5,
             volume=1000,
             previous_close=2500.0,
+            depth_source="provider_live",
+            order_book={
+                "bids": [{"price": 2509.95, "size": 300}],
+                "asks": [{"price": 2510.05, "size": 400}],
+            },
         ),
         UpstoxQuote(
             instrument_key="NSE_EQ|INE002A01018",
@@ -346,14 +404,19 @@ def test_upstox_live_ltp_starts_after_successful_provider_fetch(monkeypatch):
             ltq=8,
             volume=1500,
             previous_close=2500.0,
+            depth_source="provider_live",
+            order_book={
+                "bids": [{"price": 2522.45, "size": 500}],
+                "asks": [{"price": 2522.55, "size": 600}],
+            },
         ),
     ]
 
-    def fake_ltp(**kwargs):
+    def fake_full_quote(**kwargs):
         assert kwargs["instrument_key"] == "NSE_EQ|INE002A01018"
         return quotes.pop(0)
 
-    monkeypatch.setattr(api_main, "fetch_upstox_ltp_quote", fake_ltp)
+    monkeypatch.setattr(api_main, "fetch_upstox_full_quote", fake_full_quote)
     client = TestClient(api_main.app)
 
     response = client.post(
@@ -369,15 +432,18 @@ def test_upstox_live_ltp_starts_after_successful_provider_fetch(monkeypatch):
 
     try:
         assert response.status_code == 200
-        assert response.json()["source"] == "live_ltp"
+        assert response.json()["source"] == "live_depth"
         assert response.json()["initial_price"] == 2510.0
+        assert response.json()["depth_source"] == "provider_live"
         assert api_main.simulator is not None
         assert api_main.simulator.mode == "LIVE_SHADOW"
         assert api_main.simulator.data_source["provider"] == "upstox"
-        assert api_main.simulator.data_source["source"] == "live_ltp"
+        assert api_main.simulator.data_source["source"] == "live_depth"
 
         state = api_main.simulator.step()
         assert state["current_price"] == 2522.5
+        assert state["bid_levels"] == [{"price": 2522.45, "size": 500}]
+        assert state["ask_levels"] == [{"price": 2522.55, "size": 600}]
         assert api_main.simulator.data_source["last_price"] == 2522.5
         assert api_main.simulator.data_source["volume"] == 1500
     finally:
@@ -389,15 +455,15 @@ def test_upstox_live_ltp_starts_after_successful_provider_fetch(monkeypatch):
         api_main._sim_task = None
 
 
-def test_upstox_live_ltp_failure_does_not_freeze_existing_simulation(monkeypatch):
+def test_upstox_live_depth_failure_does_not_freeze_existing_simulation(monkeypatch):
     old_simulator = api_main.MarketSimulator([], initial_price=100.0, mode="SANDBOX")
     old_simulator.running = True
     api_main.simulator = old_simulator
 
-    def fake_ltp(**kwargs):
+    def fake_full_quote(**kwargs):
         raise UpstoxCredentialsError("Upstox rejected quote access")
 
-    monkeypatch.setattr(api_main, "fetch_upstox_ltp_quote", fake_ltp)
+    monkeypatch.setattr(api_main, "fetch_upstox_full_quote", fake_full_quote)
     client = TestClient(api_main.app)
 
     response = client.post(
@@ -415,6 +481,81 @@ def test_upstox_live_ltp_failure_does_not_freeze_existing_simulation(monkeypatch
     assert api_main.simulator.mode == "SANDBOX"
 
     api_main.simulator = None
+
+
+def test_groww_live_depth_starts_after_successful_provider_fetch(monkeypatch):
+    quotes = [
+        GrowwQuote(
+            groww_symbol="NSE-RELIANCE",
+            exchange="NSE",
+            segment="CASH",
+            last_price=149.5,
+            ltq=20,
+            volume=10000,
+            previous_close=148.5,
+            depth_source="provider_live",
+            order_book={
+                "bids": [{"price": 149.45, "size": 1000}],
+                "asks": [{"price": 149.55, "size": 900}],
+            },
+        ),
+        GrowwQuote(
+            groww_symbol="NSE-RELIANCE",
+            exchange="NSE",
+            segment="CASH",
+            last_price=150.25,
+            ltq=25,
+            volume=12000,
+            previous_close=148.5,
+            depth_source="provider_live",
+            order_book={
+                "bids": [{"price": 150.2, "size": 1100}],
+                "asks": [{"price": 150.3, "size": 950}],
+            },
+        ),
+    ]
+
+    def fake_quote(**kwargs):
+        assert kwargs["groww_symbol"] == "NSE-RELIANCE"
+        assert kwargs["segment"] == "CASH"
+        return quotes.pop(0)
+
+    monkeypatch.setattr(api_main, "fetch_groww_quote", fake_quote)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/api/live-shadow/groww/live",
+        json={
+            "groww_symbol": "RELIANCE",
+            "exchange": "NSE",
+            "segment": "CASH",
+            "speed": 2.0,
+            "poll_interval_seconds": 1,
+        },
+    )
+
+    try:
+        assert response.status_code == 200
+        assert response.json()["source"] == "live_depth"
+        assert response.json()["initial_price"] == 149.5
+        assert response.json()["depth_source"] == "provider_live"
+        assert api_main.simulator is not None
+        assert api_main.simulator.mode == "LIVE_SHADOW"
+        assert api_main.simulator.data_source["provider"] == "groww"
+        assert api_main.simulator.data_source["source"] == "live_depth"
+
+        state = api_main.simulator.step()
+        assert state["current_price"] == 150.25
+        assert state["bid_levels"] == [{"price": 150.2, "size": 1100}]
+        assert state["ask_levels"] == [{"price": 150.3, "size": 950}]
+        assert api_main.simulator.data_source["last_price"] == 150.25
+    finally:
+        if api_main.simulator:
+            api_main.simulator.stop()
+        if api_main._sim_task:
+            api_main._sim_task.cancel()
+        api_main.simulator = None
+        api_main._sim_task = None
 
 
 def test_live_shadow_market_update_preserves_contract_with_groww_metadata():
@@ -485,3 +626,33 @@ def test_live_shadow_market_update_preserves_contract_with_groww_metadata():
     assert update["price"] == sample.prices[0]
     assert update["data_source"]["provider"] == "groww"
     assert update["data_source"]["source"] == "historical_replay"
+
+
+def test_simulation_export_returns_run_config_metrics_and_warning_timeline():
+    active_sim = api_main.MarketSimulator([], initial_price=100.0, scenario="market_open")
+    active_sim.running = True
+    for _ in range(3):
+        active_sim.step()
+    api_main.simulator = active_sim
+    api_main._warning_timeline = [
+        {"timestamp": 1.0, "warning_level": "caution", "probability": 0.25}
+    ]
+    client = TestClient(api_main.app)
+
+    try:
+        response = client.get("/api/simulation/export")
+        payload = response.json()
+
+        assert response.status_code == 200
+        assert payload["run_config"]["scenario"] == "market_open"
+        assert "seed" in payload["run_config"]
+        assert "detector_hits" in payload
+        assert payload["warning_timeline"][0]["warning_level"] == "caution"
+        assert "spread_mean" in payload["validation_metrics"]
+        assert "cancel_to_trade_ratio" in payload["validation_metrics"]
+        assert "slippage_bps_mean" in payload["validation_metrics"]
+        assert len(payload["price_path"]) >= 3
+    finally:
+        active_sim.stop()
+        api_main.simulator = None
+        api_main._warning_timeline = []

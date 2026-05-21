@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import type { OrderBook } from '@/types/market';
 
 export type SimulationMode = 'SANDBOX' | 'LIVE_SHADOW';
 export type LatencyMode = 'zero' | 'deterministic' | 'cubic';
@@ -12,6 +13,20 @@ export interface SandboxPreset {
   latency: LatencyMode;
 }
 
+export interface SandboxScenario {
+  name: string;
+  label: string;
+  description: string;
+  seed_depth_multiplier: number;
+  liquidity_floor_multiplier: number;
+  spread_multiplier: number;
+  oracle_sigma_multiplier: number;
+  order_ttl_seconds: number;
+  volatility_multiplier: number;
+  enable_spoofing: boolean;
+  institutional_multiplier: number;
+}
+
 export interface SandboxCreateRequest {
   preset: string;
   initial_price: number;
@@ -21,6 +36,7 @@ export interface SandboxCreateRequest {
   latency_mode: LatencyMode;
   speed: number;
   custom_agents?: Record<string, number> | null;
+  scenario?: string;
 }
 
 export interface AbidesSandboxCreateRequest {
@@ -46,6 +62,19 @@ export interface GrowwReplayRequest {
   custom_agents?: Record<string, number> | null;
   latency_mode?: LatencyMode;
   speed: number;
+  scenario?: string;
+}
+
+export interface GrowwLiveRequest {
+  groww_symbol: string;
+  exchange: string;
+  segment: string;
+  preset?: string;
+  custom_agents?: Record<string, number> | null;
+  latency_mode?: LatencyMode;
+  speed: number;
+  poll_interval_seconds: number;
+  scenario?: string;
 }
 
 export interface UpstoxReplayRequest {
@@ -58,6 +87,7 @@ export interface UpstoxReplayRequest {
   custom_agents?: Record<string, number> | null;
   latency_mode?: LatencyMode;
   speed: number;
+  scenario?: string;
 }
 
 export interface UpstoxLiveRequest {
@@ -67,6 +97,7 @@ export interface UpstoxLiveRequest {
   latency_mode?: LatencyMode;
   speed: number;
   poll_interval_seconds: number;
+  scenario?: string;
 }
 
 export interface UpstoxInstrumentResult {
@@ -135,6 +166,10 @@ class SentinelAPI {
     return this.request<{ abides: boolean }>('/api/sandbox/capabilities');
   }
 
+  async getSandboxScenarios() {
+    return this.request<{ scenarios: SandboxScenario[] }>('/api/sandbox/scenarios');
+  }
+
   async createSandbox(config: SandboxCreateRequest) {
     return this.request<{
       status: string;
@@ -142,6 +177,7 @@ class SentinelAPI {
       agents: number;
       oracle_enabled: boolean;
       speed: number;
+      scenario: string;
     }>('/api/sandbox/create', {
       method: 'POST',
       body: JSON.stringify(config),
@@ -193,7 +229,49 @@ class SentinelAPI {
       realized_vol: number;
       agents: number;
       speed: number;
+      scenario?: string;
     }>('/api/live-shadow/groww/replay', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async fetchGrowwQuote(config: Pick<GrowwLiveRequest, 'groww_symbol' | 'exchange' | 'segment'>) {
+    return this.request<{
+      provider: 'groww';
+      source: 'live_depth';
+      status: string;
+      mode: 'LIVE_SHADOW';
+      groww_symbol: string;
+      exchange: string;
+      segment: string;
+      last_price: number;
+      ltq?: number | null;
+      volume?: number | null;
+      previous_close?: number | null;
+      depth_source?: string | null;
+      order_book?: OrderBook | null;
+    }>('/api/live-shadow/groww/quote', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async startGrowwLive(config: GrowwLiveRequest) {
+    return this.request<{
+      status: string;
+      mode: 'LIVE_SHADOW';
+      provider: 'groww';
+      source: 'live_depth';
+      groww_symbol: string;
+      initial_price: number;
+      last_price: number;
+      depth_source: string;
+      poll_interval_seconds: number;
+      agents: number;
+      speed: number;
+      scenario?: string;
+    }>('/api/live-shadow/groww/live', {
       method: 'POST',
       body: JSON.stringify(config),
     });
@@ -262,13 +340,15 @@ class SentinelAPI {
       status: string;
       mode: 'LIVE_SHADOW';
       provider: 'upstox';
-      source: 'live_ltp';
+      source: 'live_depth';
       instrument_key: string;
       initial_price: number;
       last_price: number;
+      depth_source: string;
       poll_interval_seconds: number;
       agents: number;
       speed: number;
+      scenario?: string;
     }>('/api/live-shadow/upstox/live', {
       method: 'POST',
       body: JSON.stringify(config),
@@ -288,6 +368,7 @@ class SentinelAPI {
       realized_vol: number;
       agents: number;
       speed: number;
+      scenario?: string;
     }>('/api/live-shadow/upstox/replay', {
       method: 'POST',
       body: JSON.stringify(config),

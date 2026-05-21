@@ -41,6 +41,22 @@ class GrowwCandle:
     oi: Optional[float] = None
 
 
+@dataclass(frozen=True)
+class GrowwQuote:
+    groww_symbol: str
+    exchange: str
+    segment: str
+    last_price: float
+    ltq: Optional[float] = None
+    volume: Optional[float] = None
+    previous_close: Optional[float] = None
+    timestamp: Optional[str] = None
+    total_buy_quantity: Optional[float] = None
+    total_sell_quantity: Optional[float] = None
+    depth_source: Optional[str] = None
+    order_book: Optional[dict[str, list[dict[str, Any]]]] = None
+
+
 SUPPORTED_SEGMENTS = {"CASH", "FNO"}
 
 
@@ -145,6 +161,38 @@ def normalize_groww_candles(payload: Any) -> List[GrowwCandle]:
         )
 
     return normalized
+
+
+def normalize_groww_quote(
+    payload: Any,
+    *,
+    exchange: str,
+    segment: str,
+    groww_symbol: str,
+) -> GrowwQuote:
+    if not isinstance(payload, dict):
+        raise GrowwDataError("Groww quote response was not a JSON object.")
+
+    symbol = normalize_groww_symbol(exchange, groww_symbol)
+    depth = payload.get("depth") if isinstance(payload.get("depth"), dict) else {}
+    bids = _normalize_depth_side(depth.get("buy"), "bid")
+    asks = _normalize_depth_side(depth.get("sell"), "ask")
+    ohlc = payload.get("ohlc") if isinstance(payload.get("ohlc"), dict) else {}
+
+    return GrowwQuote(
+        groww_symbol=symbol,
+        exchange=exchange.strip().upper() or "NSE",
+        segment=segment.strip().upper() or "CASH",
+        last_price=_finite_float(payload.get("last_price"), "quote last price"),
+        ltq=_optional_float(payload.get("last_trade_quantity")),
+        volume=_optional_float(payload.get("volume")),
+        previous_close=_optional_float(ohlc.get("close")),
+        timestamp=str(payload.get("last_trade_time")).strip() if payload.get("last_trade_time") is not None else None,
+        total_buy_quantity=_optional_float(payload.get("total_buy_quantity")),
+        total_sell_quantity=_optional_float(payload.get("total_sell_quantity")),
+        depth_source="provider_live" if bids or asks else None,
+        order_book={"bids": bids, "asks": asks} if bids or asks else None,
+    )
 
 
 def groww_candles_to_stock_info(
@@ -278,6 +326,45 @@ class GrowwHistoricalProvider:
             candle_interval=candle_interval,
         )
 
+    def fetch_quote(
+        self,
+        *,
+        exchange: str,
+        segment: str,
+        groww_symbol: str,
+    ) -> GrowwQuote:
+        segment_code = segment.strip().upper() or "CASH"
+        if segment_code not in SUPPORTED_SEGMENTS:
+            supported = ", ".join(sorted(SUPPORTED_SEGMENTS))
+            raise GrowwDataError(f"Unsupported Groww segment '{segment}'. Supported: {supported}.")
+
+        symbol = normalize_groww_symbol(exchange, groww_symbol)
+        exchange_code = exchange.strip().upper() or "NSE"
+        exchange_value = _client_constant(self._client, f"EXCHANGE_{exchange_code}", exchange_code)
+        segment_value = _client_constant(self._client, f"SEGMENT_{segment_code}", segment_code)
+        trading_symbol = _quote_trading_symbol(exchange_code, symbol)
+
+        try:
+            response = self._client.get_quote(
+                exchange=exchange_value,
+                segment=segment_value,
+                trading_symbol=trading_symbol,
+            )
+        except Exception as exc:
+            message = str(exc) or exc.__class__.__name__
+            if "forbidden" in message.lower() or "access" in message.lower():
+                raise GrowwDataError(
+                    "Groww rejected live quote access. Verify this Groww API key has live data permission."
+                ) from exc
+            raise GrowwProviderError(f"Groww live quote request failed: {message}") from exc
+
+        return normalize_groww_quote(
+            response,
+            exchange=exchange_code,
+            segment=segment_code,
+            groww_symbol=symbol,
+        )
+
 
 def fetch_groww_historical_stock(
     *,
@@ -297,6 +384,21 @@ def fetch_groww_historical_stock(
         start_time=start_time,
         end_time=end_time,
         candle_interval=candle_interval,
+    )
+
+
+def fetch_groww_quote(
+    *,
+    exchange: str,
+    segment: str,
+    groww_symbol: str,
+    provider: Optional[GrowwHistoricalProvider] = None,
+) -> GrowwQuote:
+    active_provider = provider or GrowwHistoricalProvider()
+    return active_provider.fetch_quote(
+        exchange=exchange,
+        segment=segment,
+        groww_symbol=groww_symbol,
     )
 
 
@@ -322,6 +424,33 @@ def _optional_float(value: Any) -> Optional[float]:
     if value is None:
         return None
     return _finite_float(value, "open interest")
+
+
+def _normalize_depth_side(entries: Any, side: str) -> list[dict[str, Any]]:
+    if not isinstance(entries, list):
+        return []
+
+    levels: list[dict[str, Any]] = []
+    for row in entries:
+        if not isinstance(row, dict):
+            continue
+        try:
+            price = _finite_float(row.get("price"), f"{side} depth price")
+            size = int(_finite_float(row.get("quantity", row.get("qty")), f"{side} depth quantity"))
+        except GrowwDataError:
+            continue
+        if price <= 0 or size <= 0:
+            continue
+        levels.append({"price": round(price, 2), "size": size})
+
+    return sorted(levels, key=lambda level: level["price"], reverse=(side == "bid"))
+
+
+def _quote_trading_symbol(exchange: str, groww_symbol: str) -> str:
+    prefix = f"{exchange.strip().upper()}-"
+    if groww_symbol.upper().startswith(prefix):
+        return groww_symbol[len(prefix):]
+    return groww_symbol
 
 
 def _client_constant(client: Any, name: str, fallback: str) -> Any:

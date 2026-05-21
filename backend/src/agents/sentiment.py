@@ -4,6 +4,7 @@ from typing import List, Dict
 from collections import deque
 import random
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -37,9 +38,19 @@ class SentimentAgent(BaseAgent):
 
         # Start in herding or contrarian mode randomly
         self._is_herding: bool = random.random() < herding_probability
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=position_limit,
+            base_order_size=order_size,
+            min_order_size=max(5, order_size // 8),
+            participation_rate=0.03,
+            max_active_orders=2,
+            stale_ticks=5,
+        )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        spread = float(market_state.get("spread", 0.05) or 0.05)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         self._price_history.append(price)
         orders: List[Order] = []
 
@@ -74,27 +85,41 @@ class SentimentAgent(BaseAgent):
 
         # ── Place order if within limits ────────────────────────────────
         if want_buy and self.position < self.position_limit:
-            qty = min(self.order_size, self.position_limit - self.position)
+            qty = self.risk_profile.target_size(
+                side=OrderSide.BUY,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                volatility=volatility,
+                aggression=0.8,
+            )
             if qty > 0:
+                order_type = OrderType.MARKET if spread <= 0.04 else OrderType.LIMIT
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
                         side=OrderSide.BUY,
-                        order_type=OrderType.MARKET,
-                        price=price,
+                        order_type=order_type,
+                        price=price if order_type == OrderType.MARKET else near_touch_price(price, OrderSide.BUY, spread),
                         quantity=qty,
                     )
                 )
 
         elif not want_buy and self.position > -self.position_limit:
-            qty = min(self.order_size, self.position_limit + self.position)
+            qty = self.risk_profile.target_size(
+                side=OrderSide.SELL,
+                position=self.position,
+                available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                volatility=volatility,
+                aggression=0.8,
+            )
             if qty > 0:
+                order_type = OrderType.MARKET if spread <= 0.04 else OrderType.LIMIT
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
                         side=OrderSide.SELL,
-                        order_type=OrderType.MARKET,
-                        price=price,
+                        order_type=order_type,
+                        price=price if order_type == OrderType.MARKET else near_touch_price(price, OrderSide.SELL, spread),
                         quantity=qty,
                     )
                 )

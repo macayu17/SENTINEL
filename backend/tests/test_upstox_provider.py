@@ -13,9 +13,11 @@ from backend.src.data.upstox_provider import (
     UpstoxHistoricalProvider,
     UpstoxInstrument,
     UpstoxQuote,
+    fetch_upstox_full_quote,
     fetch_upstox_ltp_quote,
     upstox_candles_to_stock_info,
     normalize_upstox_candles,
+    normalize_upstox_full_quote,
     normalize_upstox_instruments,
     normalize_upstox_ltp,
     search_upstox_instruments,
@@ -210,6 +212,53 @@ def test_upstox_ltp_normalizes_v3_response():
     )
 
 
+def test_upstox_full_quote_normalizes_live_depth_response():
+    payload = {
+        "status": "success",
+        "data": {
+            "NSE_EQ:RELIANCE": {
+                "instrument_token": "NSE_EQ|INE002A01018",
+                "last_price": 2520.35,
+                "volume": 123456,
+                "ohlc": {"close": 2501.0},
+                "total_buy_quantity": 5000,
+                "total_sell_quantity": 7000,
+                "timestamp": "1747984841612",
+                "depth": {
+                    "buy": [
+                        {"quantity": 1200, "price": 2520.25, "orders": 12},
+                        {"quantity": 800, "price": 2520.2, "orders": 9},
+                        {"quantity": 0, "price": 0, "orders": 0},
+                    ],
+                    "sell": [
+                        {"quantity": 900, "price": 2520.45, "orders": 7},
+                        {"quantity": 1000, "price": 2520.5, "orders": 8},
+                    ],
+                },
+            }
+        },
+    }
+
+    quote = normalize_upstox_full_quote(payload, "NSE_EQ|INE002A01018")
+
+    assert quote.instrument_key == "NSE_EQ|INE002A01018"
+    assert quote.last_price == 2520.35
+    assert quote.previous_close == 2501.0
+    assert quote.total_buy_quantity == 5000
+    assert quote.total_sell_quantity == 7000
+    assert quote.depth_source == "provider_live"
+    assert quote.order_book == {
+        "bids": [
+            {"price": 2520.25, "size": 1200, "orders": 12},
+            {"price": 2520.2, "size": 800, "orders": 9},
+        ],
+        "asks": [
+            {"price": 2520.45, "size": 900, "orders": 7},
+            {"price": 2520.5, "size": 1000, "orders": 8},
+        ],
+    }
+
+
 def test_upstox_provider_fetches_ltp_from_v3_market_quote():
     class FakeResponse:
         status_code = 200
@@ -251,4 +300,51 @@ def test_upstox_provider_fetches_ltp_from_v3_market_quote():
 
     assert quote.last_price == 2520.35
     assert client.calls[0][0] == "https://api.upstox.com/v3/market-quote/ltp"
+    assert client.calls[0][1]["params"] == {"instrument_key": "NSE_EQ|INE002A01018"}
+
+
+def test_upstox_provider_fetches_full_quote_from_v2_market_quote():
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "status": "success",
+                "data": {
+                    "NSE_EQ:RELIANCE": {
+                        "last_price": 2520.35,
+                        "instrument_token": "NSE_EQ|INE002A01018",
+                        "depth": {
+                            "buy": [{"quantity": 1200, "price": 2520.25, "orders": 12}],
+                            "sell": [{"quantity": 900, "price": 2520.45, "orders": 7}],
+                        },
+                    }
+                },
+            }
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return FakeResponse()
+
+    client = FakeClient()
+    provider = UpstoxHistoricalProvider(
+        access_token="token",
+        base_url="https://api.upstox.com/v3",
+        v2_base_url="https://api.upstox.com/v2",
+        http_client=client,
+    )
+
+    quote = fetch_upstox_full_quote(instrument_key="NSE_EQ|INE002A01018", provider=provider)
+
+    assert quote.last_price == 2520.35
+    assert quote.order_book["bids"][0]["size"] == 1200
+    assert client.calls[0][0] == "https://api.upstox.com/v2/market-quote/quotes"
     assert client.calls[0][1]["params"] == {"instrument_key": "NSE_EQ|INE002A01018"}

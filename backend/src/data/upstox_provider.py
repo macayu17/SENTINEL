@@ -58,6 +58,11 @@ class UpstoxQuote:
     ltq: Optional[float] = None
     volume: Optional[float] = None
     previous_close: Optional[float] = None
+    timestamp: Optional[str] = None
+    total_buy_quantity: Optional[float] = None
+    total_sell_quantity: Optional[float] = None
+    depth_source: Optional[str] = None
+    order_book: Optional[dict[str, list[dict[str, Any]]]] = None
 
 
 SUPPORTED_UNITS = {"minutes", "hours", "days", "weeks", "months"}
@@ -193,30 +198,7 @@ def normalize_upstox_instruments(payload: Any) -> List[UpstoxInstrument]:
 
 def normalize_upstox_ltp(payload: Any, instrument_key: str) -> UpstoxQuote:
     key = normalize_upstox_instrument_key(instrument_key)
-    if not isinstance(payload, dict):
-        raise UpstoxDataError("Upstox LTP response was not a JSON object.")
-
-    status = payload.get("status")
-    if status and status != "success":
-        raise UpstoxDataError(_upstox_error_message(payload))
-
-    data = payload.get("data")
-    if not isinstance(data, dict) or not data:
-        raise UpstoxDataError("Upstox returned no LTP quote data.")
-
-    selected = None
-    for quote in data.values():
-        if not isinstance(quote, dict):
-            continue
-        token = str(quote.get("instrument_token") or quote.get("instrument_key") or "").strip()
-        if token == key:
-            selected = quote
-            break
-        if selected is None:
-            selected = quote
-
-    if selected is None:
-        raise UpstoxDataError("Upstox LTP response did not include a usable quote.")
+    selected = _select_quote_payload(payload, key, "LTP")
 
     token = str(selected.get("instrument_token") or selected.get("instrument_key") or key).strip() or key
     return UpstoxQuote(
@@ -228,6 +210,37 @@ def normalize_upstox_ltp(payload: Any, instrument_key: str) -> UpstoxQuote:
             selected.get("cp") if "cp" in selected else selected.get("previous_close"),
             "previous close",
         ),
+    )
+
+
+def normalize_upstox_full_quote(payload: Any, instrument_key: str) -> UpstoxQuote:
+    key = normalize_upstox_instrument_key(instrument_key)
+    selected = _select_quote_payload(payload, key, "full quote")
+    token = str(selected.get("instrument_token") or selected.get("instrument_key") or key).strip() or key
+    depth = selected.get("depth") if isinstance(selected.get("depth"), dict) else {}
+    bids = _normalize_depth_side(depth.get("buy"), "bid")
+    asks = _normalize_depth_side(depth.get("sell"), "ask")
+    ohlc = selected.get("ohlc") if isinstance(selected.get("ohlc"), dict) else {}
+
+    return UpstoxQuote(
+        instrument_key=token,
+        last_price=_finite_float(selected.get("last_price"), "last price"),
+        ltq=_optional_float(
+            selected.get("ltq") if "ltq" in selected else selected.get("last_trade_quantity"),
+            "ltq",
+        ),
+        volume=_optional_float(selected.get("volume"), "volume"),
+        previous_close=_optional_float(
+            selected.get("cp")
+            if "cp" in selected
+            else selected.get("previous_close", ohlc.get("close")),
+            "previous close",
+        ),
+        timestamp=str(selected.get("timestamp")).strip() if selected.get("timestamp") is not None else None,
+        total_buy_quantity=_optional_float(selected.get("total_buy_quantity"), "total buy quantity"),
+        total_sell_quantity=_optional_float(selected.get("total_sell_quantity"), "total sell quantity"),
+        depth_source="provider_live" if bids or asks else None,
+        order_book={"bids": bids, "asks": asks} if bids or asks else None,
     )
 
 
@@ -434,6 +447,30 @@ class UpstoxHistoricalProvider:
 
         return normalize_upstox_ltp(payload, key)
 
+    def fetch_full_quote(self, *, instrument_key: str) -> UpstoxQuote:
+        key = normalize_upstox_instrument_key(instrument_key)
+        try:
+            response = self._client.get(
+                f"{self._v2_base_url}/market-quote/quotes",
+                headers=self._headers(),
+                params={"instrument_key": key},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in {401, 403}:
+                raise UpstoxCredentialsError(
+                    f"Upstox rejected full quote access ({status}). Check UPSTOX_ACCESS_TOKEN/UPSTOX_ANALYTICS_TOKEN and market-data permissions."
+                ) from exc
+            raise UpstoxProviderError(f"Upstox full quote request failed ({status}): {exc.response.text}") from exc
+        except httpx.RequestError as exc:
+            raise UpstoxProviderError(f"Upstox full quote request failed: {exc}") from exc
+        except ValueError as exc:
+            raise UpstoxDataError("Upstox returned a non-JSON full quote response.") from exc
+
+        return normalize_upstox_full_quote(payload, key)
+
 
 def fetch_upstox_historical_stock(
     *,
@@ -482,6 +519,15 @@ def fetch_upstox_ltp_quote(
     return active_provider.fetch_ltp(instrument_key=instrument_key)
 
 
+def fetch_upstox_full_quote(
+    *,
+    instrument_key: str,
+    provider: Optional[UpstoxHistoricalProvider] = None,
+) -> UpstoxQuote:
+    active_provider = provider or UpstoxHistoricalProvider()
+    return active_provider.fetch_full_quote(instrument_key=instrument_key)
+
+
 def _validate_date_range(*, from_date: Optional[str], to_date: str) -> None:
     to_dt = _parse_date(to_date, "to_date")
     if from_date:
@@ -519,6 +565,73 @@ def _optional_float(value: Any, field: str = "open interest") -> Optional[float]
     if value is None:
         return None
     return _finite_float(value, field)
+
+
+def _select_quote_payload(payload: Any, instrument_key: str, label: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise UpstoxDataError(f"Upstox {label} response was not a JSON object.")
+
+    status = payload.get("status")
+    if status and status != "success":
+        raise UpstoxDataError(_upstox_error_message(payload))
+
+    data = payload.get("data")
+    if not isinstance(data, dict) or not data:
+        raise UpstoxDataError(f"Upstox returned no {label} quote data.")
+
+    selected = None
+    for quote_payload in data.values():
+        if not isinstance(quote_payload, dict):
+            continue
+        token = str(
+            quote_payload.get("instrument_token")
+            or quote_payload.get("instrument_key")
+            or ""
+        ).strip()
+        if token == instrument_key:
+            selected = quote_payload
+            break
+        if selected is None:
+            selected = quote_payload
+
+    if selected is None:
+        raise UpstoxDataError(f"Upstox {label} response did not include a usable quote.")
+    return selected
+
+
+def _normalize_depth_side(entries: Any, side: str) -> list[dict[str, Any]]:
+    if not isinstance(entries, list):
+        return []
+
+    price_keys = ("bidP", "price") if side == "bid" else ("askP", "price")
+    size_keys = ("bidQ", "quantity", "qty") if side == "bid" else ("askQ", "quantity", "qty")
+    levels: list[dict[str, Any]] = []
+    for row in entries:
+        if not isinstance(row, dict):
+            continue
+        price_value = _first_present(row, price_keys)
+        size_value = _first_present(row, size_keys)
+        try:
+            price = _finite_float(price_value, f"{side} depth price")
+            size = int(_finite_float(size_value, f"{side} depth quantity"))
+        except UpstoxDataError:
+            continue
+        if price <= 0 or size <= 0:
+            continue
+        level: dict[str, Any] = {"price": round(price, 2), "size": size}
+        orders = _optional_float(row.get("orders"), f"{side} depth orders")
+        if orders is not None:
+            level["orders"] = int(orders)
+        levels.append(level)
+
+    return sorted(levels, key=lambda level: level["price"], reverse=(side == "bid"))
+
+
+def _first_present(row: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in row:
+            return row[key]
+    return None
 
 
 def _bars_per_year(unit: str, interval: str) -> float:

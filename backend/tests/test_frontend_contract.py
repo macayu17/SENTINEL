@@ -32,13 +32,21 @@ def test_replay_running_label_uses_active_engine_not_selected_tab():
     )
 
 
-def test_upstox_panel_exposes_search_and_live_ltp_mode():
+def test_upstox_panel_exposes_search_and_live_depth_mode():
     source = SANDBOX_PANEL.read_text(encoding="utf-8")
 
     assert "api.searchUpstoxInstruments" in source
     assert "upstoxFeedMode" in source
-    assert "UPSTOX LIVE LTP" in source
+    assert "UPSTOX LIVE DEPTH" in source
     assert "api.startUpstoxLive" in source
+
+
+def test_groww_panel_exposes_historical_and_live_depth_modes():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "growwFeedMode" in source
+    assert "GROWW LIVE DEPTH" in source
+    assert "api.startGrowwLive" in source
 
 
 def test_upstox_panel_uses_selectable_results_and_date_inputs():
@@ -48,3 +56,12 @@ def test_upstox_panel_uses_selectable_results_and_date_inputs():
     assert 'label="MATCHES"' in source
     assert "DateField" in source
     assert 'type="date"' in source
+
+
+def test_sandbox_panel_exposes_scenario_selection():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "api.getSandboxScenarios" in source
+    assert "scenario" in source
+    assert "SCENARIO" in source
+    assert "spoofing_stress" in source

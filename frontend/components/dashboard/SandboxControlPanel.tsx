@@ -6,11 +6,13 @@ import {
   api,
   type LatencyMode,
   type SandboxPreset,
+  type SandboxScenario,
   type UpstoxInstrumentResult,
 } from '@/lib/api-client';
 import { useMarketStore } from '@/store/market-store';
 
 type SandboxEngine = 'sentinel' | 'abides' | 'groww' | 'upstox';
+type GrowwFeedMode = 'historical' | 'live';
 type UpstoxFeedMode = 'historical' | 'live';
 type CommandState = 'idle' | 'loading' | 'success' | 'error';
 type AbidesCapability = 'available' | 'disabled' | 'unverified';
@@ -50,13 +52,107 @@ const FALLBACK_PRESETS: Record<string, SandboxPreset> = {
       Noise: 10,
       Momentum: 2,
       MeanReversion: 2,
-      Spoofing: 1,
+      Spoofing: 0,
       Sentiment: 5,
     },
     oracle: false,
     latency: 'deterministic',
   },
 };
+
+const FALLBACK_SCENARIOS: SandboxScenario[] = [
+  {
+    name: 'normal',
+    label: 'Normal Session',
+    description: 'Balanced continuous double-auction session.',
+    seed_depth_multiplier: 1,
+    liquidity_floor_multiplier: 1,
+    spread_multiplier: 1,
+    oracle_sigma_multiplier: 1,
+    order_ttl_seconds: 20,
+    volatility_multiplier: 1,
+    enable_spoofing: false,
+    institutional_multiplier: 1,
+  },
+  {
+    name: 'market_open',
+    label: 'Market Open',
+    description: 'Wider opening spread and faster quote churn.',
+    seed_depth_multiplier: 1.35,
+    liquidity_floor_multiplier: 1.25,
+    spread_multiplier: 2.5,
+    oracle_sigma_multiplier: 1,
+    order_ttl_seconds: 8,
+    volatility_multiplier: 1.4,
+    enable_spoofing: false,
+    institutional_multiplier: 1,
+  },
+  {
+    name: 'liquidity_shock',
+    label: 'Liquidity Shock',
+    description: 'Thin-book warning stress run.',
+    seed_depth_multiplier: 0.28,
+    liquidity_floor_multiplier: 0.35,
+    spread_multiplier: 4,
+    oracle_sigma_multiplier: 1,
+    order_ttl_seconds: 5,
+    volatility_multiplier: 2.2,
+    enable_spoofing: false,
+    institutional_multiplier: 1,
+  },
+  {
+    name: 'institutional_execution',
+    label: 'Institutional Execution',
+    description: 'Elevated parent-order flow.',
+    seed_depth_multiplier: 1.15,
+    liquidity_floor_multiplier: 1,
+    spread_multiplier: 1.25,
+    oracle_sigma_multiplier: 1,
+    order_ttl_seconds: 20,
+    volatility_multiplier: 1.2,
+    enable_spoofing: false,
+    institutional_multiplier: 2,
+  },
+  {
+    name: 'volatility_spike',
+    label: 'Volatility Spike',
+    description: 'High-volatility quoting stress.',
+    seed_depth_multiplier: 0.75,
+    liquidity_floor_multiplier: 0.8,
+    spread_multiplier: 3,
+    oracle_sigma_multiplier: 2.5,
+    order_ttl_seconds: 7,
+    volatility_multiplier: 2.8,
+    enable_spoofing: false,
+    institutional_multiplier: 1,
+  },
+  {
+    name: 'spoofing_stress',
+    label: 'Spoofing Stress',
+    description: 'Adversarial spoofing detector run.',
+    seed_depth_multiplier: 0.9,
+    liquidity_floor_multiplier: 0.8,
+    spread_multiplier: 1.75,
+    oracle_sigma_multiplier: 1,
+    order_ttl_seconds: 6,
+    volatility_multiplier: 1.5,
+    enable_spoofing: true,
+    institutional_multiplier: 1,
+  },
+  {
+    name: 'close_auction',
+    label: 'Close / Auction',
+    description: 'Closing-style liquidity concentration.',
+    seed_depth_multiplier: 1.8,
+    liquidity_floor_multiplier: 1.6,
+    spread_multiplier: 1.6,
+    oracle_sigma_multiplier: 1,
+    order_ttl_seconds: 12,
+    volatility_multiplier: 1,
+    enable_spoofing: false,
+    institutional_multiplier: 1.4,
+  },
+];
 
 const DEFAULT_AGENT_COUNTS = FALLBACK_PRESETS.balanced.agents;
 const DEFAULT_GROWW_REPLAY = {
@@ -108,10 +204,14 @@ function commandText(
   if (state === 'loading') return 'COMMAND PENDING';
   if (state === 'error') return 'COMMAND REJECTED';
   if (engine === 'abides' && abidesCapability !== 'disabled' && !sandboxApiAvailable) return 'ABIDES PROBE';
-  if (engine === 'groww' && growwReplayRunning) return 'GROWW REPLAY RUNNING';
+  if (engine === 'groww' && growwReplayRunning) {
+    return liveDataSource === 'live_depth' ? 'GROWW LIVE RUNNING' : 'GROWW REPLAY RUNNING';
+  }
   if (engine === 'groww') return connected ? 'GROWW READY' : 'BACKEND OFFLINE';
   if (engine === 'upstox' && upstoxReplayRunning) {
-    return liveDataSource === 'live_ltp' ? 'UPSTOX LIVE RUNNING' : 'UPSTOX REPLAY RUNNING';
+    return liveDataSource === 'live_depth' || liveDataSource === 'live_ltp'
+      ? 'UPSTOX LIVE RUNNING'
+      : 'UPSTOX REPLAY RUNNING';
   }
   if (engine === 'upstox') return connected ? 'UPSTOX READY' : 'BACKEND OFFLINE';
   if (!sandboxApiAvailable) return 'LEGACY API';
@@ -273,6 +373,8 @@ export default function SandboxControlPanel() {
   const [activeEngine, setActiveEngine] = useState<SandboxEngine>('sentinel');
   const [presets, setPresets] = useState<Record<string, SandboxPreset>>(FALLBACK_PRESETS);
   const [preset, setPreset] = useState('balanced');
+  const [scenarios, setScenarios] = useState<SandboxScenario[]>(FALLBACK_SCENARIOS);
+  const [scenario, setScenario] = useState('normal');
   const [sandboxApiAvailable, setSandboxApiAvailable] = useState(true);
   const [abidesCapability, setAbidesCapability] = useState<AbidesCapability>('unverified');
   const [customAgentsEnabled, setCustomAgentsEnabled] = useState(false);
@@ -292,6 +394,8 @@ export default function SandboxControlPanel() {
   const [growwStartTime, setGrowwStartTime] = useState(DEFAULT_GROWW_REPLAY.start_time);
   const [growwEndTime, setGrowwEndTime] = useState(DEFAULT_GROWW_REPLAY.end_time);
   const [growwInterval, setGrowwInterval] = useState(DEFAULT_GROWW_REPLAY.candle_interval);
+  const [growwFeedMode, setGrowwFeedMode] = useState<GrowwFeedMode>('historical');
+  const [growwPollInterval, setGrowwPollInterval] = useState(5);
   const [upstoxInstrumentKey, setUpstoxInstrumentKey] = useState(DEFAULT_UPSTOX_REPLAY.instrument_key);
   const [upstoxUnit, setUpstoxUnit] = useState(DEFAULT_UPSTOX_REPLAY.unit);
   const [upstoxInterval, setUpstoxInterval] = useState(DEFAULT_UPSTOX_REPLAY.interval);
@@ -305,6 +409,7 @@ export default function SandboxControlPanel() {
   const [commandMessage, setCommandMessage] = useState('Preset controls synced with backend.');
 
   const selectedPreset = presets[preset] ?? presets.balanced ?? FALLBACK_PRESETS.balanced;
+  const selectedScenario = scenarios.find((item) => item.name === scenario) ?? FALLBACK_SCENARIOS[0];
   const abidesAvailable = abidesCapability !== 'disabled';
   const selectedAgentCounts = customAgentsEnabled ? agentCounts : selectedPreset.agents;
   const totalAgents = useMemo(
@@ -316,20 +421,22 @@ export default function SandboxControlPanel() {
   const upstoxSource = marketData?.data_source?.provider === 'upstox' ? marketData.data_source : null;
   const growwStatus = growwSource?.status ?? (engine === 'groww' && !connected ? 'disconnected' : 'idle');
   const upstoxStatus = upstoxSource?.status ?? (engine === 'upstox' && !connected ? 'disconnected' : 'idle');
-  const upstoxLiveSelected = upstoxFeedMode === 'live' || upstoxSource?.source === 'live_ltp';
+  const growwLiveSelected = growwFeedMode === 'live' || growwSource?.source === 'live_depth';
+  const upstoxLiveSelected = upstoxFeedMode === 'live' || upstoxSource?.source === 'live_depth' || upstoxSource?.source === 'live_ltp';
   const activeLiveSource = engine === 'upstox' ? upstoxSource : growwSource;
   const activeLiveStatus = engine === 'upstox' ? upstoxStatus : growwStatus;
   const activeLiveProviderLabel = engine === 'upstox'
-    ? upstoxLiveSelected ? 'UPSTOX LIVE LTP' : 'UPSTOX HISTORICAL'
-    : 'GROWW HISTORICAL';
+    ? upstoxLiveSelected ? 'UPSTOX LIVE DEPTH' : 'UPSTOX HISTORICAL'
+    : growwLiveSelected ? 'GROWW LIVE DEPTH' : 'GROWW HISTORICAL';
 
   useEffect(() => {
     let cancelled = false;
 
     const loadSandboxMetadata = async () => {
-      const [presetsResult, capabilitiesResult] = await Promise.allSettled([
+      const [presetsResult, capabilitiesResult, scenariosResult] = await Promise.allSettled([
         api.getSandboxPresets(),
         api.getSandboxCapabilities(),
+        api.getSandboxScenarios(),
       ]);
       if (cancelled) return;
 
@@ -353,8 +460,21 @@ export default function SandboxControlPanel() {
         setAbidesCapability('unverified');
       }
 
+      if (scenariosResult.status === 'fulfilled') {
+        setScenarios(scenariosResult.value.scenarios);
+        if (!scenariosResult.value.scenarios.some((item) => item.name === scenario)) {
+          setScenario('normal');
+        }
+      } else {
+        setScenarios(FALLBACK_SCENARIOS);
+      }
+
       setCommandState('idle');
-      if (presetsResult.status === 'fulfilled' && capabilitiesResult.status === 'fulfilled') {
+      if (
+        presetsResult.status === 'fulfilled'
+        && capabilitiesResult.status === 'fulfilled'
+        && scenariosResult.status === 'fulfilled'
+      ) {
         setCommandMessage('Preset controls synced with backend.');
       } else if (capabilitiesResult.status === 'fulfilled' && capabilitiesResult.value.abides) {
         setCommandMessage('ABIDES endpoint detected. SENTINEL preset metadata is unavailable.');
@@ -370,7 +490,7 @@ export default function SandboxControlPanel() {
     return () => {
       cancelled = true;
     };
-  }, [preset]);
+  }, [preset, scenario]);
 
   const updatePreset = (nextPreset: string) => {
     const next = presets[nextPreset];
@@ -427,6 +547,29 @@ export default function SandboxControlPanel() {
 
     try {
       if (engine === 'groww') {
+        if (growwFeedMode === 'live') {
+          const response = await api.startGrowwLive({
+            groww_symbol: growwSymbol.trim(),
+            exchange: growwExchange.trim().toUpperCase(),
+            segment: growwSegment.trim().toUpperCase(),
+            preset,
+            custom_agents: customAgentsEnabled ? selectedAgentCounts : null,
+            latency_mode: latencyMode,
+            speed: safeSpeed,
+            poll_interval_seconds: toFiniteNumber(growwPollInterval, 5, 1, 60),
+            scenario,
+          });
+          resetSimulationData();
+          setActiveEngine('groww');
+          setSimulationMode('LIVE_SHADOW');
+          setSimulationRunning(true);
+          setCommandState('success');
+          setCommandMessage(
+            `Groww live depth / ${response.groww_symbol} / ${selectedScenario.label} / ${response.last_price.toFixed(2)} / ${response.poll_interval_seconds}s`,
+          );
+          return;
+        }
+
         const response = await api.startGrowwReplay({
           groww_symbol: growwSymbol.trim(),
           exchange: growwExchange.trim().toUpperCase(),
@@ -438,13 +581,16 @@ export default function SandboxControlPanel() {
           custom_agents: customAgentsEnabled ? selectedAgentCounts : null,
           latency_mode: latencyMode,
           speed: safeSpeed,
+          scenario,
         });
         resetSimulationData();
         setActiveEngine('groww');
         setSimulationMode('LIVE_SHADOW');
         setSimulationRunning(true);
         setCommandState('success');
-        setCommandMessage(`Groww historical replay / ${response.groww_symbol} / ${response.bars} bars / ${response.speed}x`);
+        setCommandMessage(
+          `Groww historical replay / ${response.groww_symbol} / ${selectedScenario.label} / ${response.bars} bars / ${response.speed}x`,
+        );
         return;
       }
 
@@ -457,6 +603,7 @@ export default function SandboxControlPanel() {
             latency_mode: latencyMode,
             speed: safeSpeed,
             poll_interval_seconds: toFiniteNumber(upstoxPollInterval, 5, 1, 60),
+            scenario,
           });
           resetSimulationData();
           setActiveEngine('upstox');
@@ -464,7 +611,7 @@ export default function SandboxControlPanel() {
           setSimulationRunning(true);
           setCommandState('success');
           setCommandMessage(
-            `Upstox live LTP / ${response.instrument_key} / ${response.last_price.toFixed(2)} / ${response.poll_interval_seconds}s`,
+            `Upstox live depth / ${response.instrument_key} / ${selectedScenario.label} / ${response.last_price.toFixed(2)} / ${response.poll_interval_seconds}s`,
           );
           return;
         }
@@ -479,13 +626,16 @@ export default function SandboxControlPanel() {
           custom_agents: customAgentsEnabled ? selectedAgentCounts : null,
           latency_mode: latencyMode,
           speed: safeSpeed,
+          scenario,
         });
         resetSimulationData();
         setActiveEngine('upstox');
         setSimulationMode('LIVE_SHADOW');
         setSimulationRunning(true);
         setCommandState('success');
-        setCommandMessage(`Upstox historical replay / ${response.instrument_key} / ${response.bars} bars / ${response.speed}x`);
+        setCommandMessage(
+          `Upstox historical replay / ${response.instrument_key} / ${selectedScenario.label} / ${response.bars} bars / ${response.speed}x`,
+        );
         return;
       }
 
@@ -534,8 +684,11 @@ export default function SandboxControlPanel() {
           latency_mode: latencyMode,
           speed: safeSpeed,
           custom_agents: customAgentsEnabled ? selectedAgentCounts : null,
+          scenario,
         });
-        setCommandMessage(`${response.preset.toUpperCase()} online / ${response.agents} agents / speed ${response.speed}x`);
+        setCommandMessage(
+          `${response.preset.toUpperCase()} online / ${response.agents} agents / ${response.scenario} / speed ${response.speed}x`,
+        );
       }
 
       setActiveEngine(engine);
@@ -814,29 +967,65 @@ export default function SandboxControlPanel() {
               />
             </div>
           )}
+
+          {engine !== 'abides' ? (
+            <SelectField label="SCENARIO" value={scenario} onChange={setScenario}>
+              {scenarios.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.label} / {item.name}
+                </option>
+              ))}
+            </SelectField>
+          ) : null}
         </div>
 
         <div className="space-y-3 border border-gray-900 bg-black/30 p-3">
           {engine === 'groww' ? (
             <>
-              <TextField label="START TIME" value={growwStartTime} onChange={setGrowwStartTime} />
-              <TextField label="END TIME" value={growwEndTime} onChange={setGrowwEndTime} />
-              <label className="block">
-                <span className="block text-[10px] tracking-[0.14em] text-gray-500">CANDLE INTERVAL</span>
-                <select
-                  value={growwInterval}
-                  onChange={(event) => setGrowwInterval(event.currentTarget.value)}
-                  className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]"
-                >
-                  <option value="MIN_1">1 MIN</option>
-                  <option value="MIN_5">5 MIN</option>
-                  <option value="MIN_15">15 MIN</option>
-                  <option value="MIN_30">30 MIN</option>
-                  <option value="HOUR_1">1 HOUR</option>
-                  <option value="DAY_1">1 DAY</option>
-                  <option value="WEEK_1">1 WEEK</option>
-                </select>
-              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <ToggleButton active={growwFeedMode === 'historical'} onClick={() => setGrowwFeedMode('historical')}>
+                  HISTORICAL
+                </ToggleButton>
+                <ToggleButton active={growwFeedMode === 'live'} onClick={() => setGrowwFeedMode('live')}>
+                  LIVE DEPTH
+                </ToggleButton>
+              </div>
+              {growwFeedMode === 'historical' ? (
+                <>
+                  <TextField label="START TIME" value={growwStartTime} onChange={setGrowwStartTime} />
+                  <TextField label="END TIME" value={growwEndTime} onChange={setGrowwEndTime} />
+                  <label className="block">
+                    <span className="block text-[10px] tracking-[0.14em] text-gray-500">CANDLE INTERVAL</span>
+                    <select
+                      value={growwInterval}
+                      onChange={(event) => setGrowwInterval(event.currentTarget.value)}
+                      className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]"
+                    >
+                      <option value="MIN_1">1 MIN</option>
+                      <option value="MIN_5">5 MIN</option>
+                      <option value="MIN_15">15 MIN</option>
+                      <option value="MIN_30">30 MIN</option>
+                      <option value="HOUR_1">1 HOUR</option>
+                      <option value="DAY_1">1 DAY</option>
+                      <option value="WEEK_1">1 WEEK</option>
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <>
+                  <NumericField
+                    label="POLL SECONDS"
+                    value={growwPollInterval}
+                    min={1}
+                    max={60}
+                    onChange={setGrowwPollInterval}
+                  />
+                  <div className="border border-gray-900 bg-black/40 p-2 text-xs text-gray-400">
+                    <div className="text-[10px] tracking-[0.14em] text-gray-500">DEPTH</div>
+                    <div className="mt-1 text-[#00bfff]">LIVE QUOTE SNAPSHOT</div>
+                  </div>
+                </>
+              )}
             </>
           ) : engine === 'upstox' ? (
             <>
@@ -845,7 +1034,7 @@ export default function SandboxControlPanel() {
                   HISTORICAL
                 </ToggleButton>
                 <ToggleButton active={upstoxFeedMode === 'live'} onClick={() => setUpstoxFeedMode('live')}>
-                  LIVE LTP
+                  LIVE DEPTH
                 </ToggleButton>
               </div>
               {upstoxFeedMode === 'historical' ? (
@@ -989,7 +1178,7 @@ export default function SandboxControlPanel() {
               />
             </div>
           ) : (
-            <div className="grid gap-2 md:grid-cols-3">
+            <div className="grid gap-2 md:grid-cols-4">
               <div className="border border-gray-900 bg-black/40 p-2">
                 <div className="text-[10px] tracking-[0.14em] text-gray-500">PROVIDER</div>
                 <div className="mt-1 truncate text-xs text-[#00bfff]">{activeLiveProviderLabel}</div>
@@ -1006,12 +1195,24 @@ export default function SandboxControlPanel() {
               </div>
               <div className="border border-gray-900 bg-black/40 p-2">
                 <div className="text-[10px] tracking-[0.14em] text-gray-500">
-                  {engine === 'upstox' && upstoxLiveSelected ? 'LTP' : 'BARS'}
+                  {(engine === 'upstox' && upstoxLiveSelected) || (engine === 'groww' && growwLiveSelected) ? 'LTP' : 'BARS'}
                 </div>
                 <div className="mt-1 truncate text-xs text-gray-200">
-                  {engine === 'upstox' && upstoxLiveSelected
+                  {(engine === 'upstox' && upstoxLiveSelected) || (engine === 'groww' && growwLiveSelected)
                     ? activeLiveSource?.last_price?.toFixed(2) ?? '--'
                     : activeLiveSource?.bars?.toLocaleString() ?? '--'}
+                </div>
+              </div>
+              <div className="border border-gray-900 bg-black/40 p-2">
+                <div className="text-[10px] tracking-[0.14em] text-gray-500">DEPTH</div>
+                <div className="mt-1 truncate text-xs text-gray-200">
+                  {activeLiveSource?.depth_source === 'provider_live'
+                    ? 'LIVE BOOK'
+                    : activeLiveSource?.depth_source === 'calibrated_from_ohlcv'
+                      ? 'SYNTH OHLCV'
+                      : activeLiveSource?.depth_source
+                        ? 'SYNTH FALLBACK'
+                      : '--'}
                 </div>
               </div>
             </div>

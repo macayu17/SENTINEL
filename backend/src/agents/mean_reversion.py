@@ -4,6 +4,7 @@ from typing import List, Dict
 from collections import deque
 import math
 from .base_agent import BaseAgent
+from .risk import AgentRiskProfile, displayed_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -35,6 +36,14 @@ class MeanReversionAgent(BaseAgent):
         self.position_limit = position_limit
         self.order_size = order_size
         self._price_history: deque = deque(maxlen=max(lookback, rsi_period + 1) + 10)
+        self.risk_profile = AgentRiskProfile(
+            max_inventory=position_limit,
+            base_order_size=order_size,
+            min_order_size=max(10, order_size // 10),
+            participation_rate=0.05,
+            max_active_orders=2,
+            stale_ticks=4,
+        )
 
     def _compute_rsi(self, prices: List[float]) -> float:
         """Compute RSI from a price series."""
@@ -55,6 +64,7 @@ class MeanReversionAgent(BaseAgent):
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         self._price_history.append(price)
         orders: List[Order] = []
 
@@ -108,7 +118,15 @@ class MeanReversionAgent(BaseAgent):
         if self.position == 0 and std > 0:
             # Buy at lower band with oversold RSI
             if price <= lower_band and rsi < self.rsi_oversold:
-                qty = min(self.order_size, self.position_limit)
+                qty = self.risk_profile.target_size(
+                    side=OrderSide.BUY,
+                    position=self.position,
+                    available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                    volatility=volatility,
+                    aggression=0.9,
+                )
+                if qty <= 0:
+                    return orders
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
@@ -121,7 +139,15 @@ class MeanReversionAgent(BaseAgent):
 
             # Sell at upper band with overbought RSI
             elif price >= upper_band and rsi > self.rsi_overbought:
-                qty = min(self.order_size, self.position_limit)
+                qty = self.risk_profile.target_size(
+                    side=OrderSide.SELL,
+                    position=self.position,
+                    available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                    volatility=volatility,
+                    aggression=0.9,
+                )
+                if qty <= 0:
+                    return orders
                 orders.append(
                     Order(
                         agent_id=self.agent_id,
