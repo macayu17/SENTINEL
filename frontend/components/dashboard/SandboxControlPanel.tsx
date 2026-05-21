@@ -75,6 +75,17 @@ const DEFAULT_UPSTOX_REPLAY = {
   to_date: '2025-01-01',
 };
 
+function findBestUpstoxMatch(
+  results: UpstoxInstrumentResult[],
+  query: string,
+): UpstoxInstrumentResult | null {
+  const normalized = query.trim().toUpperCase();
+  if (!normalized) return null;
+  return results.find((result) => result.trading_symbol.toUpperCase() === normalized)
+    ?? results.find((result) => result.instrument_key.toUpperCase() === normalized)
+    ?? null;
+}
+
 function toFiniteNumber(value: number, fallback: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
@@ -169,6 +180,56 @@ function TextField({
         onChange={(event) => onChange(event.currentTarget.value)}
         className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:text-gray-600"
       />
+    </label>
+  );
+}
+
+function DateField({
+  label,
+  value,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block min-w-0">
+      <span className="block truncate text-[10px] tracking-[0.14em] text-gray-500">{label}</span>
+      <input
+        type="date"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:text-gray-600"
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  children,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  children: ReactNode;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block min-w-0">
+      <span className="block truncate text-[10px] tracking-[0.14em] text-gray-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff]"
+      >
+        {children}
+      </select>
     </label>
   );
 }
@@ -340,11 +401,16 @@ export default function SandboxControlPanel() {
         records: 6,
       });
       setUpstoxSearchResults(response.results);
-      if (response.results[0]) {
-        setUpstoxInstrumentKey(response.results[0].instrument_key);
+      const bestMatch = findBestUpstoxMatch(response.results, upstoxSearchQuery);
+      if (bestMatch) {
+        setUpstoxInstrumentKey(bestMatch.instrument_key);
       }
       setCommandState('success');
-      setCommandMessage(`Upstox search / ${response.results.length} matches.`);
+      setCommandMessage(
+        bestMatch
+          ? `Upstox search / selected ${bestMatch.trading_symbol}.`
+          : `Upstox search / ${response.results.length} matches.`,
+      );
     } catch (error) {
       setCommandState('error');
       setCommandMessage(error instanceof Error ? error.message : 'Upstox instrument search failed.');
@@ -683,19 +749,24 @@ export default function SandboxControlPanel() {
                 </button>
               </div>
               {upstoxSearchResults.length > 0 ? (
-                <div className="max-h-20 overflow-auto border border-gray-900 bg-black/50 text-[10px]">
+                <SelectField
+                  label="MATCHES"
+                  value={
+                    upstoxSearchResults.some((result) => result.instrument_key === upstoxInstrumentKey)
+                      ? upstoxInstrumentKey
+                      : ''
+                  }
+                  onChange={setUpstoxInstrumentKey}
+                >
+                  <option value="" disabled>
+                    SELECT INSTRUMENT
+                  </option>
                   {upstoxSearchResults.map((result) => (
-                    <button
-                      key={result.instrument_key}
-                      type="button"
-                      onClick={() => setUpstoxInstrumentKey(result.instrument_key)}
-                      className="grid w-full grid-cols-[0.7fr_1.2fr] gap-2 border-b border-gray-900 px-2 py-1 text-left text-gray-400 hover:bg-[#00bfff]/10 hover:text-gray-100"
-                    >
-                      <span className="truncate text-[#00bfff]">{result.trading_symbol}</span>
-                      <span className="truncate">{result.instrument_key}</span>
-                    </button>
+                    <option key={result.instrument_key} value={result.instrument_key}>
+                      {result.trading_symbol} / {result.instrument_key}
+                    </option>
                   ))}
-                </div>
+                </SelectField>
               ) : null}
               <TextField label="INSTRUMENT KEY" value={upstoxInstrumentKey} onChange={setUpstoxInstrumentKey} />
               <div className="grid grid-cols-2 gap-2">
@@ -780,8 +851,8 @@ export default function SandboxControlPanel() {
               {upstoxFeedMode === 'historical' ? (
                 <>
                   <div className="grid grid-cols-2 gap-2">
-                    <TextField label="FROM DATE" value={upstoxFromDate} onChange={setUpstoxFromDate} />
-                    <TextField label="TO DATE" value={upstoxToDate} onChange={setUpstoxToDate} />
+                    <DateField label="FROM DATE" value={upstoxFromDate} onChange={setUpstoxFromDate} />
+                    <DateField label="TO DATE" value={upstoxToDate} onChange={setUpstoxToDate} />
                   </div>
                   <TextField label="INTERVAL" value={upstoxInterval} onChange={setUpstoxInterval} />
                 </>

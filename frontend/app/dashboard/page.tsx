@@ -39,6 +39,16 @@ function formatClock(value: number): string {
     .padStart(2, '0')}`;
 }
 
+function formatISTWallClock(date: Date): string {
+  return date.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function formatSigned(value: number, digits = 2): string {
   if (!Number.isFinite(value)) {
     return '—';
@@ -425,8 +435,8 @@ export default function DashboardPage() {
   }, [resetSimulationData, setSimulationMode, setSimulationRunning]);
 
   useEffect(() => {
-    setCurrentTime(new Date().toLocaleTimeString());
-    const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString()), 1000);
+    setCurrentTime(formatISTWallClock(new Date()));
+    const timer = setInterval(() => setCurrentTime(formatISTWallClock(new Date())), 1000);
     return () => clearInterval(timer);
   }, []);
 

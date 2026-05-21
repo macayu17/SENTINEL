@@ -39,3 +39,12 @@ def test_upstox_panel_exposes_search_and_live_ltp_mode():
     assert "upstoxFeedMode" in source
     assert "UPSTOX LIVE LTP" in source
     assert "api.startUpstoxLive" in source
+
+
+def test_upstox_panel_uses_selectable_results_and_date_inputs():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "findBestUpstoxMatch" in source
+    assert 'label="MATCHES"' in source
+    assert "DateField" in source
+    assert 'type="date"' in source

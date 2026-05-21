@@ -189,6 +189,7 @@ class SentinelAPI {
       groww_symbol: string;
       initial_price: number;
       bars: number;
+      replay_steps: number;
       realized_vol: number;
       agents: number;
       speed: number;
@@ -283,6 +284,7 @@ class SentinelAPI {
       instrument_key: string;
       initial_price: number;
       bars: number;
+      replay_steps: number;
       realized_vol: number;
       agents: number;
       speed: number;

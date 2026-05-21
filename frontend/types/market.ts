@@ -58,6 +58,7 @@ export interface MarketDataSource {
   unit?: string;
   interval?: string;
   bars?: number;
+  replay_steps?: number;
   period_start?: string;
   period_end?: string;
   last_price?: number;

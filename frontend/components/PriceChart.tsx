@@ -12,12 +12,46 @@ import {
   ComposedChart,
 } from 'recharts';
 import { useMarketStore } from '@/store/market-store';
+import type { MarketDataSource } from '@/types/market';
 
-function formatTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+const IST_TIME_FORMATTER = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+function formatISTTime(timestampMs: number): string {
+  if (!Number.isFinite(timestampMs)) return '--:--:--';
+  return IST_TIME_FORMATTER.format(new Date(timestampMs));
+}
+
+function parseProviderTime(value?: string): number | null {
+  if (!value) return null;
+  const normalized = value.trim().replace(' ', 'T');
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const timestamp = Date.parse(hasZone ? normalized : `${normalized}+05:30`);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function replayTimestampMs(
+  pointTime: number,
+  firstPointTime: number,
+  source?: MarketDataSource | null,
+): number | null {
+  if (source?.source !== 'historical_replay') return null;
+  const start = parseProviderTime(source.period_start);
+  const end = parseProviderTime(source.period_end);
+  if (start === null || end === null || end <= start) return null;
+
+  const replaySteps = Math.max(1, source.replay_steps ?? source.bars ?? 1);
+  const progress = Math.min(1, Math.max(0, (pointTime - firstPointTime) / replaySteps));
+  return start + (end - start) * progress;
+}
+
+function formatChartTime(timestampMs: number): string {
+  return formatISTTime(timestampMs);
 }
 
 interface CustomTooltipProps {
@@ -30,7 +64,7 @@ function TerminalTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload) return null;
   return (
     <div className="bg-black border border-gray-700 px-2 py-1 font-mono text-xs">
-      <div className="text-gray-500">{formatTime(label || 0)}</div>
+      <div className="text-gray-500">{formatChartTime(label || 0)} IST</div>
       {payload.map((p, i) => (
         <div key={i} style={{ color: p.color }}>
           {p.dataKey.toUpperCase()}: {typeof p.value === 'number' ? p.value.toFixed(4) : p.value}
@@ -43,6 +77,12 @@ function TerminalTooltip({ active, payload, label }: CustomTooltipProps) {
 export default function PriceChart() {
   const priceHistory = useMarketStore((s) => s.priceHistory);
   const marketData = useMarketStore((s) => s.marketData);
+  const dataSource = marketData?.data_source ?? null;
+  const firstPointTime = priceHistory[0]?.time ?? 0;
+  const chartData = priceHistory.map((point) => ({
+    ...point,
+    chartTimeMs: replayTimestampMs(point.time, firstPointTime, dataSource) ?? point.receivedAt,
+  }));
 
   const currentPrice = marketData?.price ?? 0;
   const priceChange = priceHistory.length > 1
@@ -78,15 +118,17 @@ export default function PriceChart() {
 
       <div className="h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={priceHistory} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+          <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
             <CartesianGrid
               strokeDasharray="1 4"
               stroke="#1a1a1a"
               vertical={false}
             />
             <XAxis
-              dataKey="time"
-              tickFormatter={formatTime}
+              dataKey="chartTimeMs"
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              tickFormatter={formatChartTime}
               stroke="#333"
               tick={{ fill: '#555', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
               interval="preserveStartEnd"

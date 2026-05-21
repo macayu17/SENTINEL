@@ -21,7 +21,12 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function timestampLabel(date: Date): string {
-  return date.toLocaleTimeString([], { hour12: false, minute: '2-digit', second: '2-digit' });
+  return date.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 function nextDepthHeat(midPrice: number): DepthHeatLevel[] {

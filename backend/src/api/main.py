@@ -634,6 +634,7 @@ async def start_groww_replay(request: GrowwReplayRequest):
         latency_config=latency_cfg,
         speed_multiplier=request.speed,
     )
+    replay_steps = len(oracle_path)
     simulator.data_source = {
         "provider": "groww",
         "source": "historical_replay",
@@ -643,6 +644,7 @@ async def start_groww_replay(request: GrowwReplayRequest):
         "segment": request.segment.upper(),
         "candle_interval": request.candle_interval,
         "bars": info.bars,
+        "replay_steps": replay_steps,
         "period_start": info.period_start,
         "period_end": info.period_end,
     }
@@ -655,6 +657,7 @@ async def start_groww_replay(request: GrowwReplayRequest):
         "groww_symbol": info.ticker,
         "initial_price": initial_price,
         "bars": info.bars,
+        "replay_steps": replay_steps,
         "realized_vol": info.realized_vol,
         "agents": len(agents),
         "speed": request.speed,
@@ -746,6 +749,7 @@ async def start_upstox_replay(request: UpstoxReplayRequest):
         latency_config=latency_cfg,
         speed_multiplier=request.speed,
     )
+    replay_steps = len(oracle_path)
     simulator.data_source = {
         "provider": "upstox",
         "source": "historical_replay",
@@ -754,6 +758,7 @@ async def start_upstox_replay(request: UpstoxReplayRequest):
         "unit": request.unit.lower(),
         "interval": request.interval,
         "bars": info.bars,
+        "replay_steps": replay_steps,
         "period_start": info.period_start,
         "period_end": info.period_end,
     }
@@ -766,6 +771,7 @@ async def start_upstox_replay(request: UpstoxReplayRequest):
         "instrument_key": info.ticker,
         "initial_price": initial_price,
         "bars": info.bars,
+        "replay_steps": replay_steps,
         "realized_vol": info.realized_vol,
         "agents": len(agents),
         "speed": request.speed,

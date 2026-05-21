@@ -3,7 +3,7 @@ import { MarketUpdate, Alert } from '@/types/market';
 
 interface MarketStore {
   marketData: MarketUpdate | null;
-  priceHistory: { time: number; price: number; spread: number }[];
+  priceHistory: { time: number; receivedAt: number; price: number; spread: number }[];
   connected: boolean;
   alerts: Alert[];
   simulationRunning: boolean;
@@ -33,6 +33,7 @@ export const useMarketStore = create<MarketStore>((set) => ({
     set((state) => {
       const newPoint = {
         time: data.timestamp,
+        receivedAt: Date.now(),
         price: data.price,
         spread: data.spread,
       };
