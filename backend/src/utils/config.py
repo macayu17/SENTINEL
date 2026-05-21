@@ -3,7 +3,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 _UTILS_DIR = Path(__file__).resolve().parent
 _BACKEND_ROOT = _UTILS_DIR.parents[1]
@@ -18,6 +18,29 @@ def _load_environment_files(backend_root: Path = _BACKEND_ROOT, project_root: Pa
 
 
 _load_environment_files()
+
+
+def _reload_environment_values(
+    names: list[str],
+    backend_root: Path = _BACKEND_ROOT,
+    project_root: Path = _PROJECT_ROOT,
+) -> None:
+    """Fill missing runtime env values from dotenv without overriding real env."""
+    pending = [name for name in names if not os.getenv(name)]
+    if not pending:
+        return
+
+    for env_file in (backend_root / ".env", project_root / ".env"):
+        if not env_file.exists():
+            continue
+        values = dotenv_values(env_file)
+        for name in list(pending):
+            value = values.get(name)
+            if value:
+                os.environ[name] = value
+                pending.remove(name)
+        if not pending:
+            return
 
 
 def _split_csv(value: str) -> list[str]:

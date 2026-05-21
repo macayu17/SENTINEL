@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+from backend.src.data import upstox_provider
 from backend.src.data.upstox_provider import (
     UpstoxCredentialsError,
     UpstoxHistoricalProvider,
@@ -25,6 +26,7 @@ from backend.src.data.upstox_provider import (
 def test_upstox_provider_requires_server_token(monkeypatch):
     monkeypatch.delenv("UPSTOX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("UPSTOX_ANALYTICS_TOKEN", raising=False)
+    monkeypatch.setattr(upstox_provider, "_reload_environment_values", lambda names: None)
 
     with pytest.raises(UpstoxCredentialsError, match="UPSTOX_ACCESS_TOKEN"):
         UpstoxHistoricalProvider()

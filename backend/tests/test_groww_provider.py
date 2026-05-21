@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+from backend.src.data import groww_provider
 from backend.src.data.groww_provider import (
     GrowwCredentialsError,
     GrowwHistoricalProvider,
@@ -22,6 +23,7 @@ def test_groww_provider_requires_server_auth_token(monkeypatch):
     monkeypatch.delenv("GROWW_API_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("GROWW_API_KEY", raising=False)
     monkeypatch.delenv("GROWW_API_SECRET", raising=False)
+    monkeypatch.setattr(groww_provider, "_reload_environment_values", lambda names: None)
 
     with pytest.raises(GrowwCredentialsError, match="GROWW_API_AUTH_TOKEN"):
         GrowwHistoricalProvider()

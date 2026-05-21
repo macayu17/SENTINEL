@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from backend.src.api import main as api_main
+from backend.src.data import groww_provider, upstox_provider
 from backend.src.data.upstox_provider import UpstoxCredentialsError, UpstoxInstrument, UpstoxQuote
 from backend.src.market.market_data import StockInfo
 
@@ -258,6 +259,7 @@ def test_groww_fetch_missing_token_returns_clear_error(monkeypatch):
     monkeypatch.delenv("GROWW_API_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("GROWW_API_KEY", raising=False)
     monkeypatch.delenv("GROWW_API_SECRET", raising=False)
+    monkeypatch.setattr(groww_provider, "_reload_environment_values", lambda names: None)
     client = TestClient(api_main.app)
 
     response = client.post(
@@ -279,6 +281,7 @@ def test_groww_fetch_missing_token_returns_clear_error(monkeypatch):
 def test_upstox_fetch_missing_token_returns_clear_error(monkeypatch):
     monkeypatch.delenv("UPSTOX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("UPSTOX_ANALYTICS_TOKEN", raising=False)
+    monkeypatch.setattr(upstox_provider, "_reload_environment_values", lambda names: None)
     client = TestClient(api_main.app)
 
     response = client.post(

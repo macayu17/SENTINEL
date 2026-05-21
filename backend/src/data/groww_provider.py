@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import numpy as np
 
 from ..market.market_data import StockInfo
+from ..utils.config import _reload_environment_values
 
 
 class GrowwProviderError(RuntimeError):
@@ -198,6 +199,14 @@ class GrowwHistoricalProvider:
         if self._client is not None:
             return
 
+        _reload_environment_values(
+            [
+                "GROWW_API_AUTH_TOKEN",
+                "GROWW_API_KEY",
+                "GROWW_API_SECRET",
+                "GROWW_API_TOTP",
+            ]
+        )
         token = auth_token or os.getenv("GROWW_API_AUTH_TOKEN")
         api_key = os.getenv("GROWW_API_KEY")
         api_secret = os.getenv("GROWW_API_SECRET")

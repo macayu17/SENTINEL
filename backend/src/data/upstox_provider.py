@@ -13,6 +13,7 @@ import httpx
 import numpy as np
 
 from ..market.market_data import StockInfo
+from ..utils.config import _reload_environment_values
 
 
 class UpstoxProviderError(RuntimeError):
@@ -285,6 +286,14 @@ class UpstoxHistoricalProvider:
         http_client: Optional[httpx.Client] = None,
         timeout: float = 10.0,
     ) -> None:
+        _reload_environment_values(
+            [
+                "UPSTOX_ACCESS_TOKEN",
+                "UPSTOX_ANALYTICS_TOKEN",
+                "UPSTOX_BASE_URL",
+                "UPSTOX_V2_BASE_URL",
+            ]
+        )
         token = access_token or os.getenv("UPSTOX_ACCESS_TOKEN") or os.getenv("UPSTOX_ANALYTICS_TOKEN")
         if not token:
             raise UpstoxCredentialsError(
