@@ -115,6 +115,29 @@ def test_stock_replay_always_uses_sandbox_mode(monkeypatch):
         api_main.config.simulation_mode = "SANDBOX"
 
 
+def test_replay_oracle_sigma_uses_interval_return_volatility():
+    sample = StockInfo(
+        ticker="NSE-WIPRO",
+        name="NSE-WIPRO Groww CASH",
+        currency="INR",
+        last_close=99.0,
+        period_start="2025-09-24T09:15:00",
+        period_end="2025-09-24T10:15:00",
+        bars=3,
+        prices=[100.0, 110.0, 99.0],
+        volumes=[1000, 1200, 1300],
+        highs=[101.0, 111.0, 100.0],
+        lows=[99.0, 109.0, 98.0],
+        returns=[0.10, -0.10],
+        realized_vol=0.80,
+        mean_return=0.0,
+    )
+
+    _, _, _, _, oracle_cfg = api_main._build_replay_components(sample, "normal")
+
+    assert oracle_cfg.sigma_s == pytest.approx(10.0)
+
+
 def test_market_data_endpoints_require_active_simulation():
     api_main.simulator = None
     client = TestClient(api_main.app)
@@ -326,6 +349,7 @@ def test_groww_live_shadow_replay_starts_oracle_path(monkeypatch):
         assert api_main.simulator.data_source["provider"] == "groww"
         assert response["depth_source"] == "modeled_from_ohlcv"
         assert response["order_book_history"] == "unavailable_from_provider"
+        assert "historical L2" in response["depth_note"]
         assert api_main.simulator.data_source["depth_source"] == "modeled_from_ohlcv"
         assert api_main.simulator.data_source["order_book_history"] == "unavailable_from_provider"
         assert api_main.simulator.depth_profile["source"] == "ohlcv"
@@ -395,6 +419,7 @@ def test_upstox_live_shadow_replay_starts_oracle_path(monkeypatch):
         assert api_main.simulator.data_source["instrument_key"] == sample.ticker
         assert response["depth_source"] == "modeled_from_ohlcv"
         assert response["order_book_history"] == "unavailable_from_provider"
+        assert "historical L2" in response["depth_note"]
         assert api_main.simulator.data_source["depth_source"] == "modeled_from_ohlcv"
         assert api_main.simulator.data_source["order_book_history"] == "unavailable_from_provider"
         assert api_main.simulator.depth_profile["source"] == "ohlcv"
@@ -403,6 +428,87 @@ def test_upstox_live_shadow_replay_starts_oracle_path(monkeypatch):
             api_main.simulator.stop()
         api_main.simulator = None
         api_main._sim_task = None
+
+
+def test_groww_fetch_response_includes_modeled_depth_metadata(monkeypatch):
+    sample = StockInfo(
+        ticker="NSE-WIPRO",
+        name="NSE-WIPRO Groww CASH",
+        currency="INR",
+        last_close=246.5,
+        period_start="2025-09-24T10:30:00",
+        period_end="2025-09-24T11:00:00",
+        bars=3,
+        prices=[245.6, 246.1, 246.5],
+        volumes=[1000, 1200, 1300],
+        highs=[246.0, 246.3, 246.8],
+        lows=[245.1, 245.8, 246.0],
+        returns=[0.002, 0.0016],
+        realized_vol=0.12,
+        mean_return=0.0018,
+    )
+
+    monkeypatch.setattr(api_main, "fetch_groww_historical_stock", lambda **kwargs: sample)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/api/live-shadow/groww/fetch",
+        json={
+            "groww_symbol": "NSE-WIPRO",
+            "exchange": "NSE",
+            "segment": "CASH",
+            "start_time": "2025-09-24 10:30:00",
+            "end_time": "2025-09-24 11:00:00",
+            "candle_interval": "MIN_30",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["depth_source"] == "modeled_from_ohlcv"
+    assert payload["order_book_history"] == "unavailable_from_provider"
+    assert payload["order_book_source"] == "modeled_replay_depth"
+    assert "historical L2" in payload["depth_note"]
+
+
+def test_upstox_fetch_response_includes_modeled_depth_metadata(monkeypatch):
+    sample = StockInfo(
+        ticker="NSE_EQ|INE002A01018",
+        name="NSE_EQ|INE002A01018 Upstox minutes/30",
+        currency="INR",
+        last_close=2521.5,
+        period_start="2025-01-01T09:15:00+05:30",
+        period_end="2025-01-01T10:15:00+05:30",
+        bars=3,
+        prices=[2510.0, 2518.0, 2521.5],
+        volumes=[1000, 1200, 1300],
+        highs=[2512.0, 2520.0, 2524.0],
+        lows=[2508.0, 2515.0, 2519.0],
+        returns=[0.003, 0.0014],
+        realized_vol=0.18,
+        mean_return=0.0022,
+    )
+
+    monkeypatch.setattr(api_main, "fetch_upstox_historical_stock", lambda **kwargs: sample)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/api/live-shadow/upstox/fetch",
+        json={
+            "instrument_key": "NSE_EQ|INE002A01018",
+            "unit": "minutes",
+            "interval": "30",
+            "from_date": "2025-01-01",
+            "to_date": "2025-01-01",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["depth_source"] == "modeled_from_ohlcv"
+    assert payload["order_book_history"] == "unavailable_from_provider"
+    assert payload["order_book_source"] == "modeled_replay_depth"
+    assert "historical L2" in payload["depth_note"]
 
 
 def test_groww_fetch_missing_token_returns_clear_error(monkeypatch):
@@ -567,6 +673,36 @@ def test_upstox_live_depth_failure_does_not_freeze_existing_simulation(monkeypat
         "/api/live-shadow/upstox/live",
         json={
             "instrument_key": "NSE_EQ|INE002A01018",
+            "speed": 1.0,
+            "poll_interval_seconds": 1,
+        },
+    )
+
+    assert response.status_code == 503
+    assert api_main.simulator is old_simulator
+    assert api_main.simulator.running is True
+    assert api_main.simulator.mode == "SANDBOX"
+
+    api_main.simulator = None
+
+
+def test_groww_live_depth_failure_does_not_freeze_existing_simulation(monkeypatch):
+    old_simulator = api_main.MarketSimulator([], initial_price=100.0, mode="SANDBOX")
+    old_simulator.running = True
+    api_main.simulator = old_simulator
+
+    def fake_quote(**kwargs):
+        raise groww_provider.GrowwCredentialsError("Groww rejected quote access")
+
+    monkeypatch.setattr(api_main, "fetch_groww_quote", fake_quote)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/api/live-shadow/groww/live",
+        json={
+            "groww_symbol": "RELIANCE",
+            "exchange": "NSE",
+            "segment": "CASH",
             "speed": 1.0,
             "poll_interval_seconds": 1,
         },

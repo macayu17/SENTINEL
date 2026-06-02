@@ -4,6 +4,7 @@ import type { Alert, MarketUpdate, SimulationMode } from '@/types/market';
 type PriceHistoryPoint = {
   time: number;
   receivedAt: number;
+  providerTimestamp?: string | null;
   price: number;
   spread: number;
 };
@@ -89,6 +90,7 @@ export const useMarketStore = create<MarketStore>((set) => ({
       const newPoint = {
         time: data.timestamp,
         receivedAt,
+        providerTimestamp: data.data_source?.timestamp ?? null,
         price: data.price,
         spread: data.spread,
       };

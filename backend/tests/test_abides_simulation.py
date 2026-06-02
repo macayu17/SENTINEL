@@ -97,3 +97,51 @@ def test_abides_export_snapshot_preserves_trace_and_order_flow_shape():
     assert snapshot["events"][0]["type"] == "fill"
     assert snapshot["recent_orders"][0]["status"] == "filled"
     assert snapshot["warning_timeline"] == [{"warning_level": "safe"}]
+
+
+def test_abides_order_flow_counts_buy_and_sell_aggressor_volume():
+    sim = AbidesSimulation(oracle_config=OracleConfig(enabled=False))
+    exchange = ExchangeAgent(initial_price=100.0)
+    sim.set_exchange(exchange)
+    sim.register_agent(Agent("BUYER", agent_type="TestBuyer"))
+    sim.register_agent(Agent("SELLER", agent_type="TestSeller"))
+    sim.register_agent(Agent("ASK_POSTER", agent_type="TestSeller"))
+    sim.register_agent(Agent("BID_POSTER", agent_type="TestBuyer"))
+
+    sim._dispatch_message(
+        OrderMessage("ASK_POSTER", OrderSide.SELL, OrderType.LIMIT, 100.0, 25)
+    )
+    sim.kernel.run_until(1.0)
+    sim._dispatch_message(
+        OrderMessage("BUYER", OrderSide.BUY, OrderType.MARKET, 100.0, 25)
+    )
+    sim.kernel.run_until(2.0)
+    sim._dispatch_message(
+        OrderMessage("BID_POSTER", OrderSide.BUY, OrderType.LIMIT, 99.9, 30)
+    )
+    sim.kernel.run_until(3.0)
+    sim._dispatch_message(
+        OrderMessage("SELLER", OrderSide.SELL, OrderType.MARKET, 99.9, 30)
+    )
+    sim.kernel.run_until(4.0)
+
+    summary = sim.get_order_flow_summary()
+    recent_orders = sim.get_recent_orders(limit=10)
+
+    assert summary["fills"] == 2
+    assert summary["buy_volume"] == 25
+    assert summary["sell_volume"] == 30
+    assert recent_orders[0]["side"] == "SELL"
+
+
+def test_abides_informed_agent_receives_initial_oracle_market_data():
+    sim = AbidesSimulation(oracle_config=OracleConfig(enabled=True, r_bar=101.0))
+    exchange = ExchangeAgent(initial_price=100.0)
+    sim.set_exchange(exchange)
+    informed = InformedAgent("INF_ONLY", wakeup_interval=0.5, mispricing_threshold=0.1)
+    sim.register_agent(informed)
+
+    sim.initialize()
+
+    assert informed.last_oracle is not None
+    assert informed.last_oracle["mispricing"] < 0

@@ -534,7 +534,8 @@ class MarketSimulator:
     def _request_agent_orders(self, agent: BaseAgent) -> None:
         """Process an agent action cycle through the simulator's normal order path."""
         note_cancel_result = getattr(agent, "note_cancel_result", None)
-        for order_id in agent.consume_cancellations():
+        state = self.get_market_state()
+        for order_id in agent.cancel_for_state(state):
             cancelled = self._cancel_order(order_id)
             if callable(note_cancel_result):
                 note_cancel_result(cancelled)
@@ -894,19 +895,22 @@ def get_sandbox_presets() -> Dict:
         "balanced": {
             "name": "Balanced", "description": "40 agents — realistic mix", "icon": "⚖️",
             "agents": {"MarketMaker": 3, "HFT": 2, "Institutional": 2, "Retail": 10, "Informed": 3,
-                       "Noise": 10, "Momentum": 2, "MeanReversion": 2, "Spoofing": 0, "Sentiment": 5},
+                       "Noise": 10, "Momentum": 2, "MeanReversion": 2, "Spoofing": 0, "Sentiment": 5,
+                       "LiquidityTrader": 1},
             "oracle": False, "latency": "deterministic",
         },
         "institutional": {
             "name": "Institutional", "description": "80 agents — deep market", "icon": "🏦",
             "agents": {"MarketMaker": 5, "HFT": 4, "Institutional": 8, "Retail": 15, "Informed": 5,
-                       "Noise": 20, "Momentum": 8, "MeanReversion": 5, "Spoofing": 0, "Sentiment": 8},
+                       "Noise": 20, "Momentum": 8, "MeanReversion": 5, "Spoofing": 0, "Sentiment": 8,
+                       "LiquidityTrader": 5},
             "oracle": True, "latency": "cubic",
         },
         "stress_test": {
             "name": "Stress Test", "description": "200 agents — chaos mode", "icon": "🔥",
             "agents": {"MarketMaker": 8, "HFT": 10, "Institutional": 5, "Retail": 30, "Informed": 10,
-                       "Noise": 100, "Momentum": 12, "MeanReversion": 10, "Spoofing": 0, "Sentiment": 12},
+                       "Noise": 100, "Momentum": 12, "MeanReversion": 10, "Spoofing": 0, "Sentiment": 12,
+                       "LiquidityTrader": 3},
             "oracle": True, "latency": "cubic",
         },
     }
@@ -928,12 +932,13 @@ def create_sandbox_agents(
     from ..agents.mean_reversion import MeanReversionAgent
     from ..agents.spoofing import SpoofingAgent
     from ..agents.sentiment import SentimentAgent
+    from ..agents.liquidity_trader import LiquidityTraderAgent
 
     AGENT_MAP = {
         "MarketMaker": MarketMakerAgent, "HFT": HFTAgent, "Institutional": InstitutionalAgent,
         "Retail": RetailAgent, "Informed": InformedAgent, "Noise": NoiseAgent,
         "Momentum": MomentumAgent, "MeanReversion": MeanReversionAgent,
-        "Spoofing": SpoofingAgent, "Sentiment": SentimentAgent,
+        "Spoofing": SpoofingAgent, "Sentiment": SentimentAgent, "LiquidityTrader": LiquidityTraderAgent,
     }
 
     if custom_agents and any(v > 0 for v in custom_agents.values()):

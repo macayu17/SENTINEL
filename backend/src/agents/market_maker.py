@@ -36,11 +36,11 @@ class MarketMakerAgent(BaseAgent):
         )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
-        mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
         time_to_close = market_state.get("time_to_close", float("inf"))
         volatility = float(market_state.get("volatility", 0.0) or 0.0)
         imbalance = float(market_state.get("order_book_imbalance", 0.0) or 0.0)
         orders: List[Order] = []
+        mid, bid_price, ask_price = self._quote_targets(market_state)
 
         # Flatten near close
         if time_to_close < 600 and self.position != 0:
@@ -56,18 +56,15 @@ class MarketMakerAgent(BaseAgent):
             )
             return orders
 
+        if self.active_orders and not self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=bid_price,
+            target_ask=ask_price,
+        ):
+            return orders
+
         # Inventory ratio determines quoting behaviour
         inv_ratio = abs(self.position) / self.max_inventory if self.max_inventory else 0
-
-        # Inventory and volatility widen quotes; imbalance shifts reservation price.
-        vol_multiplier = 1.0 + min(4.0, volatility * 40.0)
-        imbalance_multiplier = 1.0 + min(0.5, abs(imbalance) * 0.5)
-        half_spread = max(0.01, (self.base_spread * mid) / 2 * vol_multiplier * imbalance_multiplier)
-        inventory_skew = (self.position / self.max_inventory) * half_spread * 2 if self.max_inventory else 0.0
-        reservation = mid - inventory_skew
-
-        bid_price = round(reservation - half_spread, 2)
-        ask_price = round(reservation + half_spread, 2)
 
         quote_specs = [
             (OrderSide.BUY, bid_price, self.position <= 0.85 * self.max_inventory),
@@ -97,5 +94,33 @@ class MarketMakerAgent(BaseAgent):
                 orders.append(order)
         return orders
 
-    def consume_cancellations(self) -> List[str]:
-        return self.cancel_all_active_orders()
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        if not self.active_orders:
+            return []
+        time_to_close = market_state.get("time_to_close", float("inf"))
+        if time_to_close < 600 and self.position != 0:
+            return self.cancel_all_active_orders()
+        _, bid_price, ask_price = self._quote_targets(market_state)
+        if self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=bid_price,
+            target_ask=ask_price,
+        ):
+            return self.cancel_all_active_orders()
+        return []
+
+    def _quote_targets(self, market_state: Dict) -> tuple[float, float, float]:
+        mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        volatility = float(market_state.get("volatility", 0.0) or 0.0)
+        imbalance = float(market_state.get("order_book_imbalance", 0.0) or 0.0)
+
+        # Inventory and volatility widen quotes; imbalance shifts reservation price.
+        vol_multiplier = 1.0 + min(4.0, volatility * 40.0)
+        imbalance_multiplier = 1.0 + min(0.5, abs(imbalance) * 0.5)
+        half_spread = max(0.01, (self.base_spread * mid) / 2 * vol_multiplier * imbalance_multiplier)
+        inventory_skew = (self.position / self.max_inventory) * half_spread * 2 if self.max_inventory else 0.0
+        reservation = mid - inventory_skew
+
+        bid_price = round(reservation - half_spread, 2)
+        ask_price = round(reservation + half_spread, 2)
+        return mid, bid_price, ask_price

@@ -32,6 +32,24 @@ def test_normal_preset_excludes_spoofing_until_stress_scenario_enables_it():
     assert stress_counts["Spoofing"] >= 1
 
 
+def test_balanced_preset_matches_forty_agent_label_with_liquidity_flow():
+    balanced = get_sandbox_presets()["balanced"]["agents"]
+
+    assert sum(balanced.values()) == 40
+    assert balanced["LiquidityTrader"] == 1
+
+
+def test_sandbox_agent_factory_supports_every_preset_agent_type():
+    from backend.src.market.simulator import create_sandbox_agents
+
+    for preset_name, preset in get_sandbox_presets().items():
+        requested = {name: 1 for name in preset["agents"]}
+        agents = create_sandbox_agents(preset_name, custom_agents=requested, scenario="spoofing_stress")
+
+        created_types = {agent.agent_type for agent in agents}
+        assert set(requested).issubset(created_types)
+
+
 def test_market_simulator_state_includes_scenario_and_uses_depth_profile():
     scenario = get_scenario_config("liquidity_shock")
     simulator = MarketSimulator([], initial_price=100.0, scenario=scenario.name)

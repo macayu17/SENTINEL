@@ -21,17 +21,20 @@ class InstitutionalAgent(BaseAgent):
         execution_window: int = 3600,
         slice_interval: int = 60,
         max_slice_size: int = 1000,
+        start_after_seconds: float | None = None,
     ) -> None:
         super().__init__(agent_id, "Institutional", initial_capital, latency_seconds=0.01)
         self.target_quantity = target_quantity
         self.execution_window = execution_window
         self.slice_interval = slice_interval
         self.max_slice_size = max_slice_size
+        self.start_after_seconds = start_after_seconds
         self.executed_quantity: int = 0
         self.side: OrderSide = random.choice([OrderSide.BUY, OrderSide.SELL])
         self._last_slice_time: float = 0.0
         self._start_time: float = 0.0
         self._started: bool = False
+        self._scheduled_start_time: float = self._next_start_time()
         self.risk_profile = AgentRiskProfile(
             max_inventory=max(target_quantity, max_slice_size),
             base_order_size=max_slice_size,
@@ -48,17 +51,20 @@ class InstitutionalAgent(BaseAgent):
         volatility = float(market_state.get("volatility", 0.0) or 0.0)
         orders: List[Order] = []
 
+        if self.active_orders and self._has_fresh_active_order(market_state):
+            return orders
+
         # Already done
         if self.executed_quantity >= self.target_quantity:
             return orders
 
         # Start execution at a random point in the session
         if not self._started:
-            if random.random() < 0.01:  # ~1% chance per step to start
-                self._started = True
-                self._start_time = current_time
-                self._last_slice_time = current_time
-            return orders
+            if current_time < self._scheduled_start_time:
+                return orders
+            self._started = True
+            self._start_time = self._scheduled_start_time
+            self._last_slice_time = self._scheduled_start_time
 
         # TWAP: slice at regular intervals
         elapsed_since_slice = current_time - self._last_slice_time
@@ -94,6 +100,12 @@ class InstitutionalAgent(BaseAgent):
 
         return orders
 
+    def _next_start_time(self) -> float:
+        if self.start_after_seconds is not None:
+            return max(0.0, float(self.start_after_seconds))
+        latest = max(float(self.slice_interval), min(600.0, self.execution_window * 0.2))
+        return random.uniform(0.0, latest)
+
     def update_position(self, trade) -> None:
         super().update_position(trade)
         self.executed_quantity = abs(self.position)
@@ -105,6 +117,21 @@ class InstitutionalAgent(BaseAgent):
         self._last_slice_time = 0.0
         self._start_time = 0.0
         self._started = False
+        self._scheduled_start_time = self._next_start_time()
 
-    def consume_cancellations(self) -> List[str]:
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        if not self.active_orders:
+            return []
+        if self._has_fresh_active_order(market_state):
+            return []
         return self.cancel_all_active_orders()
+
+    def _has_fresh_active_order(self, market_state: Dict) -> bool:
+        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        spread = float(market_state.get("spread", 0.05) or 0.05)
+        target = near_touch_price(price, self.side, spread)
+        return not self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=target if self.side == OrderSide.BUY else price,
+            target_ask=target if self.side == OrderSide.SELL else price,
+        )

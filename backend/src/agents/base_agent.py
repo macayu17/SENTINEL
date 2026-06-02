@@ -50,6 +50,10 @@ class BaseAgent(ABC):
         """Return any outstanding order IDs the simulator should cancel."""
         return []
 
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        """Return cancellations that depend on the current market snapshot."""
+        return self.consume_cancellations()
+
     def cancel_all_active_orders(self) -> List[str]:
         """Cancel and clear any currently tracked resting orders."""
         order_ids = list(self.active_orders.keys())

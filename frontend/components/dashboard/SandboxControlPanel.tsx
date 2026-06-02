@@ -16,6 +16,14 @@ type GrowwFeedMode = 'historical' | 'live';
 type UpstoxFeedMode = 'historical' | 'live';
 type CommandState = 'idle' | 'loading' | 'success' | 'error';
 type AbidesCapability = 'available' | 'disabled' | 'unverified';
+type LiveShadowProvider = 'groww' | 'upstox';
+
+const FIELD_BASE_CLASS =
+  'mt-1 h-10 min-h-10 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:cursor-not-allowed disabled:text-gray-600';
+const TEXT_FIELD_CLASS = `${FIELD_BASE_CLASS} cursor-text`;
+const NUMERIC_FIELD_CLASS = TEXT_FIELD_CLASS;
+const SELECT_FIELD_CLASS = `${FIELD_BASE_CLASS} cursor-pointer appearance-auto pr-8 [color-scheme:dark]`;
+const DATE_FIELD_CLASS = `${FIELD_BASE_CLASS} cursor-pointer [color-scheme:dark]`;
 
 const AGENT_ORDER = [
   'MarketMaker',
@@ -24,6 +32,7 @@ const AGENT_ORDER = [
   'Retail',
   'Informed',
   'Noise',
+  'LiquidityTrader',
   'Momentum',
   'MeanReversion',
   'Spoofing',
@@ -50,6 +59,7 @@ const FALLBACK_PRESETS: Record<string, SandboxPreset> = {
       Retail: 10,
       Informed: 3,
       Noise: 10,
+      LiquidityTrader: 1,
       Momentum: 2,
       MeanReversion: 2,
       Spoofing: 0,
@@ -206,21 +216,22 @@ function commandText(
   liveDataProvider?: string | null,
   liveDataSource?: string | null,
 ): string {
-  const growwReplayRunning = (activeEngine === 'groww' && running) || (liveDataProvider === 'groww' && running);
-  const upstoxReplayRunning = (activeEngine === 'upstox' && running) || (liveDataProvider === 'upstox' && running);
-
   if (state === 'loading') return 'COMMAND PENDING';
   if (state === 'error') return 'COMMAND REJECTED';
   if (engine === 'abides' && abidesCapability !== 'disabled' && !sandboxApiAvailable) return 'ABIDES PROBE';
-  if (engine === 'groww' && growwReplayRunning) {
+
+  if (liveDataProvider === 'groww' && running) {
     return liveDataSource === 'live_depth' ? 'GROWW LIVE RUNNING' : 'GROWW REPLAY RUNNING';
   }
-  if (engine === 'groww') return connected ? 'GROWW READY' : 'BACKEND OFFLINE';
-  if (engine === 'upstox' && upstoxReplayRunning) {
+  if (liveDataProvider === 'upstox' && running) {
     return liveDataSource === 'live_depth' || liveDataSource === 'live_ltp'
       ? 'UPSTOX LIVE RUNNING'
       : 'UPSTOX REPLAY RUNNING';
   }
+
+  if (activeEngine === 'groww' && running) return 'GROWW REPLAY RUNNING';
+  if (activeEngine === 'upstox' && running) return 'UPSTOX REPLAY RUNNING';
+  if (engine === 'groww') return connected ? 'GROWW READY' : 'BACKEND OFFLINE';
   if (engine === 'upstox') return connected ? 'UPSTOX READY' : 'BACKEND OFFLINE';
   if (!sandboxApiAvailable) return 'LEGACY API';
   if (running) return 'SANDBOX RUNNING';
@@ -231,6 +242,26 @@ function abidesCapabilityText(capability: AbidesCapability): string {
   if (capability === 'available') return 'ABIDES MODULE AVAILABLE';
   if (capability === 'disabled') return 'ABIDES MODULE DISABLED';
   return 'ABIDES MODULE UNVERIFIED';
+}
+
+function isLiveShadowProvider(provider?: string | null): provider is LiveShadowProvider {
+  return provider === 'groww' || provider === 'upstox';
+}
+
+function isLiveProviderSource(source?: string | null): boolean {
+  return source === 'live_depth' || source === 'live_ltp';
+}
+
+function liveProviderLabel(
+  provider: LiveShadowProvider,
+  source: { source?: string | null } | null,
+  fallbackMode: GrowwFeedMode | UpstoxFeedMode,
+): string {
+  const live = source?.source ? isLiveProviderSource(source.source) : fallbackMode === 'live';
+  if (provider === 'upstox') {
+    return live ? 'UPSTOX LIVE DEPTH' : 'UPSTOX HISTORICAL';
+  }
+  return live ? 'GROWW LIVE DEPTH' : 'GROWW HISTORICAL';
 }
 
 function NumericField({
@@ -261,7 +292,7 @@ function NumericField({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.currentTarget.value))}
-        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:text-gray-600"
+        className={NUMERIC_FIELD_CLASS}
       />
     </label>
   );
@@ -286,7 +317,7 @@ function TextField({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:text-gray-600"
+        className={TEXT_FIELD_CLASS}
       />
     </label>
   );
@@ -311,7 +342,7 @@ function DateField({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:text-gray-600"
+        className={DATE_FIELD_CLASS}
       />
     </label>
   );
@@ -336,7 +367,7 @@ function DateTimeField({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:text-gray-600"
+        className={DATE_FIELD_CLASS}
       />
     </label>
   );
@@ -359,7 +390,7 @@ function SelectField({
       <select
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff]"
+        className={SELECT_FIELD_CLASS}
       >
         {children}
       </select>
@@ -450,17 +481,37 @@ export default function SandboxControlPanel() {
     [selectedAgentCounts],
   );
   const abidesAgentTotal = marketMakers + noiseAgents + informedAgents;
-  const growwSource = marketData?.data_source?.provider === 'groww' ? marketData.data_source : null;
-  const upstoxSource = marketData?.data_source?.provider === 'upstox' ? marketData.data_source : null;
+  const liveDataSource = marketData?.data_source ?? null;
+  const liveDataProvider = isLiveShadowProvider(liveDataSource?.provider) ? liveDataSource.provider : null;
+  const growwSource = liveDataProvider === 'groww' ? liveDataSource : null;
+  const upstoxSource = liveDataProvider === 'upstox' ? liveDataSource : null;
   const growwStatus = growwSource?.status ?? (engine === 'groww' && !connected ? 'disconnected' : 'idle');
   const upstoxStatus = upstoxSource?.status ?? (engine === 'upstox' && !connected ? 'disconnected' : 'idle');
-  const growwLiveSelected = growwFeedMode === 'live' || growwSource?.source === 'live_depth';
-  const upstoxLiveSelected = upstoxFeedMode === 'live' || upstoxSource?.source === 'live_depth' || upstoxSource?.source === 'live_ltp';
-  const activeLiveSource = engine === 'upstox' ? upstoxSource : growwSource;
-  const activeLiveStatus = engine === 'upstox' ? upstoxStatus : growwStatus;
-  const activeLiveProviderLabel = engine === 'upstox'
-    ? upstoxLiveSelected ? 'UPSTOX LIVE DEPTH' : 'UPSTOX HISTORICAL'
-    : growwLiveSelected ? 'GROWW LIVE DEPTH' : 'GROWW HISTORICAL';
+  const activeLiveProvider = liveDataProvider ?? (isLiveShadowProvider(activeEngine) ? activeEngine : null);
+  const selectedLiveProvider = isLiveShadowProvider(engine) ? engine : null;
+  const displayLiveProvider = simulationRunning && activeLiveProvider ? activeLiveProvider : selectedLiveProvider;
+  const displayLiveSource = displayLiveProvider === 'upstox'
+    ? upstoxSource
+    : displayLiveProvider === 'groww'
+      ? growwSource
+      : null;
+  const displayLiveStatus = displayLiveProvider === 'upstox'
+    ? upstoxStatus
+    : displayLiveProvider === 'groww'
+      ? growwStatus
+      : 'idle';
+  const displayLiveProviderLabel = displayLiveProvider === 'upstox'
+    ? liveProviderLabel('upstox', displayLiveSource, upstoxFeedMode)
+    : displayLiveProvider === 'groww'
+      ? liveProviderLabel('groww', displayLiveSource, growwFeedMode)
+      : 'LIVE SHADOW';
+  const displayLiveIsLive = displayLiveSource?.source
+    ? isLiveProviderSource(displayLiveSource.source)
+    : displayLiveProvider === 'upstox'
+      ? upstoxFeedMode === 'live'
+      : displayLiveProvider === 'groww'
+        ? growwFeedMode === 'live'
+        : false;
 
   useEffect(() => {
     let cancelled = false;
@@ -866,7 +917,7 @@ export default function SandboxControlPanel() {
                 value={preset}
                 disabled={!sandboxApiAvailable}
                 onChange={(event) => updatePreset(event.currentTarget.value)}
-                className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff] disabled:text-gray-600"
+                className={SELECT_FIELD_CLASS}
               >
                 {Object.entries(presets).map(([key, value]) => (
                   <option key={key} value={key}>
@@ -895,16 +946,16 @@ export default function SandboxControlPanel() {
               <div className="text-[10px] tracking-[0.14em] text-gray-500">SOURCE</div>
               <div
                 className={`mt-1 ${
-                  activeLiveStatus === 'connected'
+                  displayLiveStatus === 'connected'
                     ? 'text-[#00ff41]'
-                    : activeLiveStatus === 'disconnected'
+                    : displayLiveStatus === 'disconnected'
                       ? 'text-[#ff0040]'
                       : 'text-[#ffb800]'
                 }`}
               >
-                {activeLiveSource
-                  ? `${activeLiveProviderLabel} / ${activeLiveSource.groww_symbol ?? activeLiveSource.instrument_key}`
-                  : activeLiveProviderLabel}
+                {displayLiveSource
+                  ? `${displayLiveProviderLabel} / ${displayLiveSource.groww_symbol ?? displayLiveSource.instrument_key}`
+                  : displayLiveProviderLabel}
               </div>
             </div>
           )}
@@ -918,7 +969,7 @@ export default function SandboxControlPanel() {
                   <select
                     value={growwExchange}
                     onChange={(event) => setGrowwExchange(event.currentTarget.value)}
-                    className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]"
+                    className={SELECT_FIELD_CLASS}
                   >
                     <option value="NSE">NSE</option>
                     <option value="BSE">BSE</option>
@@ -931,7 +982,7 @@ export default function SandboxControlPanel() {
                   <select
                     value={growwSegment}
                     onChange={(event) => setGrowwSegment(event.currentTarget.value)}
-                    className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]"
+                    className={SELECT_FIELD_CLASS}
                   >
                     <option value="CASH">CASH</option>
                     <option value="FNO">FNO</option>
@@ -988,7 +1039,7 @@ export default function SandboxControlPanel() {
                   <select
                     value={upstoxUnit}
                     onChange={(event) => setUpstoxUnit(event.currentTarget.value)}
-                    className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]"
+                    className={SELECT_FIELD_CLASS}
                   >
                     <option value="minutes">MINUTES</option>
                     <option value="hours">HOURS</option>
@@ -1059,7 +1110,7 @@ export default function SandboxControlPanel() {
                     <select
                       value={growwInterval}
                       onChange={(event) => setGrowwInterval(event.currentTarget.value)}
-                      className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]"
+                      className={SELECT_FIELD_CLASS}
                     >
                       <option value="MIN_1">1 MIN</option>
                       <option value="MIN_5">5 MIN</option>
@@ -1126,7 +1177,7 @@ export default function SandboxControlPanel() {
                 <select
                   value={latencyMode}
                   onChange={(event) => setLatencyMode(event.currentTarget.value as LatencyMode)}
-                  className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]"
+                  className={SELECT_FIELD_CLASS}
                 >
                   <option value="zero">ZERO</option>
                   <option value="deterministic">DETERMINISTIC</option>
@@ -1191,10 +1242,10 @@ export default function SandboxControlPanel() {
             ) : (
               <span
                 className={`text-[10px] tracking-[0.14em] ${
-                  activeLiveStatus === 'connected' ? 'text-[#00ff41]' : activeLiveStatus === 'error' ? 'text-[#ff0040]' : 'text-[#00bfff]'
+                  displayLiveStatus === 'connected' ? 'text-[#00ff41]' : displayLiveStatus === 'error' ? 'text-[#ff0040]' : 'text-[#00bfff]'
                 }`}
               >
-                {activeLiveStatus.toUpperCase()}
+                {displayLiveStatus.toUpperCase()}
               </span>
             )}
           </div>
@@ -1241,38 +1292,38 @@ export default function SandboxControlPanel() {
             <div className="grid gap-2 md:grid-cols-4">
               <div className="border border-gray-900 bg-black/40 p-2">
                 <div className="text-[10px] tracking-[0.14em] text-gray-500">PROVIDER</div>
-                <div className="mt-1 truncate text-xs text-[#00bfff]">{activeLiveProviderLabel}</div>
+                <div className="mt-1 truncate text-xs text-[#00bfff]">{displayLiveProviderLabel}</div>
               </div>
               <div className="border border-gray-900 bg-black/40 p-2">
                 <div className="text-[10px] tracking-[0.14em] text-gray-500">
-                  {engine === 'upstox' ? 'INSTRUMENT' : 'SYMBOL'}
+                  {displayLiveProvider === 'upstox' ? 'INSTRUMENT' : 'SYMBOL'}
                 </div>
                 <div className="mt-1 truncate text-xs text-gray-200">
-                  {engine === 'upstox'
-                    ? upstoxSource?.instrument_key ?? upstoxInstrumentKey
-                    : growwSource?.groww_symbol ?? growwSymbol}
+                  {displayLiveProvider === 'upstox'
+                    ? displayLiveSource?.instrument_key ?? upstoxInstrumentKey
+                    : displayLiveSource?.groww_symbol ?? growwSymbol}
                 </div>
               </div>
               <div className="border border-gray-900 bg-black/40 p-2">
                 <div className="text-[10px] tracking-[0.14em] text-gray-500">
-                  {(engine === 'upstox' && upstoxLiveSelected) || (engine === 'groww' && growwLiveSelected) ? 'LTP' : 'BARS'}
+                  {displayLiveIsLive ? 'LTP' : 'BARS'}
                 </div>
                 <div className="mt-1 truncate text-xs text-gray-200">
-                  {(engine === 'upstox' && upstoxLiveSelected) || (engine === 'groww' && growwLiveSelected)
-                    ? activeLiveSource?.last_price?.toFixed(2) ?? '--'
-                    : activeLiveSource?.bars?.toLocaleString() ?? '--'}
+                  {displayLiveIsLive
+                    ? displayLiveSource?.last_price?.toFixed(2) ?? '--'
+                    : displayLiveSource?.bars?.toLocaleString() ?? '--'}
                 </div>
               </div>
               <div className="border border-gray-900 bg-black/40 p-2">
                 <div className="text-[10px] tracking-[0.14em] text-gray-500">DEPTH</div>
                 <div className="mt-1 truncate text-xs text-gray-200">
-                  {activeLiveSource?.depth_source === 'provider_live'
+                  {displayLiveSource?.depth_source === 'provider_live'
                     ? 'LIVE BOOK'
-                    : activeLiveSource?.depth_source === 'modeled_from_ohlcv'
+                    : displayLiveSource?.depth_source === 'modeled_from_ohlcv'
                       ? 'MODELED OHLCV'
-                      : activeLiveSource?.depth_source === 'modeled_live_fallback'
+                      : displayLiveSource?.depth_source === 'modeled_live_fallback'
                         ? 'MODELED LIVE'
-                        : activeLiveSource?.depth_source
+                        : displayLiveSource?.depth_source
                           ? 'MODELED FALLBACK'
                           : '--'}
                 </div>

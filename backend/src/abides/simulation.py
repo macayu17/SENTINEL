@@ -12,6 +12,7 @@ from .agents.base import Agent
 from .agents.exchange import ExchangeAgent
 from ..market.latency_model import LatencyModel, LatencyConfig
 from ..market.oracle import MeanRevertingOracle, OracleConfig
+from ..market.order import OrderSide
 
 
 class AbidesSimulation:
@@ -32,6 +33,8 @@ class AbidesSimulation:
         self.step_count: int = 0
         self._submitted_order_count: int = 0
         self._cancel_request_count: int = 0
+        self._buy_volume: int = 0
+        self._sell_volume: int = 0
         self._event_sequence: int = 0
         self._event_log: deque[Dict[str, Any]] = deque(maxlen=500)
         self._recent_orders: deque[Dict[str, Any]] = deque(maxlen=200)
@@ -56,11 +59,15 @@ class AbidesSimulation:
         self.step_count = 0
         self._submitted_order_count = 0
         self._cancel_request_count = 0
+        self._buy_volume = 0
+        self._sell_volume = 0
         self._event_sequence = 0
         self._event_log.clear()
         self._recent_orders.clear()
         for agent in self.agents.values():
             agent.on_start()
+        self._broadcast_market_data()
+        for agent in self.agents.values():
             self.kernel.schedule_in(agent.wakeup_interval, EventType.WAKEUP, self._agent_wakeup, agent.agent_id)
 
     def run(self, duration_seconds: float) -> None:
@@ -129,17 +136,18 @@ class AbidesSimulation:
         outbound = self.exchange.on_message(message, self.kernel.current_time)
         for msg in outbound:
             if isinstance(msg, TradeMessage):
-                self._record_fill(msg)
+                aggressor_side = message.side if isinstance(message, OrderMessage) else None
+                self._record_fill(msg, aggressor_side=aggressor_side)
                 self._schedule_agent_message(msg.recipient_id or "", msg)
             else:
                 self._deliver_to_agent(msg)
 
     def _deliver_to_agent(self, message: Message) -> None:
         if isinstance(message, MarketDataMessage):
-            oracle_info = None
-            if self.oracle.enabled:
-                oracle_info = self.oracle.get_mispricing(self.exchange.last_price if self.exchange else 0.0)
-
+            oracle_info = message.oracle
+            if oracle_info is None and self.oracle.enabled and self.exchange is not None:
+                mark = self.exchange.last_price or message.mid_price
+                oracle_info = self.oracle.get_mispricing(mark)
             for agent in self.agents.values():
                 delay = self._get_agent_latency(agent.agent_id)
                 payload = MarketDataMessage(
@@ -162,6 +170,24 @@ class AbidesSimulation:
         recipient = self.agents.get(message.recipient_id or "")
         if recipient:
             recipient.on_message(message)
+
+    def _broadcast_market_data(self) -> None:
+        if self.exchange is None:
+            return
+        mid = self.exchange.order_book.mid_price or self.exchange.last_price
+        oracle_info = self.oracle.get_mispricing(self.exchange.last_price) if self.oracle.enabled else None
+        for agent in self.agents.values():
+            agent.on_message(
+                MarketDataMessage(
+                    sender_id=self.exchange.exchange_id,
+                    mid_price=mid,
+                    best_bid=self.exchange.order_book.best_bid,
+                    best_ask=self.exchange.order_book.best_ask,
+                    spread=self.exchange.order_book.spread,
+                    oracle=oracle_info,
+                    timestamp=self.kernel.current_time,
+                )
+            )
 
     def _deliver_market_data(self, payload: tuple[str, MarketDataMessage]) -> None:
         agent_id, message = payload
@@ -244,12 +270,19 @@ class AbidesSimulation:
             status="cancelled",
         )
 
-    def _record_fill(self, message: TradeMessage) -> None:
+    def _record_fill(self, message: TradeMessage, aggressor_side: Optional[OrderSide] = None) -> None:
         if message.recipient_id != message.buyer_id:
             return
+        side = aggressor_side or OrderSide.BUY
+        if side == OrderSide.SELL:
+            self._sell_volume += message.quantity
+            agent_id = message.seller_id
+        else:
+            self._buy_volume += message.quantity
+            agent_id = message.buyer_id
         self._record_recent_order(
-            agent_id=message.buyer_id,
-            side="BUY",
+            agent_id=agent_id,
+            side=side.value.upper(),
             price=message.price,
             quantity=message.quantity,
             status="filled",
@@ -257,8 +290,8 @@ class AbidesSimulation:
         self._record_event(
             "fill",
             f"ABIDES filled {message.quantity} @ {message.price:.2f}",
-            agent_id=message.buyer_id,
-            side="BUY",
+            agent_id=agent_id,
+            side=side.value.upper(),
             price=message.price,
             quantity=message.quantity,
             status="filled",
@@ -340,7 +373,6 @@ class AbidesSimulation:
 
     def get_order_flow_summary(self, trades: Optional[Sequence[Any]] = None) -> Dict[str, Any]:
         trade_history = trades if trades is not None else self._trades()
-        volume = sum(int(getattr(trade, "quantity", 0) or 0) for trade in trade_history)
         fills = len(trade_history)
         match_rate = (fills / self._submitted_order_count) * 100 if self._submitted_order_count else 0.0
         return {
@@ -348,8 +380,8 @@ class AbidesSimulation:
             "fills": fills,
             "cancelled": self._cancel_request_count,
             "match_rate": round(match_rate, 2),
-            "buy_volume": volume,
-            "sell_volume": 0,
+            "buy_volume": self._buy_volume,
+            "sell_volume": self._sell_volume,
         }
 
     def get_export_snapshot(self, warning_timeline: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:

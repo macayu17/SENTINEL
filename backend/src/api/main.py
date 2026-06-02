@@ -13,7 +13,12 @@ from .websocket import ConnectionManager
 from ..market.simulator import MarketSimulator, get_sandbox_presets, create_sandbox_agents
 from ..market.oracle import OracleConfig
 from ..market.latency_model import LatencyConfig, LatencyMode
-from ..market.market_data import fetch_stock, build_oracle_path, POPULAR_TICKERS
+from ..market.market_data import (
+    fetch_stock,
+    build_oracle_path,
+    bar_return_price_sigma,
+    POPULAR_TICKERS,
+)
 from ..market.scenario import get_scenario_config, list_scenarios
 from ..data.groww_provider import (
     GrowwProviderError,
@@ -65,6 +70,11 @@ except Exception:
     ABIDES_AVAILABLE = False
 
 logger = get_logger("api")
+
+HISTORICAL_DEPTH_NOTE = (
+    "Groww and Upstox historical endpoints provide OHLCV candles, not historical L2 snapshots; "
+    "SENTINEL rebuilds a modeled depth ladder from candle volume and volatility."
+)
 
 # Global singletons
 simulator: Optional[MarketSimulator] = None
@@ -225,6 +235,18 @@ def _depth_profile_from_stock_info(info) -> dict:
     }
 
 
+def _historical_depth_metadata(depth_profile: Optional[dict] = None) -> dict:
+    payload = {
+        "depth_source": "modeled_from_ohlcv",
+        "order_book_history": "unavailable_from_provider",
+        "order_book_source": "modeled_replay_depth",
+        "depth_note": HISTORICAL_DEPTH_NOTE,
+    }
+    if depth_profile is not None:
+        payload["depth_model"] = depth_profile
+    return payload
+
+
 def _record_warning_event(event: dict) -> None:
     _warning_timeline.append(event)
     if len(_warning_timeline) > 500:
@@ -246,6 +268,7 @@ def _stock_info_payload(info) -> dict:
 
 
 def _live_shadow_stock_response(provider: str, symbol_key: str, info) -> dict:
+    depth_profile = _depth_profile_from_stock_info(info)
     return {
         "provider": provider,
         "source": "historical",
@@ -253,18 +276,19 @@ def _live_shadow_stock_response(provider: str, symbol_key: str, info) -> dict:
         "mode": "LIVE_SHADOW",
         symbol_key: info.ticker,
         **_stock_info_payload(info),
+        **_historical_depth_metadata(depth_profile),
     }
 
 
 def _build_replay_components(info, scenario_name: str):
     scenario = get_scenario_config(scenario_name)
     depth_profile = _depth_profile_from_stock_info(info)
-    oracle_path = build_oracle_path(info, target_steps=500)
     initial_price = float(info.prices[0])
+    oracle_path = build_oracle_path(info, target_steps=500)
     oracle_cfg = OracleConfig(
         r_bar=initial_price,
         kappa=0.05,
-        sigma_s=max(0.001, info.realized_vol / 252) * scenario.oracle_sigma_multiplier,
+        sigma_s=bar_return_price_sigma(info, initial_price) * scenario.oracle_sigma_multiplier,
         enabled=True,
         replay_path=oracle_path,
     )
@@ -286,14 +310,7 @@ def _historical_replay_data_source(
         "source": "historical_replay",
         "status": "connected",
         symbol_key: info.ticker,
-        "depth_source": "modeled_from_ohlcv",
-        "order_book_history": "unavailable_from_provider",
-        "order_book_source": "modeled_replay_depth",
-        "depth_note": (
-            "Groww and Upstox historical endpoints provide OHLCV candles, not historical L2 snapshots; "
-            "SENTINEL rebuilds a modeled depth ladder from candle volume and volatility."
-        ),
-        "depth_model": depth_profile,
+        **_historical_depth_metadata(depth_profile),
         "scenario": scenario_name,
         "bars": info.bars,
         "replay_steps": replay_steps,
@@ -329,8 +346,7 @@ def _historical_replay_response(
         "agents": agents_count,
         "speed": speed,
         "scenario": scenario_name,
-        "depth_source": "modeled_from_ohlcv",
-        "order_book_history": "unavailable_from_provider",
+        **_historical_depth_metadata(),
     }
 
 

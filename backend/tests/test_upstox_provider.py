@@ -265,6 +265,28 @@ def test_upstox_full_quote_normalizes_live_depth_response():
     }
 
 
+def test_upstox_full_quote_without_depth_marks_modeled_live_fallback():
+    payload = {
+        "status": "success",
+        "data": {
+            "NSE_EQ:RELIANCE": {
+                "instrument_token": "NSE_EQ|INE002A01018",
+                "last_price": 2520.35,
+                "volume": 123456,
+                "ohlc": {"close": 2501.0},
+                "total_buy_quantity": 5000,
+                "total_sell_quantity": 7000,
+                "timestamp": "1747984841612",
+            }
+        },
+    }
+
+    quote = normalize_upstox_full_quote(payload, "NSE_EQ|INE002A01018")
+
+    assert quote.depth_source == "modeled_live_fallback"
+    assert quote.order_book is None
+
+
 def test_upstox_provider_fetches_ltp_from_v3_market_quote():
     class FakeResponse:
         status_code = 200

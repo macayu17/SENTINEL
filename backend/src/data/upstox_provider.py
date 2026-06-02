@@ -203,7 +203,7 @@ def normalize_upstox_full_quote(payload: Any, instrument_key: str) -> UpstoxQuot
         timestamp=str(selected.get("timestamp")).strip() if selected.get("timestamp") is not None else None,
         total_buy_quantity=_optional_float(selected.get("total_buy_quantity"), "total buy quantity"),
         total_sell_quantity=_optional_float(selected.get("total_sell_quantity"), "total sell quantity"),
-        depth_source="provider_live" if bids or asks else None,
+        depth_source="provider_live" if bids or asks else "modeled_live_fallback",
         order_book={"bids": bids, "asks": asks} if bids or asks else None,
     )
 

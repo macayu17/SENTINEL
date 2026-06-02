@@ -46,8 +46,19 @@ class HFTAgent(BaseAgent):
         self._price_history.append(price)
         orders: List[Order] = []
 
-        if len(self._price_history) < 20:
+        if self.active_orders and self._has_fresh_active_order(market_state):
             return orders
+
+        imbalance_order = self._imbalance_scalp_order(
+            price=price,
+            spread=spread,
+            imbalance=imbalance,
+            market_state=market_state,
+            volatility=volatility,
+        )
+
+        if len(self._price_history) < 20:
+            return [imbalance_order] if imbalance_order is not None else orders
 
         # Z-score mean reversion
         prices = list(self._price_history)
@@ -111,28 +122,52 @@ class HFTAgent(BaseAgent):
                 orders.append(order)
 
         # Imbalance scalp: small passive quote on pressured side when spread supports it.
-        if spread >= 0.02 and abs(imbalance) > 0.2:
-            quote_side = OrderSide.BUY if imbalance > 0 else OrderSide.SELL
-            quote_px = round(price - 0.01, 2) if quote_side == OrderSide.BUY else round(price + 0.01, 2)
-            order = risk_limited_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                side=quote_side,
-                order_type=OrderType.LIMIT,
-                price=quote_px,
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                aggression=0.3,
-            )
-            if order is None:
-                return orders
-            orders.append(order)
+        if imbalance_order is not None:
+            orders.append(imbalance_order)
         return orders
+
+    def _imbalance_scalp_order(
+        self,
+        *,
+        price: float,
+        spread: float,
+        imbalance: float,
+        market_state: Dict,
+        volatility: float,
+    ) -> Order | None:
+        if spread < 0.02 or abs(imbalance) <= 0.2:
+            return None
+        quote_side = OrderSide.BUY if imbalance > 0 else OrderSide.SELL
+        quote_px = round(price - 0.01, 2) if quote_side == OrderSide.BUY else round(price + 0.01, 2)
+        return risk_limited_order(
+            self.risk_profile,
+            agent_id=self.agent_id,
+            side=quote_side,
+            order_type=OrderType.LIMIT,
+            price=quote_px,
+            position=self.position,
+            market_state=market_state,
+            volatility=volatility,
+            aggression=0.3,
+        )
 
     def reset(self) -> None:
         super().reset()
         self._price_history.clear()
 
-    def consume_cancellations(self) -> List[str]:
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        if not self.active_orders:
+            return []
+        if self._has_fresh_active_order(market_state):
+            return []
         return self.cancel_all_active_orders()
+
+    def _has_fresh_active_order(self, market_state: Dict) -> bool:
+        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        target_bid = round(price - 0.01, 2)
+        target_ask = round(price + 0.01, 2)
+        return not self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=target_bid,
+            target_ask=target_ask,
+        )

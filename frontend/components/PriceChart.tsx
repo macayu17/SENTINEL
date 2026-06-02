@@ -27,11 +27,13 @@ function formatISTTime(timestampMs: number): string {
   return IST_TIME_FORMATTER.format(new Date(timestampMs));
 }
 
-function parseProviderTime(value?: string): number | null {
+function parseProviderTime(value?: string | null): number | null {
   if (!value) return null;
   const normalized = value.trim().replace(' ', 'T');
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
-  const timestamp = Date.parse(hasZone ? normalized : `${normalized}+05:30`);
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(normalized);
+  const timestampValue = isDateOnly ? `${normalized}T00:00:00+05:30` : normalized;
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestampValue);
+  const timestamp = Date.parse(hasZone ? timestampValue : `${timestampValue}+05:30`);
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
@@ -52,6 +54,20 @@ function replayTimestampMs(
 
 function formatChartTime(timestampMs: number): string {
   return formatISTTime(timestampMs);
+}
+
+function providerTimestampMs(
+  point: { time: number; receivedAt: number; providerTimestamp?: string | null },
+  firstPointTime: number,
+  source?: MarketDataSource | null,
+): number {
+  if (source?.source === 'historical_replay') {
+    return replayTimestampMs(point.time, firstPointTime, source) ?? point.receivedAt;
+  }
+  if (source?.source === 'live_depth' || source?.source === 'live_ltp') {
+    return parseProviderTime(point.providerTimestamp) ?? point.receivedAt;
+  }
+  return point.receivedAt;
 }
 
 interface CustomTooltipProps {
@@ -81,7 +97,7 @@ export default function PriceChart() {
   const firstPointTime = priceHistory[0]?.time ?? 0;
   const chartData = priceHistory.map((point) => ({
     ...point,
-    chartTimeMs: replayTimestampMs(point.time, firstPointTime, dataSource) ?? point.receivedAt,
+    chartTimeMs: providerTimestampMs(point, firstPointTime, dataSource),
   }));
 
   const currentPrice = marketData?.price ?? 0;

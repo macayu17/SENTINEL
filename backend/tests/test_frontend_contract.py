@@ -128,6 +128,33 @@ def test_replay_running_label_uses_active_engine_not_selected_tab():
     )
 
 
+def test_live_shadow_running_label_prefers_active_data_source_provider():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "liveDataProvider === 'groww'" in source
+    assert "liveDataProvider === 'upstox'" in source
+    assert "const displayLiveProvider" in source
+    assert "simulationRunning && activeLiveProvider" in source
+    assert "displayLiveProviderLabel" in source
+
+
+def test_sandbox_panel_uses_native_sized_control_affordances():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "const SELECT_FIELD_CLASS" in source
+    assert "const DATE_FIELD_CLASS" in source
+    assert "h-10 min-h-10" in source
+    assert "cursor-pointer" in source
+    assert "[color-scheme:dark]" in source
+
+
+def test_sandbox_panel_exposes_liquidity_trader_agent_control():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "'LiquidityTrader'" in source
+    assert "LiquidityTrader: 1" in source
+
+
 def test_upstox_panel_exposes_search_and_live_depth_mode():
     source = SANDBOX_PANEL.read_text(encoding="utf-8")
 
