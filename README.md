@@ -20,8 +20,8 @@ SENTINEL is a real-time market microstructure simulator with a FastAPI backend a
 │   ├── src/
 │   │   ├── agents/
 │   │   ├── api/
+│   │   ├── data/
 │   │   ├── market/
-│   │   ├── mcp/
 │   │   ├── prediction/
 │   │   └── utils/
 │   ├── Dockerfile

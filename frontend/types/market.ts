@@ -72,6 +72,10 @@ export interface MarketDataSource {
   total_buy_quantity?: number | null;
   total_sell_quantity?: number | null;
   depth_source?: string | null;
+  depth_note?: string | null;
+  order_book_source?: string | null;
+  order_book_history?: string | null;
+  depth_model?: Record<string, number | string | boolean | null> | null;
   order_book?: OrderBook | null;
   poll_interval_seconds?: number;
   last_update_step?: number;

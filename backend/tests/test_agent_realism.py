@@ -74,6 +74,20 @@ def test_market_maker_near_inventory_cap_only_quotes_flattening_side():
     assert all(order.side == OrderSide.SELL for order in orders)
 
 
+def test_market_maker_reduces_passive_bid_when_bid_queue_is_crowded():
+    agent = MarketMakerAgent("MM_QUEUE", quote_size=500, max_inventory=5_000)
+
+    balanced_orders = agent.decide_action(_state(bid_depth=5_000, ask_depth=5_000, order_book_imbalance=0.0))
+    crowded_orders = agent.decide_action(_state(bid_depth=50_000, ask_depth=1_000, order_book_imbalance=0.9))
+
+    balanced_bid = next(order for order in balanced_orders if order.side == OrderSide.BUY)
+    crowded_bid = next(order for order in crowded_orders if order.side == OrderSide.BUY)
+    crowded_ask = next(order for order in crowded_orders if order.side == OrderSide.SELL)
+
+    assert crowded_bid.quantity < balanced_bid.quantity
+    assert crowded_ask.quantity >= crowded_bid.quantity
+
+
 def test_institutional_child_order_respects_participation_of_displayed_depth():
     agent = InstitutionalAgent(
         "INST",

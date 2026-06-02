@@ -98,8 +98,12 @@ function sourceBadgeLabel(
   depthSource?: string | null,
 ): string {
   if (!connected) return 'SOURCE: DISCONNECTED';
-  const liveDepthLabel = depthSource === 'provider_live' ? 'LIVE BOOK' : 'LIVE QUOTE';
-  const historicalDepthLabel = depthSource === 'calibrated_from_ohlcv' ? 'SYNTH DEPTH' : 'HISTORICAL';
+  const liveDepthLabel = depthSource === 'provider_live'
+    ? 'LIVE BOOK'
+    : depthSource === 'modeled_live_fallback'
+      ? 'MODELED BOOK'
+      : 'LIVE QUOTE';
+  const historicalDepthLabel = depthSource === 'modeled_from_ohlcv' ? 'MODELED BOOK' : 'HISTORICAL';
   if (provider === 'groww') {
     if (source === 'live_depth') return `SOURCE: GROWW ${liveDepthLabel}`;
     return source === 'historical_replay' ? `SOURCE: GROWW ${historicalDepthLabel}` : 'SOURCE: GROWW DATA';

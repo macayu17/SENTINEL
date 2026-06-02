@@ -76,6 +76,11 @@ class MarketMakerAgent(BaseAgent):
         for side, price, enabled in quote_specs:
             if not enabled:
                 continue
+            same_side_crowding = max(0.0, imbalance if side == OrderSide.BUY else -imbalance)
+            opposite_side_need = max(0.0, -imbalance if side == OrderSide.BUY else imbalance)
+            queue_aggression = (0.7 if inv_ratio > 0.5 else 1.0)
+            queue_aggression *= 1.0 - min(0.9, same_side_crowding * 0.95)
+            queue_aggression *= 1.0 + min(0.3, opposite_side_need * 0.3)
             order = risk_limited_order(
                 self.risk_profile,
                 agent_id=self.agent_id,
@@ -85,7 +90,7 @@ class MarketMakerAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
-                aggression=0.7 if inv_ratio > 0.5 else 1.0,
+                aggression=queue_aggression,
                 depth_fn=passive_depth_for_side,
             )
             if order is not None:

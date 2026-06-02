@@ -159,8 +159,8 @@ const DEFAULT_GROWW_REPLAY = {
   groww_symbol: 'RELIANCE',
   exchange: 'NSE',
   segment: 'CASH',
-  start_time: '2025-09-24 09:15:00',
-  end_time: '2025-09-24 15:30:00',
+  start_time: '2025-09-24T09:15',
+  end_time: '2025-09-24T15:30',
   candle_interval: 'MIN_30',
 };
 const DEFAULT_UPSTOX_REPLAY = {
@@ -185,6 +185,14 @@ function findBestUpstoxMatch(
 function toFiniteNumber(value: number, fallback: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function toGrowwApiTime(value: string): string {
+  const normalized = value.trim().replace('T', ' ');
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized)) {
+    return `${normalized}:00`;
+  }
+  return normalized;
 }
 
 function commandText(
@@ -300,6 +308,31 @@ function DateField({
       <span className="block truncate text-[10px] tracking-[0.14em] text-gray-500">{label}</span>
       <input
         type="date"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="mt-1 h-8 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] disabled:text-gray-600"
+      />
+    </label>
+  );
+}
+
+function DateTimeField({
+  label,
+  value,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block min-w-0">
+      <span className="block truncate text-[10px] tracking-[0.14em] text-gray-500">{label}</span>
+      <input
+        type="datetime-local"
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -574,8 +607,8 @@ export default function SandboxControlPanel() {
           groww_symbol: growwSymbol.trim(),
           exchange: growwExchange.trim().toUpperCase(),
           segment: growwSegment.trim().toUpperCase(),
-          start_time: growwStartTime.trim(),
-          end_time: growwEndTime.trim(),
+          start_time: toGrowwApiTime(growwStartTime),
+          end_time: toGrowwApiTime(growwEndTime),
           candle_interval: growwInterval.trim().toUpperCase(),
           preset,
           custom_agents: customAgentsEnabled ? selectedAgentCounts : null,
@@ -1019,8 +1052,8 @@ export default function SandboxControlPanel() {
               </div>
               {growwFeedMode === 'historical' ? (
                 <>
-                  <TextField label="START TIME" value={growwStartTime} onChange={setGrowwStartTime} />
-                  <TextField label="END TIME" value={growwEndTime} onChange={setGrowwEndTime} />
+                  <DateTimeField label="START TIME" value={growwStartTime} onChange={setGrowwStartTime} />
+                  <DateTimeField label="END TIME" value={growwEndTime} onChange={setGrowwEndTime} />
                   <label className="block">
                     <span className="block text-[10px] tracking-[0.14em] text-gray-500">CANDLE INTERVAL</span>
                     <select
@@ -1049,7 +1082,7 @@ export default function SandboxControlPanel() {
                   />
                   <div className="border border-gray-900 bg-black/40 p-2 text-xs text-gray-400">
                     <div className="text-[10px] tracking-[0.14em] text-gray-500">DEPTH</div>
-                    <div className="mt-1 text-[#00bfff]">LIVE QUOTE SNAPSHOT</div>
+                    <div className="mt-1 text-[#00bfff]">QUOTE / MODELED FALLBACK</div>
                   </div>
                 </>
               )}
@@ -1235,11 +1268,13 @@ export default function SandboxControlPanel() {
                 <div className="mt-1 truncate text-xs text-gray-200">
                   {activeLiveSource?.depth_source === 'provider_live'
                     ? 'LIVE BOOK'
-                    : activeLiveSource?.depth_source === 'calibrated_from_ohlcv'
-                      ? 'SYNTH OHLCV'
-                      : activeLiveSource?.depth_source
-                        ? 'SYNTH FALLBACK'
-                      : '--'}
+                    : activeLiveSource?.depth_source === 'modeled_from_ohlcv'
+                      ? 'MODELED OHLCV'
+                      : activeLiveSource?.depth_source === 'modeled_live_fallback'
+                        ? 'MODELED LIVE'
+                        : activeLiveSource?.depth_source
+                          ? 'MODELED FALLBACK'
+                          : '--'}
                 </div>
               </div>
             </div>

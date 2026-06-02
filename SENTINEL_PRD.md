@@ -1,7 +1,7 @@
 # SENTINEL — Product Requirements Document
 **Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events**
 
-**Version:** 4.0 | **Stack:** Next.js 14 · TypeScript · Tailwind CSS · Python FastAPI · Google Stitch MCP UI Components · Zerodha Kite API  
+**Version:** 4.0 | **Stack:** Next.js 14 · TypeScript · Tailwind CSS · Python FastAPI · Google Stitch MCP UI Components · Groww/Upstox Market Data APIs
 **Target:** Production-ready handoff for Claude Code / GitHub Copilot
 
 ---
@@ -11,7 +11,7 @@
 ### 0.1 AI Agent Persona — "The Architect"
 > *This section tells Claude Code / Copilot how to think and behave while building SENTINEL.*
 
-**Name:** Sentinel Architect  
+**Name:** Sentinel Architect
 **Mindset:** You are a senior quantitative engineer with deep expertise in market microstructure, real-time systems, and ML pipelines. You write production-quality code — typed, tested, and documented. You never cut corners on data integrity or latency.
 
 **Principles:**
@@ -146,7 +146,7 @@ SENTINEL is a real-time market microstructure simulator and early-warning system
 | Frontend | Next.js 14, TypeScript, Tailwind CSS, Recharts, Zustand, Lucide React |
 | Backend | Python 3.10, FastAPI, WebSockets, Uvicorn |
 | ML | Scikit-learn (RandomForest), XGBoost, NumPy, Pandas |
-| Market Data | Zerodha Kite Connect (real-time + historical) |
+| Market Data | Groww and Upstox market-data APIs (live quote/depth + historical OHLCV) |
 | UI Components | Google Stitch MCP (frontend-only, optional) |
 | Fallback Data | yfinance (historical OHLCV fallback) |
 | Infra | Docker, docker-compose |
@@ -182,14 +182,11 @@ sentinel/
 │   │   │   └── features.py
 │   │   ├── data/
 │   │   │   ├── base_provider.py
-│   │   │   ├── kite_provider.py
-│   │   │   ├── kite_auth.py
+│   │   │   ├── groww_provider.py / upstox_provider.py
+│   │   │   ├── provider credential loading
 │   │   │   ├── yfinance_provider.py
 │   │   │   ├── nse_csv_provider.py
 │   │   │   └── data_manager.py
-│   │   ├── mcp/
-│   │   │   ├── __init__.py
-│   │   │   └── kite_client.py
 │   │   ├── api/
 │   │   │   ├── __init__.py
 │   │   │   ├── main.py
@@ -419,25 +416,27 @@ export class StitchMCPUI {
 
 ---
 
-## 9. Phase 5 — Data Layer: Zerodha Kite API (Week 4–5)
+## 9. Phase 5 — Data Layer: Groww/Upstox Market Data APIs (Week 4–5)
 
 ### 9.1 Overview
 
-SENTINEL uses **Zerodha Kite Connect** as its primary data provider for both real-time streaming and historical data across NSE equities, BSE equities, F&O, and indices.
+SENTINEL uses **Groww/Upstox market-data APIs** as its primary data provider for both real-time streaming and historical data across NSE equities, BSE equities, F&O, and indices.
 
-**Kite API credentials required (add to `backend/.env`):**
+**Groww/Upstox API credentials required (add to `backend/.env`):**
 ```
-KITE_API_KEY=your_api_key
-KITE_API_SECRET=your_api_secret
-KITE_ACCESS_TOKEN=generated_per_session
-KITE_DEFAULT_SYMBOL=NSE:RELIANCE
+GROWW_API_AUTH_TOKEN=<groww_token>
+GROWW_API_KEY=<groww_key>
+GROWW_API_SECRET=<groww_secret>
+UPSTOX_ANALYTICS_TOKEN=<upstox_analytics_token>
+UPSTOX_ACCESS_TOKEN=<upstox_access_token>
+LIVE_SHADOW_DEFAULT_SYMBOL=<exchange_symbol>
 ```
 
-Access token expires daily — SENTINEL must handle re-authentication automatically on startup via `kite_auth.py`.
+Provider access tokens may expire. SENTINEL keeps credentials server-side and reports clear errors when a token is missing, expired, or not entitled for market data.
 
 Add to `backend/requirements.txt`:
 ```
-kiteconnect==4.2.0
+httpx + optional growwapi
 ```
 
 ---
@@ -447,12 +446,8 @@ kiteconnect==4.2.0
 ```
 backend/src/data/
 ├── __init__.py
-├── base_provider.py          # Abstract DataProvider
-├── kite_provider.py          # Zerodha Kite implementation
-├── kite_auth.py              # Daily token refresh helper
-├── yfinance_provider.py      # Fallback for historical data
-├── nse_csv_provider.py       # NSE official CSV loader (flash crash backtest)
-└── data_manager.py           # Unified interface with fallback switching
+├── groww_provider.py         # Groww historical and live quote adapter
+└── upstox_provider.py        # Upstox historical, search, LTP, and full quote adapter
 ```
 
 ---
@@ -495,19 +490,19 @@ class DataProvider(ABC):
 
     @abstractmethod
     def get_instrument_token(self, symbol: str) -> int:
-        """Resolves symbol string to Kite instrument token."""
+        """Resolves symbol string to Provider instrument token."""
         ...
 ```
 
 ---
 
-### 9.4 Kite Provider
+### 9.4 Groww/Upstox Providers
 
-**`backend/src/data/kite_provider.py`**
+**`backend/src/data/groww_provider.py / upstox_provider.py`**
 
-Constructor: `KiteProvider(api_key, access_token)` — initialises `KiteConnect` and `KiteTicker`, caches instrument tokens on first call.
+Provider functions keep credentials on the backend, normalize provider-specific payloads, and return a shared quote/candle shape for LIVE_SHADOW.
 
-**`get_quote(symbol)`** — calls `kite.quote([symbol])`, returns:
+**`get_quote(symbol)`** — calls `provider.quote([symbol])`, returns:
 ```python
 {
   "symbol": "NSE:RELIANCE",
@@ -519,7 +514,7 @@ Constructor: `KiteProvider(api_key, access_token)` — initialises `KiteConnect`
 }
 ```
 
-**`get_order_book(symbol)`** — extracts `depth.buy` and `depth.sell` from `kite.quote()`, returns 5 bid/ask levels:
+**`get_order_book(symbol)`** — extracts `depth.buy` and `depth.sell` from `provider.quote()`, returns 5 bid/ask levels:
 ```python
 {
   "bids": [{"price": 2450.00, "size": 500}, ...],
@@ -527,17 +522,17 @@ Constructor: `KiteProvider(api_key, access_token)` — initialises `KiteConnect`
 }
 ```
 
-**`get_historical_ohlcv(symbol, interval, from_date, to_date)`** — calls `kite.historical_data(instrument_token, from_date, to_date, interval)`. Returns list of `{"timestamp", "open", "high", "low", "close", "volume"}`.
+**`get_historical_ohlcv(symbol, interval, from_date, to_date)`** — calls `provider.historical_data(instrument_token, from_date, to_date, interval)`. Returns list of `{"timestamp", "open", "high", "low", "close", "volume"}`.
 
-**`stream_ticks(symbols, on_tick)`** — subscribes via `KiteTicker`, sets mode to `FULL` (includes depth), calls `on_tick` on each tick.
+**`stream_ticks(symbols, on_tick)`** — subscribes via `provider market-depth feed`, sets mode to `FULL` (includes depth), calls `on_tick` on each tick.
 
 **`get_instrument_token(symbol)`** — loads instruments CSV on first call, caches `symbol → token`. Example: `"NSE:RELIANCE" → 738561`.
 
-**`backend/src/data/kite_auth.py`** — daily token refresh:
+**`backend/src/data/provider credential loading`** — daily token refresh:
 ```python
 async def refresh_access_token(api_key: str, api_secret: str, request_token: str) -> str:
-    kite = KiteConnect(api_key=api_key)
-    data = kite.generate_session(request_token, api_secret=api_secret)
+    Provider = providerConnect(api_key=api_key)
+    data = provider.generate_session(request_token, api_secret=api_secret)
     return data["access_token"]
 ```
 
@@ -547,20 +542,20 @@ async def refresh_access_token(api_key: str, api_secret: str, request_token: str
 
 **1. ML Model Training**
 
-Extend `LiquidityShockPredictor.generate_training_data()` to optionally seed each simulation episode with real historical volatility and spread baselines from Kite (200 days of minute OHLCV). This makes synthetic training data statistically realistic for Indian equities.
+Extend `LiquidityShockPredictor.generate_training_data()` to optionally seed each simulation episode with real historical volatility and spread baselines from Provider (200 days of minute OHLCV). This makes synthetic training data statistically realistic for Indian equities.
 
 ```python
-async def generate_training_data_with_kite(
-    self, provider: KiteProvider, symbol: str, num_simulations: int = 100
+async def generate_training_data_with_provider(
+    self, provider: LiveShadowProvider, symbol: str, num_simulations: int = 100
 ) -> List: ...
 ```
 
 **2. Feature Baseline Calibration**
 
-On startup, `FeatureExtractor` calls Kite to set realistic baselines from 30 days of minute bars (50th percentile of spread, depth, volatility distributions):
+On startup, `FeatureExtractor` calls Provider to set realistic baselines from 30 days of minute bars (50th percentile of spread, depth, volatility distributions):
 
 ```python
-async def calibrate_from_kite(self, provider: KiteProvider, symbol: str):
+async def calibrate_from_provider(self, provider: LiveShadowProvider, symbol: str):
     # Sets self.baseline_spread, self.baseline_depth, self.baseline_volatility
 ```
 
@@ -576,10 +571,10 @@ class BacktestRunner:
 
 **4. Simulator Price Seeding**
 
-On simulation start, fetch current quote + order book from Kite and use as `initial_price` and order book warm-up state:
+On simulation start, fetch current quote + order book from Provider and use as `initial_price` and order book warm-up state:
 
 ```python
-async def seed_simulator_from_kite(simulator: MarketSimulator, provider: KiteProvider, symbol: str):
+async def seed_simulator_from_provider(simulator: MarketSimulator, provider: LiveShadowProvider, symbol: str):
     quote = await provider.get_quote(symbol)
     order_book = await provider.get_order_book(symbol)
     simulator.initial_price = quote["last_price"]
@@ -590,12 +585,12 @@ async def seed_simulator_from_kite(simulator: MarketSimulator, provider: KitePro
 
 ### 9.6 Real-time Streaming: Two Use Cases
 
-Kite tick stream runs as a **parallel background task** alongside the simulation:
+Provider tick stream runs as a **parallel background task** alongside the simulation:
 
-**1. Price Anchoring** — every 5 seconds, nudge `simulator.current_price` toward the real Kite last price (weight=0.05) to prevent unrealistic drift:
+**1. Price Anchoring** — every 5 seconds, nudge `simulator.current_price` toward the real Provider last price (weight=0.05) to prevent unrealistic drift:
 
 ```python
-async def handle_kite_tick(tick: Dict):
+async def handle_provider_tick(tick: Dict):
     if simulator:
         simulator.anchor_price(tick["last_price"], weight=0.05)
     await manager.broadcast({"type": "real_trade", "tick": tick})
@@ -604,13 +599,13 @@ async def handle_kite_tick(tick: Dict):
 Start on FastAPI startup:
 ```python
 @app.on_event("startup")
-async def start_kite_stream():
+async def start_provider_stream():
     asyncio.create_task(
-        kite_provider.stream_ticks([settings.KITE_DEFAULT_SYMBOL], handle_kite_tick)
+        provider_provider.stream_ticks([settings.LIVE_SHADOW_DEFAULT_SYMBOL], handle_provider_tick)
     )
 ```
 
-**2. Dashboard Real Trade Overlay** — real Kite trades are forwarded as `type: "real_trade"` WebSocket events, overlaid as dots on the frontend PriceChart.
+**2. Dashboard Real Trade Overlay** — real Provider trades are forwarded as `type: "real_trade"` WebSocket events, overlaid as dots on the frontend PriceChart.
 
 ---
 
@@ -631,7 +626,7 @@ class DataManager:
             raise
 ```
 
-Default setup: `DataManager(primary=KiteProvider(...), fallback=YFinanceProvider(...))`.
+Default setup: `DataManager(primary=LiveShadowProvider(...), fallback=YFinanceProvider(...))`.
 
 ---
 
@@ -658,7 +653,7 @@ Default setup: `DataManager(primary=KiteProvider(...), fallback=YFinanceProvider
 | `NSE:INFY` | NSE | 408065 | Equity |
 | `NSE:HDFCBANK` | NSE | 341249 | Equity |
 
-Any Kite-tradeable instrument can be used by updating `KITE_DEFAULT_SYMBOL` in `.env`.
+Any provider-tradeable instrument can be used by updating `LIVE_SHADOW_DEFAULT_SYMBOL` in `.env`.
 
 ---
 
@@ -934,12 +929,12 @@ cd frontend && npm run test
 
 ## 17. Error Handling & Edge Cases
 
-### 17.1 Kite API Failures
+### 17.1 Groww/Upstox API Failures
 
 | Scenario | Behaviour |
 |---|---|
-| Access token expired | On 403, auto-trigger `refresh_access_token()`, retry once, then raise `KiteAuthError` with clear message |
-| Kite WebSocket disconnect | Reconnect with exponential backoff (1s, 2s, 4s, 8s, max 60s). Log each attempt. After 5 failures, fall back to `YFinanceProvider` and emit `{"type": "data_source_fallback"}` WebSocket event to dashboard |
+| Access token expired | On 403, auto-trigger `refresh_access_token()`, retry once, then raise `providerAuthError` with clear message |
+| Provider WebSocket disconnect | Reconnect with exponential backoff (1s, 2s, 4s, 8s, max 60s). Log each attempt. After 5 failures, fall back to `YFinanceProvider` and emit `{"type": "data_source_fallback"}` WebSocket event to dashboard |
 | Quote endpoint timeout (>3s) | Return last cached quote with `{"stale": true, "stale_since": timestamp}` flag |
 | Instrument token not found | Raise `UnknownSymbolError(symbol)` with list of valid symbols in message |
 
@@ -1000,7 +995,7 @@ IDLE → INITIALISING → RUNNING → PAUSED → STOPPED
 | State | Description |
 |---|---|
 | `IDLE` | No simulator instance exists. Default on startup. |
-| `INITIALISING` | `POST /api/simulation/start` called. Agents being created, Kite seeding in progress. |
+| `INITIALISING` | `POST /api/simulation/start` called. Agents being created, Provider seeding in progress. |
 | `RUNNING` | Simulator step loop active. WebSocket streaming live data. |
 | `PAUSED` | Step loop suspended. WebSocket still connected, last state frozen on dashboard. |
 | `STOPPED` | Step loop ended. Results available. Simulator instance still in memory for export. |
@@ -1012,7 +1007,7 @@ IDLE → INITIALISING → RUNNING → PAUSED → STOPPED
 |---|---|---|
 | `IDLE` | `INITIALISING` | `POST /api/simulation/start` |
 | `INITIALISING` | `RUNNING` | Seeding complete |
-| `INITIALISING` | `ERROR` | Kite auth failure or agent init error |
+| `INITIALISING` | `ERROR` | Provider auth failure or agent init error |
 | `RUNNING` | `PAUSED` | `POST /api/simulation/pause` |
 | `RUNNING` | `STOPPED` | `POST /api/simulation/stop` or duration elapsed |
 | `RUNNING` | `ERROR` | Unhandled exception in step loop |
@@ -1053,7 +1048,7 @@ The dashboard must reflect simulation state visually:
 | State | Dashboard behaviour |
 |---|---|
 | `IDLE` | "Start Simulation" button active, all charts empty |
-| `INITIALISING` | Loading spinner, "Connecting to Kite..." message |
+| `INITIALISING` | Loading spinner, "Connecting to provider..." message |
 | `RUNNING` | Live data streaming, "Pause" and "Stop" buttons visible |
 | `PAUSED` | Charts frozen, "Resume" and "Stop" buttons visible, "PAUSED" badge on header |
 | `STOPPED` | Charts frozen at last state, "Export" and "Reset" buttons visible |
@@ -1065,7 +1060,7 @@ The dashboard must reflect simulation state visually:
 
 ### 19.1 Backend API Key Auth
 
-All REST endpoints and the WebSocket connection require a static API key passed as a header. This prevents unauthorised access to the simulation and Kite data.
+All REST endpoints and the WebSocket connection require a static API key passed as a header. This prevents unauthorised access to the simulation and Provider data.
 
 **Header:** `X-API-Key: <key>`
 
@@ -1120,9 +1115,9 @@ const headers = {
 }
 ```
 
-### 19.3 Kite Secret Protection
+### 19.3 Provider Secret Protection
 
-- `KITE_API_SECRET` and `KITE_ACCESS_TOKEN` must never be exposed via any REST endpoint or WebSocket message
+- Groww and Upstox credentials must never be exposed via any REST endpoint or WebSocket message
 - Add to `.gitignore`: `.env`, `backend/.env`, `frontend/.env.local`
 - Provide `.env.example` files with placeholder values in the repo root
 
@@ -1164,7 +1159,7 @@ class Alert:
 | Liquidity shock | `health_score < 40` | critical | When `health_score ≥ 50` for 10s |
 | Large order detected | Any TWAP/Iceberg detection | warning | After 60s |
 | Large order — high impact | `expected_impact_pct > 0.5%` | critical | After 30s |
-| Kite data fallback | Provider switched to yfinance | info | When Kite reconnects |
+| Provider data fallback | Provider switched to yfinance | info | When Provider reconnects |
 | Simulation error | State transitions to ERROR | critical | On manual reset |
 
 ### 20.3 Backend Alert Manager
@@ -1314,7 +1309,7 @@ Log levels by component:
 |---|---|---|
 | Simulator | INFO | Step milestones (every 1000), price at each milestone |
 | Order book | WARNING | Empty book on market order, partial fill |
-| Kite provider | INFO/ERROR | Connect, disconnect, fallback trigger, token refresh |
+| Market-data provider | INFO/ERROR | Fetch, permission failure, fallback trigger, token refresh |
 | ML predictor | INFO | Model trained (accuracy), prediction (health score + level) |
 | Alert manager | INFO | Alert triggered, acknowledged, auto-cleared |
 | FastAPI | INFO | Request method + path + status + latency |
@@ -1342,8 +1337,8 @@ Expand `GET /api/health` to return full observability snapshot:
   "simulation_state": "RUNNING",
   "current_step": 1234,
   "websocket_connections": 3,
-  "kite_connected": true,
-  "kite_data_source": "primary",
+  "provider_connected": true,
+  "provider_data_source": "primary",
   "last_prediction_ms": 12.4,
   "active_alerts": 1,
   "uptime_seconds": 3600,
@@ -1356,7 +1351,7 @@ Expand `GET /api/health` to return full observability snapshot:
 Add a small status bar at the bottom of the dashboard showing:
 - WebSocket latency (ms) — measured as time between send and receive of heartbeat ping
 - Last update timestamp
-- Data source badge: "Kite Live" (green) / "yFinance Fallback" (yellow) / "Disconnected" (red)
+- Data source badge: "Provider Live" (green) / "yFinance Fallback" (yellow) / "Disconnected" (red)
 - Active alert count badge
 
 ---
@@ -1392,8 +1387,8 @@ jobs:
       - name: Test
         run: pytest backend/tests/ -v --cov=backend/src --cov-report=xml
         env:
-          KITE_API_KEY: mock_key
-          KITE_ACCESS_TOKEN: mock_token
+          GROWW_API_AUTH_TOKEN: mock_groww_token
+          UPSTOX_ANALYTICS_TOKEN: mock_upstox_token
           SENTINEL_API_KEY: test_key
       - name: Coverage gate
         run: |
@@ -1471,8 +1466,8 @@ PR to `main` requires: all CI checks green + at least one approval.
 | Liquidity predictor | Trains without error, predicts in < 100ms |
 | Large order detector | Correctly flags TWAP and Iceberg patterns in unit tests |
 | WebSocket | Dashboard receives updates at ≥ 10 Hz |
-| Kite API | Real quote returned for `NSE:RELIANCE` within 500ms |
-| Kite fallback | Auto-switches to yfinance on Kite disconnect, dashboard shows fallback badge |
+| Groww/Upstox API | Real quote returned for `NSE:RELIANCE` within 500ms |
+| Provider fallback | Auto-switches to yfinance on Provider disconnect, dashboard shows fallback badge |
 | State machine | All 6 state transitions trigger correct UI state on dashboard |
 | API auth | Requests without valid `X-API-Key` return HTTP 403 |
 | Alerts | Critical alert appears within 1 WebSocket cycle of threshold breach |

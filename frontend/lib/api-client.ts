@@ -146,6 +146,8 @@ class SentinelAPI {
       agents: number;
       speed: number;
       scenario?: string;
+      depth_source: string;
+      order_book_history: string;
     }>('/api/live-shadow/groww/replay', {
       method: 'POST',
       body: JSON.stringify(config),
@@ -271,6 +273,8 @@ class SentinelAPI {
       agents: number;
       speed: number;
       scenario?: string;
+      depth_source: string;
+      order_book_history: string;
     }>('/api/live-shadow/upstox/replay', {
       method: 'POST',
       body: JSON.stringify(config),

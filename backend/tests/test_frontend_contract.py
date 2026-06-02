@@ -145,6 +145,17 @@ def test_groww_panel_exposes_historical_and_live_depth_modes():
     assert "api.startGrowwLive" in source
 
 
+def test_groww_panel_uses_datetime_inputs_for_historical_replay():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "DateTimeField" in source
+    assert 'type="datetime-local"' in source
+    assert 'label="START TIME"' in source
+    assert 'label="END TIME"' in source
+    assert "toGrowwApiTime(growwStartTime)" in source
+    assert "toGrowwApiTime(growwEndTime)" in source
+
+
 def test_upstox_panel_uses_selectable_results_and_date_inputs():
     source = SANDBOX_PANEL.read_text(encoding="utf-8")
 

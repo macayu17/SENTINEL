@@ -208,15 +208,20 @@ def _prepare_simulator_replacement(mode: str, *, reload_rl: bool = False) -> Non
 def _depth_profile_from_stock_info(info) -> dict:
     volumes = [float(value) for value in getattr(info, "volumes", []) if value is not None]
     avg_volume = sum(volumes) / max(1, len(volumes)) if volumes else 50_000.0
+    prices = [float(value) for value in getattr(info, "prices", []) if value is not None]
+    price_span = (max(prices) - min(prices)) / max(0.01, sum(prices) / max(1, len(prices))) if prices else 0.0
     level_size = max(50, min(5_000, int(avg_volume * 0.002)))
+    tick_spacing = 0.01 if not prices else min(0.05, max(0.01, round((sum(prices) / len(prices)) * 0.0001, 2)))
     return {
         "source": "ohlcv",
+        "depth_source": "modeled_from_ohlcv",
+        "order_book_history": "unavailable_from_provider",
         "levels": 10,
         "level_size": level_size,
-        "tick_spacing": 0.01,
-        "spread_multiplier": 1.0,
+        "tick_spacing": tick_spacing,
+        "spread_multiplier": round(1.0 + min(3.0, price_span * 10.0), 4),
         "avg_volume": round(avg_volume, 2),
-        "method": "synthetic depth calibrated from OHLCV volume; not historical L2",
+        "method": "modeled historical L2 ladder rebuilt from OHLCV volume and volatility; provider historical L2 unavailable",
     }
 
 
@@ -281,7 +286,13 @@ def _historical_replay_data_source(
         "source": "historical_replay",
         "status": "connected",
         symbol_key: info.ticker,
-        "depth_source": "calibrated_from_ohlcv",
+        "depth_source": "modeled_from_ohlcv",
+        "order_book_history": "unavailable_from_provider",
+        "order_book_source": "modeled_replay_depth",
+        "depth_note": (
+            "Groww and Upstox historical endpoints provide OHLCV candles, not historical L2 snapshots; "
+            "SENTINEL rebuilds a modeled depth ladder from candle volume and volatility."
+        ),
         "depth_model": depth_profile,
         "scenario": scenario_name,
         "bars": info.bars,
@@ -318,11 +329,13 @@ def _historical_replay_response(
         "agents": agents_count,
         "speed": speed,
         "scenario": scenario_name,
+        "depth_source": "modeled_from_ohlcv",
+        "order_book_history": "unavailable_from_provider",
     }
 
 
 def _quote_depth_source(quote) -> str:
-    return quote.depth_source or "synthetic_fallback"
+    return quote.depth_source or "modeled_live_fallback"
 
 
 def _live_depth_data_source(provider: str, quote, poll_interval: int, scenario_name: str) -> dict:

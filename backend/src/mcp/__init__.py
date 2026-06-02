@@ -1,3 +1,7 @@
-from .kite_client import KiteClient
+"""MCP integration namespace.
 
-__all__ = ["KiteClient"]
+SENTINEL's market-data live-shadow path is handled by Groww and Upstox
+providers under ``backend.src.data``.
+"""
+
+__all__: list[str] = []

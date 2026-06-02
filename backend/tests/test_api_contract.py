@@ -324,8 +324,12 @@ def test_groww_live_shadow_replay_starts_oracle_path(monkeypatch):
         assert api_main.simulator.oracle.enabled is True
         assert api_main.simulator.oracle.config.replay_path[:3] == sample.prices
         assert api_main.simulator.data_source["provider"] == "groww"
-        assert api_main.simulator.data_source["depth_source"] == "calibrated_from_ohlcv"
+        assert response["depth_source"] == "modeled_from_ohlcv"
+        assert response["order_book_history"] == "unavailable_from_provider"
+        assert api_main.simulator.data_source["depth_source"] == "modeled_from_ohlcv"
+        assert api_main.simulator.data_source["order_book_history"] == "unavailable_from_provider"
         assert api_main.simulator.depth_profile["source"] == "ohlcv"
+        assert "historical L2" in api_main.simulator.depth_profile["method"]
     finally:
         if api_main.simulator:
             api_main.simulator.stop()
@@ -389,7 +393,10 @@ def test_upstox_live_shadow_replay_starts_oracle_path(monkeypatch):
         assert api_main.simulator.oracle.config.replay_path[:3] == sample.prices
         assert api_main.simulator.data_source["provider"] == "upstox"
         assert api_main.simulator.data_source["instrument_key"] == sample.ticker
-        assert api_main.simulator.data_source["depth_source"] == "calibrated_from_ohlcv"
+        assert response["depth_source"] == "modeled_from_ohlcv"
+        assert response["order_book_history"] == "unavailable_from_provider"
+        assert api_main.simulator.data_source["depth_source"] == "modeled_from_ohlcv"
+        assert api_main.simulator.data_source["order_book_history"] == "unavailable_from_provider"
         assert api_main.simulator.depth_profile["source"] == "ohlcv"
     finally:
         if api_main.simulator:
@@ -648,7 +655,7 @@ def test_groww_live_depth_starts_after_successful_provider_fetch(monkeypatch):
         api_main._sim_task = None
 
 
-def test_groww_live_depth_marks_synthetic_fallback_when_provider_has_no_depth(monkeypatch):
+def test_groww_live_depth_marks_modeled_fallback_when_provider_has_no_depth(monkeypatch):
     quote = GrowwQuote(
         groww_symbol="NSE-RELIANCE",
         exchange="NSE",
@@ -677,9 +684,9 @@ def test_groww_live_depth_marks_synthetic_fallback_when_provider_has_no_depth(mo
 
     try:
         assert response.status_code == 200
-        assert response.json()["depth_source"] == "synthetic_fallback"
+        assert response.json()["depth_source"] == "modeled_live_fallback"
         assert api_main.simulator is not None
-        assert api_main.simulator.data_source["depth_source"] == "synthetic_fallback"
+        assert api_main.simulator.data_source["depth_source"] == "modeled_live_fallback"
     finally:
         if api_main.simulator:
             api_main.simulator.stop()
