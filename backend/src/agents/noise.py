@@ -49,6 +49,7 @@ class NoiseAgent(BaseAgent):
             position=self.position,
             available_depth=displayed_depth_for_side(market_state, side),
             volatility=volatility,
+            active_orders=self.active_orders,
             aggression=random.uniform(0.4, 1.0),
         )
         if max_child <= 0:

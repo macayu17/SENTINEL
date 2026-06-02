@@ -66,6 +66,7 @@ class LiquidityTraderAgent(BaseAgent):
             position=self.position,
             available_depth=displayed_depth_for_side(market_state, self._active_side),
             volatility=volatility,
+            active_orders=self.active_orders,
             aggression=1.1,
         )
         child_qty = min(
@@ -110,5 +111,18 @@ class LiquidityTraderAgent(BaseAgent):
         self._active_side = None
         self._remaining_parent_qty = 0
 
-    def consume_cancellations(self) -> List[str]:
-        return self.cancel_all_active_orders()
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        if not self.active_orders:
+            return []
+        if self._active_side is None:
+            return self.cancel_all_active_orders()
+        mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        spread = market_state.get("spread", 0.05)
+        target = near_touch_price(mid, self._active_side, spread)
+        if self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=target if self._active_side == OrderSide.BUY else mid,
+            target_ask=target if self._active_side == OrderSide.SELL else mid,
+        ):
+            return self.cancel_all_active_orders()
+        return []

@@ -3,7 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, risk_limited_order
+from .risk import AgentRiskProfile, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -60,16 +60,17 @@ class RetailAgent(BaseAgent):
 
             if pnl_pct <= -self.stop_loss or pnl_pct >= self.take_profit:
                 # Close position
-                side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=side,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=abs(self.position),
-                    )
+                order = risk_limited_exit_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
+                    position=self.position,
+                    price=price,
+                    market_state=market_state,
+                    volatility=volatility,
+                    aggression=1.2,
                 )
+                if order is not None:
+                    orders.append(order)
                 self._entry_price = 0.0
                 return orders
 
@@ -89,6 +90,7 @@ class RetailAgent(BaseAgent):
                     position=self.position,
                     market_state=market_state,
                     volatility=volatility,
+                    active_orders=self.active_orders,
                     aggression=0.7,
                 )
                 if order is None:
@@ -107,6 +109,7 @@ class RetailAgent(BaseAgent):
                     position=self.position,
                     market_state=market_state,
                     volatility=volatility,
+                    active_orders=self.active_orders,
                     aggression=0.7,
                 )
                 if order is None:

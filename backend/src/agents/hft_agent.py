@@ -84,6 +84,7 @@ class HFTAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=min(1.6, abs(z_score) / self.z_threshold),
             )
             if order is not None:
@@ -98,6 +99,7 @@ class HFTAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=min(1.6, abs(z_score) / self.z_threshold),
             )
             if order is not None:
@@ -116,6 +118,7 @@ class HFTAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=min(1.5, abs(momentum) / self.momentum_threshold),
             )
             if order is not None:
@@ -148,6 +151,7 @@ class HFTAgent(BaseAgent):
             position=self.position,
             market_state=market_state,
             volatility=volatility,
+            active_orders=self.active_orders,
             aggression=0.3,
         )
 

@@ -3,7 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, risk_limited_order
+from .risk import AgentRiskProfile, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -61,15 +61,17 @@ class MomentumAgent(BaseAgent):
 
             # Exit: trailing stop hit OR price fell back inside channel
             if drawdown >= self.trailing_stop_pct or price < channel_high:
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.SELL,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=abs(self.position),
-                    )
+                order = risk_limited_exit_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
+                    position=self.position,
+                    price=price,
+                    market_state=market_state,
+                    volatility=volatility,
+                    aggression=1.3,
                 )
+                if order is not None:
+                    orders.append(order)
                 self._peak_price = 0.0
                 return orders
 
@@ -80,15 +82,17 @@ class MomentumAgent(BaseAgent):
 
             # Exit: trailing stop hit OR price rose back inside channel
             if rally >= self.trailing_stop_pct or price > channel_low:
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.BUY,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=abs(self.position),
-                    )
+                order = risk_limited_exit_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
+                    position=self.position,
+                    price=price,
+                    market_state=market_state,
+                    volatility=volatility,
+                    aggression=1.3,
                 )
+                if order is not None:
+                    orders.append(order)
                 self._trough_price = float("inf")
                 return orders
 
@@ -105,6 +109,7 @@ class MomentumAgent(BaseAgent):
                     position=self.position,
                     market_state=market_state,
                     volatility=volatility,
+                    active_orders=self.active_orders,
                     aggression=1.2,
                 )
                 if order is None:
@@ -123,6 +128,7 @@ class MomentumAgent(BaseAgent):
                     position=self.position,
                     market_state=market_state,
                     volatility=volatility,
+                    active_orders=self.active_orders,
                     aggression=1.2,
                 )
                 if order is None:

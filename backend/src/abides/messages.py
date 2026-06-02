@@ -42,6 +42,7 @@ class OrderMessage(Message):
     order_type: OrderType = OrderType.LIMIT
     price: float = 0.0
     quantity: int = 0
+    order_id: Optional[str] = None
 
     def __init__(
         self,
@@ -50,6 +51,7 @@ class OrderMessage(Message):
         order_type: OrderType,
         price: float,
         quantity: int,
+        order_id: Optional[str] = None,
         timestamp: float = 0.0,
     ) -> None:
         self._set_message(MessageType.ORDER, sender_id, timestamp=timestamp)
@@ -57,6 +59,7 @@ class OrderMessage(Message):
         self.order_type = order_type
         self.price = float(price)
         self.quantity = int(quantity)
+        self.order_id = order_id
 
 
 @dataclass

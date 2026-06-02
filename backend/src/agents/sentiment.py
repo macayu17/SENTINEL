@@ -95,6 +95,7 @@ class SentimentAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=0.8,
             )
             if order is not None:
@@ -111,6 +112,7 @@ class SentimentAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=0.8,
             )
             if order is not None:

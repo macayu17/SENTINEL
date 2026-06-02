@@ -20,14 +20,18 @@ class AbidesOrderBook:
         order_type: OrderType,
         price: float,
         quantity: int,
+        order_id: str | None = None,
     ) -> List[Trade]:
-        order = Order(
-            agent_id=agent_id,
-            side=side,
-            order_type=order_type,
-            price=price,
-            quantity=quantity,
-        )
+        order_kwargs = {
+            "agent_id": agent_id,
+            "side": side,
+            "order_type": order_type,
+            "price": price,
+            "quantity": quantity,
+        }
+        if order_id:
+            order_kwargs["order_id"] = order_id
+        order = Order(**order_kwargs)
         return self._book.add_order(order)
 
     def cancel_order(self, order_id: str) -> bool:

@@ -30,6 +30,7 @@ class ExchangeAgent:
                 order_type=message.order_type,
                 price=message.price,
                 quantity=message.quantity,
+                order_id=message.order_id,
             )
             return self._build_responses(trades, timestamp)
 

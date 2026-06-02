@@ -2,7 +2,7 @@
 
 from typing import List, Dict
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, passive_depth_for_side, risk_limited_order
+from .risk import AgentRiskProfile, passive_depth_for_side, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -44,16 +44,17 @@ class MarketMakerAgent(BaseAgent):
 
         # Flatten near close
         if time_to_close < 600 and self.position != 0:
-            side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
-            orders.append(
-                Order(
-                    agent_id=self.agent_id,
-                    side=side,
-                    order_type=OrderType.MARKET,
-                    price=mid,
-                    quantity=abs(self.position),
-                )
+            order = risk_limited_exit_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
+                position=self.position,
+                price=mid,
+                market_state=market_state,
+                volatility=volatility,
+                aggression=1.5,
             )
+            if order is not None:
+                orders.append(order)
             return orders
 
         if self.active_orders and not self.risk_profile.should_reprice(
@@ -87,6 +88,7 @@ class MarketMakerAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=queue_aggression,
                 depth_fn=passive_depth_for_side,
             )

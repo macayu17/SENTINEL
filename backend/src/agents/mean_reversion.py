@@ -4,7 +4,7 @@ from typing import List, Dict
 from collections import deque
 import math
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, risk_limited_order
+from .risk import AgentRiskProfile, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -89,29 +89,33 @@ class MeanReversionAgent(BaseAgent):
         if self.position > 0:
             # Long position: exit when price returns to SMA
             if price >= sma:
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.SELL,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=abs(self.position),
-                    )
+                order = risk_limited_exit_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
+                    position=self.position,
+                    price=price,
+                    market_state=market_state,
+                    volatility=volatility,
+                    aggression=1.2,
                 )
+                if order is not None:
+                    orders.append(order)
                 return orders
 
         elif self.position < 0:
             # Short position: exit when price returns to SMA
             if price <= sma:
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.BUY,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=abs(self.position),
-                    )
+                order = risk_limited_exit_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
+                    position=self.position,
+                    price=price,
+                    market_state=market_state,
+                    volatility=volatility,
+                    aggression=1.2,
                 )
+                if order is not None:
+                    orders.append(order)
                 return orders
 
         # ── Entry signals (only if flat) ────────────────────────────────
@@ -127,6 +131,7 @@ class MeanReversionAgent(BaseAgent):
                     position=self.position,
                     market_state=market_state,
                     volatility=volatility,
+                    active_orders=self.active_orders,
                     aggression=0.9,
                 )
                 if order is None:
@@ -144,6 +149,7 @@ class MeanReversionAgent(BaseAgent):
                     position=self.position,
                     market_state=market_state,
                     volatility=volatility,
+                    active_orders=self.active_orders,
                     aggression=0.9,
                 )
                 if order is None:
@@ -156,5 +162,16 @@ class MeanReversionAgent(BaseAgent):
         super().reset()
         self._price_history.clear()
 
-    def consume_cancellations(self) -> List[str]:
-        return self.cancel_all_active_orders()
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        if not self.active_orders:
+            return []
+        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        target_bid = round(price + 0.01, 2)
+        target_ask = round(price - 0.01, 2)
+        if self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=target_bid,
+            target_ask=target_ask,
+        ):
+            return self.cancel_all_active_orders()
+        return []

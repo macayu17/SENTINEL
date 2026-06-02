@@ -3,7 +3,7 @@
 from typing import List, Dict
 import random
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
+from .risk import AgentRiskProfile, near_touch_price, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -55,16 +55,17 @@ class InformedAgent(BaseAgent):
         if self._active_signal and (current_time - self._signal_start_time) > self.signal_duration:
             # Unwind position
             if self.position != 0:
-                side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=side,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=abs(self.position),
-                    )
+                order = risk_limited_exit_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
+                    position=self.position,
+                    price=price,
+                    market_state=market_state,
+                    volatility=volatility,
+                    aggression=1.5,
                 )
+                if order is not None:
+                    orders.append(order)
             self._active_signal = None
             return orders
 
@@ -98,6 +99,7 @@ class InformedAgent(BaseAgent):
                     position=self.position,
                     market_state=market_state,
                     volatility=volatility,
+                    active_orders=self.active_orders,
                     aggression=1.3,
                 )
                 if order is None:

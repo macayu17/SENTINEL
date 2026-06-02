@@ -9,7 +9,7 @@ from backend.src.agents.noise import NoiseAgent
 from backend.src.agents.retail import RetailAgent
 from backend.src.agents.sentiment import SentimentAgent
 from backend.src.agents.spoofing import SpoofingAgent
-from backend.src.market.order import OrderSide, OrderType
+from backend.src.market.order import Order, OrderSide, OrderType
 
 
 def _state(**overrides):
@@ -72,6 +72,18 @@ def test_market_maker_near_inventory_cap_only_quotes_flattening_side():
 
     assert orders
     assert all(order.side == OrderSide.SELL for order in orders)
+
+
+def test_market_maker_close_flattening_is_depth_capped():
+    agent = MarketMakerAgent("MM_CLOSE", quote_size=500, max_inventory=5_000)
+    agent.position = 2_000
+
+    orders = agent.decide_action(_state(time_to_close=120, bid_depth=300, ask_depth=5_000))
+
+    assert len(orders) == 1
+    assert orders[0].side == OrderSide.SELL
+    assert orders[0].order_type == OrderType.MARKET
+    assert orders[0].quantity == 24
 
 
 def test_market_maker_reduces_passive_bid_when_bid_queue_is_crowded():
@@ -188,3 +200,22 @@ def test_institutional_agent_can_start_on_scheduled_delay_without_random_gate():
     assert len(orders) == 1
     assert orders[0].side == OrderSide.SELL
     assert orders[0].quantity > 0
+
+
+def test_liquidity_trader_keeps_fresh_child_limit_until_reprice():
+    agent = LiquidityTraderAgent("LIQ_KEEP")
+    agent._active_side = OrderSide.BUY
+    resting = Order("LIQ_KEEP", OrderSide.BUY, OrderType.LIMIT, 99.99, 100)
+    agent.active_orders = {resting.order_id: resting}
+
+    assert agent.cancel_for_state(_state(spread=0.02)) == []
+    assert agent.cancel_for_state(_state(mid_price=101.0, current_price=101.0, spread=0.02)) == [resting.order_id]
+
+
+def test_mean_reversion_keeps_fresh_entry_limit_until_reprice():
+    agent = MeanReversionAgent("MR_KEEP")
+    resting = Order("MR_KEEP", OrderSide.BUY, OrderType.LIMIT, 100.01, 100)
+    agent.active_orders = {resting.order_id: resting}
+
+    assert agent.cancel_for_state(_state()) == []
+    assert agent.cancel_for_state(_state(mid_price=101.0, current_price=101.0)) == [resting.order_id]

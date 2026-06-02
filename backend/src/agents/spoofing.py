@@ -3,7 +3,7 @@
 from typing import List, Dict, Optional
 import random
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side, risk_limited_order
+from .risk import AgentRiskProfile, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -73,23 +73,17 @@ class SpoofingAgent(BaseAgent):
 
         # ── Flatten if over position limit ──────────────────────────────
         if abs(self.position) >= self.position_limit:
-            side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
-            qty = self.risk_profile.target_size(
-                side=side,
+            order = risk_limited_exit_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 position=self.position,
-                available_depth=displayed_depth_for_side(market_state, side),
+                price=price,
+                market_state=market_state,
                 volatility=volatility,
                 aggression=1.5,
             )
-            orders.append(
-                Order(
-                    agent_id=self.agent_id,
-                    side=side,
-                    order_type=OrderType.MARKET,
-                    price=price,
-                    quantity=max(1, min(abs(self.position), qty or self.real_order_size)),
-                )
-            )
+            if order is not None:
+                orders.append(order)
             return orders
 
         # ── State machine ───────────────────────────────────────────────
@@ -141,6 +135,7 @@ class SpoofingAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=1.2,
             )
             if order is None:

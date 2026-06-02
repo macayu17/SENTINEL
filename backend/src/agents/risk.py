@@ -25,12 +25,18 @@ class AgentRiskProfile:
             return 0.0
         return min(1.0, abs(position) / float(self.max_inventory))
 
-    def remaining_capacity(self, side: OrderSide, position: int) -> int:
+    def remaining_capacity(
+        self,
+        side: OrderSide,
+        position: int,
+        active_orders: Mapping[str, Order] | None = None,
+    ) -> int:
         if self.max_inventory <= 0:
             return max(0, self.base_order_size)
+        pending = active_exposure_for_side(active_orders or {}, side)
         if side == OrderSide.BUY:
-            return max(0, self.max_inventory - position)
-        return max(0, self.max_inventory + position)
+            return max(0, self.max_inventory - position - pending)
+        return max(0, self.max_inventory + position - pending)
 
     def target_size(
         self,
@@ -39,10 +45,11 @@ class AgentRiskProfile:
         position: int,
         available_depth: float,
         volatility: float,
+        active_orders: Mapping[str, Order] | None = None,
         aggression: float = 1.0,
     ) -> int:
         """Return a realistic child-order size bounded by risk and displayed depth."""
-        capacity = self.remaining_capacity(side, position)
+        capacity = self.remaining_capacity(side, position, active_orders=active_orders)
         if capacity <= 0:
             return 0
 
@@ -77,6 +84,20 @@ def _clamp(value: float, low: float, high: float) -> float:
     return min(high, max(low, float(value)))
 
 
+def active_exposure_for_side(active_orders: Mapping[str, Order], side: OrderSide) -> int:
+    """Count resting same-side shares that still consume inventory capacity."""
+    exposure = 0
+    for order in active_orders.values():
+        if order.side != side:
+            continue
+        try:
+            remaining = int(order.remaining_quantity)
+        except (TypeError, ValueError):
+            remaining = 0
+        exposure += max(0, remaining)
+    return exposure
+
+
 def displayed_depth_for_side(market_state: Mapping, side: OrderSide) -> float:
     """Depth available on the side an aggressive child order would consume."""
     key = "ask_depth" if side == OrderSide.BUY else "bid_depth"
@@ -107,6 +128,7 @@ def risk_limited_order(
     position: int,
     market_state: Mapping,
     volatility: float,
+    active_orders: Mapping[str, Order] | None = None,
     aggression: float = 1.0,
     quantity_cap: int | None = None,
     depth_fn: Callable[[Mapping, OrderSide], float] = displayed_depth_for_side,
@@ -117,6 +139,7 @@ def risk_limited_order(
         position=position,
         available_depth=depth_fn(market_state, side),
         volatility=volatility,
+        active_orders=active_orders,
         aggression=aggression,
     )
     if quantity_cap is not None:
@@ -127,6 +150,37 @@ def risk_limited_order(
         agent_id=agent_id,
         side=side,
         order_type=order_type,
+        price=price,
+        quantity=quantity,
+    )
+
+
+def risk_limited_exit_order(
+    profile: AgentRiskProfile,
+    *,
+    agent_id: str,
+    position: int,
+    price: float,
+    market_state: Mapping,
+    volatility: float,
+    aggression: float = 1.0,
+) -> Order | None:
+    """Build a reduce-only market order capped by displayed contra-side depth."""
+    if position == 0:
+        return None
+    side = OrderSide.SELL if position > 0 else OrderSide.BUY
+    available_depth = displayed_depth_for_side(market_state, side)
+    depth_cap = int(max(1.0, available_depth) * _clamp(profile.participation_rate, 0.01, 1.0))
+    vol = max(0.0, float(volatility or 0.0))
+    vol_factor = 1.0 if vol <= 0.001 else 1.0 / (1.0 + 10.0 * vol)
+    target = int(profile.base_order_size * vol_factor * _clamp(aggression, 0.05, 3.0))
+    quantity = min(abs(position), max(profile.min_order_size, target), max(1, depth_cap))
+    if quantity <= 0:
+        return None
+    return Order(
+        agent_id=agent_id,
+        side=side,
+        order_type=OrderType.MARKET,
         price=price,
         quantity=quantity,
     )

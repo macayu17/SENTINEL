@@ -145,3 +145,16 @@ def test_abides_informed_agent_receives_initial_oracle_market_data():
 
     assert informed.last_oracle is not None
     assert informed.last_oracle["mispricing"] < 0
+
+
+def test_abides_market_maker_replaces_quotes_without_depth_stacking():
+    sim = AbidesSimulation(oracle_config=OracleConfig(enabled=False))
+    exchange = ExchangeAgent(initial_price=100.0)
+    sim.set_exchange(exchange)
+    sim.register_agent(MarketMakerAgent("MM_STACK", wakeup_interval=0.5, spread=0.1, size=100))
+
+    sim.run(duration_seconds=2.0)
+
+    depth = exchange.order_book.get_depth(levels=10)
+    assert sum(level["size"] for level in depth["bids"]) == 100
+    assert sum(level["size"] for level in depth["asks"]) == 100

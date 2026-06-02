@@ -91,6 +91,7 @@ class InstitutionalAgent(BaseAgent):
                 position=self.position,
                 market_state=market_state,
                 volatility=volatility,
+                active_orders=self.active_orders,
                 aggression=1.0,
                 quantity_cap=twap_size,
             )
