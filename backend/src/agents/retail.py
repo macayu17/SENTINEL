@@ -3,7 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side
+from .risk import AgentRiskProfile, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -80,46 +80,38 @@ class RetailAgent(BaseAgent):
 
             # Bullish crossover
             if prev_ma20 <= prev_ma50 and ma20 > ma50:
-                qty = self.risk_profile.target_size(
+                order = risk_limited_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
                     side=OrderSide.BUY,
+                    order_type=OrderType.MARKET,
+                    price=price,
                     position=self.position,
-                    available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                    market_state=market_state,
                     volatility=volatility,
                     aggression=0.7,
                 )
-                if qty <= 0:
+                if order is None:
                     return orders
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.BUY,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=qty,
-                    )
-                )
+                orders.append(order)
                 self._entry_price = price
 
             # Bearish crossover
             elif prev_ma20 >= prev_ma50 and ma20 < ma50:
-                qty = self.risk_profile.target_size(
+                order = risk_limited_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
                     side=OrderSide.SELL,
+                    order_type=OrderType.MARKET,
+                    price=price,
                     position=self.position,
-                    available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                    market_state=market_state,
                     volatility=volatility,
                     aggression=0.7,
                 )
-                if qty <= 0:
+                if order is None:
                     return orders
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.SELL,
-                        order_type=OrderType.MARKET,
-                        price=price,
-                        quantity=qty,
-                    )
-                )
+                orders.append(order)
                 self._entry_price = price
 
         return orders

@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
-    sys.path.append(str(ROOT))
+    sys.path.insert(0, str(ROOT))
 
 from backend.src.market.gp_policy import GPTrainingConfig, GeneticPolicyModel, GeneticProgramTrainer
 

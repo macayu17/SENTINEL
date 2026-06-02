@@ -28,8 +28,7 @@ class OrderBook:
         """Add an order to the book. Returns list of trades if matched."""
         if order.order_type == OrderType.MARKET:
             return self._match_market_order(order)
-        else:
-            return self._match_limit_order(order)
+        return self._match_limit_order(order)
 
     def _match_market_order(self, order: Order) -> List[Trade]:
         """Match a market order against the opposite side."""
@@ -132,7 +131,7 @@ class OrderBook:
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an order by ID. Returns True if found and cancelled."""
-        for book in [self.bids, self.asks]:
+        for book in (self.bids, self.asks):
             for i, order in enumerate(book):
                 if order.order_id == order_id:
                     order.status = OrderStatus.CANCELLED
@@ -168,10 +167,7 @@ class OrderBook:
 
     def get_total_depth(self, levels: int = 5) -> int:
         """Total quantity across top N levels on both sides."""
-        depth = self.get_depth(levels)
-        bid_total = sum(level["size"] for level in depth["bids"])
-        ask_total = sum(level["size"] for level in depth["asks"])
-        return bid_total + ask_total
+        return self._total_depth(self.bids, levels) + self._total_depth(self.asks, levels)
 
     def replace_depth(
         self,
@@ -197,16 +193,24 @@ class OrderBook:
         self, orders: List[Order], levels: int
     ) -> List[Dict[str, float]]:
         """Aggregate orders into price levels."""
+        level_map = self._aggregate_level_sizes(orders, levels)
+        return [
+            {"price": price, "size": size} for price, size in level_map.items()
+        ]
+
+    @staticmethod
+    def _aggregate_level_sizes(orders: List[Order], levels: int) -> Dict[float, int]:
         level_map: Dict[float, int] = {}
         for order in orders:
             price = round(order.price, 2)
             level_map[price] = level_map.get(price, 0) + order.remaining_quantity
             if len(level_map) >= levels:
                 break
+        return level_map
 
-        return [
-            {"price": price, "size": size} for price, size in level_map.items()
-        ]
+    @classmethod
+    def _total_depth(cls, orders: List[Order], levels: int) -> int:
+        return sum(cls._aggregate_level_sizes(orders, levels).values())
 
     @staticmethod
     def _valid_depth_level(level: Dict[str, float]) -> bool:

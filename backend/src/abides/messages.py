@@ -23,6 +23,18 @@ class Message:
     recipient_id: Optional[str] = None
     timestamp: float = 0.0
 
+    def _set_message(
+        self,
+        msg_type: MessageType,
+        sender_id: str,
+        recipient_id: Optional[str] = None,
+        timestamp: float = 0.0,
+    ) -> None:
+        self.msg_type = msg_type
+        self.sender_id = sender_id
+        self.recipient_id = recipient_id
+        self.timestamp = timestamp
+
 
 @dataclass
 class OrderMessage(Message):
@@ -40,7 +52,7 @@ class OrderMessage(Message):
         quantity: int,
         timestamp: float = 0.0,
     ) -> None:
-        super().__init__(MessageType.ORDER, sender_id, None, timestamp)
+        self._set_message(MessageType.ORDER, sender_id, timestamp=timestamp)
         self.side = side
         self.order_type = order_type
         self.price = float(price)
@@ -52,7 +64,7 @@ class CancelMessage(Message):
     order_id: str = ""
 
     def __init__(self, sender_id: str, order_id: str, timestamp: float = 0.0) -> None:
-        super().__init__(MessageType.CANCEL, sender_id, None, timestamp)
+        self._set_message(MessageType.CANCEL, sender_id, timestamp=timestamp)
         self.order_id = order_id
 
 
@@ -74,7 +86,7 @@ class MarketDataMessage(Message):
         oracle: Optional[dict] = None,
         timestamp: float = 0.0,
     ) -> None:
-        super().__init__(MessageType.MARKET_DATA, sender_id, None, timestamp)
+        self._set_message(MessageType.MARKET_DATA, sender_id, timestamp=timestamp)
         self.mid_price = float(mid_price)
         self.best_bid = best_bid
         self.best_ask = best_ask
@@ -99,7 +111,7 @@ class TradeMessage(Message):
         seller_id: str,
         timestamp: float = 0.0,
     ) -> None:
-        super().__init__(MessageType.TRADE, sender_id, recipient_id, timestamp)
+        self._set_message(MessageType.TRADE, sender_id, recipient_id, timestamp)
         self.price = float(price)
         self.quantity = int(quantity)
         self.buyer_id = buyer_id

@@ -1,12 +1,62 @@
+import builtins
+import importlib
 import sys
+import types
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.append(str(ROOT))
 
 from backend.src.agents.rl_agent import RLAgent
 from backend.src.market.simulator import MarketSimulator
+
+PREDICTION_ROOT = Path(__file__).resolve().parents[1] / "src" / "prediction"
+
+
+def _drop_intraday_rl_modules():
+    for module_name in list(sys.modules):
+        if module_name.startswith("backend.src.prediction.intraday_rl"):
+            sys.modules.pop(module_name)
+
+
+def test_intraday_environment_import_does_not_load_training_backend(monkeypatch):
+    _drop_intraday_rl_modules()
+
+    gymnasium_stub = types.ModuleType("gymnasium")
+    gymnasium_stub.Env = object
+    gymnasium_stub.spaces = types.SimpleNamespace(Box=object, Discrete=object)
+
+    numpy_stub = types.ModuleType("numpy")
+    numpy_stub.ndarray = object
+    numpy_stub.float32 = "float32"
+    numpy_stub.inf = float("inf")
+
+    pandas_stub = types.ModuleType("pandas")
+    pandas_stub.DataFrame = object
+    pandas_stub.DatetimeIndex = object
+
+    monkeypatch.setitem(sys.modules, "gymnasium", gymnasium_stub)
+    monkeypatch.setitem(sys.modules, "numpy", numpy_stub)
+    monkeypatch.setitem(sys.modules, "pandas", pandas_stub)
+
+    prediction_pkg = types.ModuleType("backend.src.prediction")
+    prediction_pkg.__path__ = [str(PREDICTION_ROOT)]
+    src_pkg = importlib.import_module("backend.src")
+    monkeypatch.setitem(sys.modules, "backend.src.prediction", prediction_pkg)
+    monkeypatch.setattr(src_pkg, "prediction", prediction_pkg, raising=False)
+
+    original_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("stable_baselines3") or name == "torch" or name.startswith("torch."):
+            raise AssertionError(f"eager training import: {name}")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    try:
+        module = importlib.import_module("backend.src.prediction.intraday_rl.environment")
+
+        assert module.IntradayTradingEnv.__name__ == "IntradayTradingEnv"
+    finally:
+        _drop_intraday_rl_modules()
 
 
 def test_rl_agent_routes_quotes_through_simulator_lifecycle():

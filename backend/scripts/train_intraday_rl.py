@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from _path_setup import BACKEND_ROOT, add_backend_to_path
+except ModuleNotFoundError:
+    from backend.scripts._path_setup import BACKEND_ROOT, add_backend_to_path
+
+add_backend_to_path()
 
 from src.prediction.intraday_rl.environment import IntradayEnvConfig
 from src.prediction.intraday_rl.trainer import (
@@ -28,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-model",
         type=str,
-        default=str(Path(__file__).parent.parent / "models" / "intraday_ppo"),
+        default=str(BACKEND_ROOT / "models" / "intraday_ppo"),
         help="Output path for PPO model",
     )
     parser.add_argument("--total-timesteps", type=int, default=250000)
@@ -40,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dqn-output-model",
         type=str,
-        default=str(Path(__file__).parent.parent / "models" / "intraday_dqn"),
+        default=str(BACKEND_ROOT / "models" / "intraday_dqn"),
     )
     return parser.parse_args()
 

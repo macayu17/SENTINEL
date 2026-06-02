@@ -70,7 +70,7 @@ class LiquidityShockPredictor:
         timestamp = market_state.get("current_time", 0.0)
 
         if self.model is not None:
-            X = np.array([[features[f] for f in FEATURE_NAMES]])
+            X = np.array([[features[f] for f in FEATURE_NAMES]], dtype=np.float32)
             proba = self.model.predict_proba(X)[0]
             # proba[1] = probability of shock
             shock_prob = float(proba[1]) if len(proba) > 1 else 0.0
@@ -129,7 +129,7 @@ class LiquidityShockPredictor:
             logger.warning("No training data provided")
             return
 
-        X = np.array([[d["features"][f] for f in FEATURE_NAMES] for d in training_data])
+        X = np.array([[d["features"][f] for f in FEATURE_NAMES] for d in training_data], dtype=np.float32)
         y = np.array([d["label"] for d in training_data])
 
         logger.info(f"Training on {len(X)} samples (shock rate: {y.mean():.2%})")

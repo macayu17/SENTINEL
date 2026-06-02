@@ -3,7 +3,7 @@
 from typing import List, Dict
 import random
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
+from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -88,25 +88,21 @@ class InformedAgent(BaseAgent):
             current_pos = abs(self.position)
 
             if current_pos < self.max_position:
-                qty = self.risk_profile.target_size(
+                order_type = OrderType.MARKET if spread <= 0.05 else OrderType.LIMIT
+                order = risk_limited_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
                     side=side,
+                    order_type=order_type,
+                    price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
                     position=self.position,
-                    available_depth=displayed_depth_for_side(market_state, side),
+                    market_state=market_state,
                     volatility=volatility,
                     aggression=1.3,
                 )
-                if qty <= 0:
+                if order is None:
                     return orders
-                order_type = OrderType.MARKET if spread <= 0.05 else OrderType.LIMIT
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=side,
-                        order_type=order_type,
-                        price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
-                        quantity=qty,
-                    )
-                )
+                orders.append(order)
 
         return orders
 

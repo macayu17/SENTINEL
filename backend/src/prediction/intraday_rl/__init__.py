@@ -1,5 +1,8 @@
 """Intraday RL package combining indicator features and data-augmentation RL."""
 
+from importlib import import_module
+from typing import Any
+
 from .backtest import backtest_model
 from .environment import (
     ACTION_BUY,
@@ -15,15 +18,25 @@ from .features import (
     resample_ohlcv,
     split_sessions,
 )
-from .trainer import (
-    DQNTrainingConfig,
-    PPOTrainingConfig,
-    describe_training_setup,
-    load_and_prepare_sessions,
-    prepare_training_sessions,
-    train_dqn_baseline,
-    train_ppo,
-)
+
+_TRAINER_EXPORTS = {
+    "DQNTrainingConfig",
+    "PPOTrainingConfig",
+    "describe_training_setup",
+    "load_and_prepare_sessions",
+    "prepare_training_sessions",
+    "train_dqn_baseline",
+    "train_ppo",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _TRAINER_EXPORTS:
+        trainer = import_module(f"{__name__}.trainer")
+        value = getattr(trainer, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "ACTION_BUY",

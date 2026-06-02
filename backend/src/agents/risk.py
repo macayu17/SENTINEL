@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Mapping
+from typing import Callable, Mapping
 
-from ..market.order import Order, OrderSide
+from ..market.order import Order, OrderSide, OrderType
 
 
 @dataclass(frozen=True)
@@ -95,6 +95,41 @@ def passive_depth_for_side(market_state: Mapping, side: OrderSide) -> float:
         return max(1.0, float(market_state.get(key, fallback) or fallback))
     except (TypeError, ValueError):
         return 1_000.0
+
+
+def risk_limited_order(
+    profile: AgentRiskProfile,
+    *,
+    agent_id: str,
+    side: OrderSide,
+    order_type: OrderType,
+    price: float,
+    position: int,
+    market_state: Mapping,
+    volatility: float,
+    aggression: float = 1.0,
+    quantity_cap: int | None = None,
+    depth_fn: Callable[[Mapping, OrderSide], float] = displayed_depth_for_side,
+) -> Order | None:
+    """Build a profile-sized order, or return None when risk leaves no size."""
+    quantity = profile.target_size(
+        side=side,
+        position=position,
+        available_depth=depth_fn(market_state, side),
+        volatility=volatility,
+        aggression=aggression,
+    )
+    if quantity_cap is not None:
+        quantity = min(quantity, max(0, int(quantity_cap)))
+    if quantity <= 0:
+        return None
+    return Order(
+        agent_id=agent_id,
+        side=side,
+        order_type=order_type,
+        price=price,
+        quantity=quantity,
+    )
 
 
 def near_touch_price(mid: float, side: OrderSide, spread: float, *, ticks: int = 1) -> float:

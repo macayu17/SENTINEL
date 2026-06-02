@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
+try:
+    from _path_setup import add_repo_root_to_path
+except ModuleNotFoundError:
+    from backend.scripts._path_setup import add_repo_root_to_path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = add_repo_root_to_path()
 DEFAULT_OUTPUT = ROOT / "output" / "validation_metrics.json"
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from backend.src.validation.metrics import classification_metrics, lead_time_summary
 

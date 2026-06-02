@@ -376,20 +376,24 @@ class IntradayTradingEnv(gym.Env):
         end = self._current_step
         window = self._session_df.iloc[start:end]
 
-        closes = window["close"].values.astype(np.float32)
-        prev_closes = np.roll(closes, 1)
+        values = window[
+            ["open", "high", "low", "close", "volume_ratio", "sma_signal", "rsi"]
+        ].to_numpy(dtype=np.float32, copy=False)
+        closes = values[:, 3]
+        prev_closes = np.empty_like(closes)
         prev_closes[0] = closes[0]
+        prev_closes[1:] = closes[:-1]
 
-        open_rel = (window["open"].values.astype(np.float32) / prev_closes) - 1.0
-        high_rel = (window["high"].values.astype(np.float32) / prev_closes) - 1.0
-        low_rel = (window["low"].values.astype(np.float32) / prev_closes) - 1.0
-        close_rel = (window["close"].values.astype(np.float32) / prev_closes) - 1.0
-        volume_rel = window["volume_ratio"].values.astype(np.float32) - 1.0
+        obs = np.empty(self.observation_space.shape[0], dtype=np.float32)
+        candle_obs = obs[: self.config.lookback * self._obs_feature_count].reshape(
+            self.config.lookback,
+            self._obs_feature_count,
+        )
+        candle_obs[:, :4] = (values[:, :4] / prev_closes[:, None]) - 1.0
+        candle_obs[:, 4] = values[:, 4] - 1.0
 
-        stacked = np.column_stack([open_rel, high_rel, low_rel, close_rel, volume_rel]).flatten()
-
-        latest = window.iloc[-1]
-        equity = self._mark_to_market(float(latest["close"]))
+        latest = values[-1]
+        equity = self._mark_to_market(float(latest[3]))
         pnl_pct = (equity - self.config.initial_cash) / self.config.initial_cash
 
         ts = window.index[-1]
@@ -397,20 +401,18 @@ class IntradayTradingEnv(gym.Env):
         elapsed = (ts - session_start).total_seconds() / 60.0
         morning_progress = min(1.0, elapsed / float(self.config.morning_minutes))
 
-        extra = np.array(
-            [
-                float(self.position),
-                float(pnl_pct),
-                float(latest["sma_signal"]),
-                (float(latest["rsi"]) / 50.0) - 1.0,
-                float(latest["volume_ratio"] - 1.0),
-                float(morning_progress),
-            ],
-            dtype=np.float32,
+        extra_start = self.config.lookback * self._obs_feature_count
+        obs[extra_start:] = (
+            float(self.position),
+            float(pnl_pct),
+            float(latest[5]),
+            (float(latest[6]) / 50.0) - 1.0,
+            float(latest[4] - 1.0),
+            float(morning_progress),
         )
 
-        obs = np.concatenate([stacked.astype(np.float32), extra], axis=0)
-        return np.clip(obs, -10.0, 10.0).astype(np.float32)
+        np.clip(obs, -10.0, 10.0, out=obs)
+        return obs
 
     def _terminal_observation(self) -> np.ndarray:
         # Return last valid observation shape when the episode ends.

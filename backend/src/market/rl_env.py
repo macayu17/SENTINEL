@@ -3,7 +3,7 @@
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 from .simulator import MarketSimulator
 from .rl_features import extract_market_maker_observation
 from ..agents.rl_agent import RLAgent
@@ -68,11 +68,12 @@ class MarketMakerEnv(gym.Env):
         next_state = self.simulator.step()
         num_cancels = rl_agent.consume_last_cancel_count()
         effective_spread, effective_skew, effective_qty = rl_agent.get_last_effective_action()
+        next_mid = next_state.get("mid_price", mid) or mid or 0.0
 
         # Compute Rewards
-        current_pnl = self._get_agent_pnl()
+        current_pnl = rl_agent.realized_pnl + rl_agent.get_unrealized_pnl(next_mid)
         current_realized = rl_agent.realized_pnl
-        position = self._get_agent_inventory()
+        position = rl_agent.position
 
         pnl_diff = current_pnl - self.last_total_pnl
         realized_diff = current_realized - self.last_realized_pnl
@@ -90,7 +91,6 @@ class MarketMakerEnv(gym.Env):
 
         pnl_scale = max(25.0, rl_agent.initial_capital * 0.0005)
         drawdown_scale = max(50.0, rl_agent.initial_capital * 0.001)
-        next_mid = next_state.get("mid_price", mid) or mid or 0.0
         mid_change_bps = 0.0
         if mid and next_mid:
             mid_change_bps = ((next_mid - mid) / mid) * 10_000.0
@@ -104,7 +104,7 @@ class MarketMakerEnv(gym.Env):
         adverse_selection_penalty = max(0.0, -(inventory_ratio * mid_change_bps)) * 0.01
         closeout_penalty = 0.2 * abs(inventory_ratio) if next_state["time_to_close"] / max(1.0, self.simulator.duration_seconds) < 0.1 else 0.0
         two_sided_bonus = 0.03 if active_quotes >= 2 else (-0.02 if active_quotes == 0 else 0.0)
-        quote_quality_bonus = 0.01 if effective_spread <= max(self._get_rl_agent().min_spread * 2.0, state.get("spread", 0.0) * 1.6) else 0.0
+        quote_quality_bonus = 0.01 if effective_spread <= max(rl_agent.min_spread * 2.0, state.get("spread", 0.0) * 1.6) else 0.0
 
         reward = (
             spread_capture_reward
@@ -122,7 +122,7 @@ class MarketMakerEnv(gym.Env):
         self.last_position = position
         self.last_mid_price = next_mid
 
-        obs = self._extract_obs(next_state)
+        obs = self._extract_obs(next_state, rl_agent)
         done = next_state['time_to_close'] <= 0
         truncated = False 
         
@@ -153,8 +153,13 @@ class MarketMakerEnv(gym.Env):
 
         return obs, reward, done, truncated, info
 
-    def _extract_obs(self, state: Dict) -> np.ndarray:
-        return extract_market_maker_observation(self.simulator, self.rl_agent_id)
+    def _extract_obs(self, state: Optional[Dict] = None, agent: Optional[RLAgent] = None) -> np.ndarray:
+        return extract_market_maker_observation(
+            self.simulator,
+            self.rl_agent_id,
+            state=state,
+            agent=agent,
+        )
 
     def _get_agent_pnl(self) -> float:
         agent = self.simulator.get_agent(self.rl_agent_id)

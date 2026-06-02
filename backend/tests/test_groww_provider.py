@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 from backend.src.data import groww_provider
 from backend.src.data.groww_provider import (
     GrowwCredentialsError,
+    GrowwDataError,
     GrowwHistoricalProvider,
     _resolve_interval_constant,
     fetch_groww_quote,
@@ -148,6 +149,24 @@ def test_groww_quote_normalizes_live_depth_payload():
             {"price": 149.65, "size": 600},
         ],
     }
+
+
+def test_groww_quote_reports_quote_field_errors():
+    with pytest.raises(GrowwDataError, match="Groww quote last price is not numeric."):
+        normalize_groww_quote(
+            {"last_price": "not-a-price"},
+            exchange="NSE",
+            segment="CASH",
+            groww_symbol="RELIANCE",
+        )
+
+    with pytest.raises(GrowwDataError, match="Groww total buy quantity is not numeric."):
+        normalize_groww_quote(
+            {"last_price": 149.5, "total_buy_quantity": "not-a-quantity"},
+            exchange="NSE",
+            segment="CASH",
+            groww_symbol="RELIANCE",
+        )
 
 
 def test_groww_provider_fetches_live_quote_with_trading_symbol():

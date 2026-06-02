@@ -110,38 +110,7 @@ def normalize_upstox_candles(payload: Any) -> List[UpstoxCandle]:
     if not isinstance(candles, list) or not candles:
         raise UpstoxDataError("Upstox returned no historical candles.")
 
-    normalized: List[UpstoxCandle] = []
-    for row in candles:
-        if isinstance(row, dict):
-            normalized.append(
-                UpstoxCandle(
-                    timestamp=_normalize_timestamp(row.get("timestamp") or row.get("time")),
-                    open=_finite_float(row.get("open"), "open"),
-                    high=_finite_float(row.get("high"), "high"),
-                    low=_finite_float(row.get("low"), "low"),
-                    close=_finite_float(row.get("close"), "close"),
-                    volume=_finite_float(row.get("volume", 0), "volume"),
-                    oi=_optional_float(row.get("oi") if "oi" in row else row.get("open_interest")),
-                )
-            )
-            continue
-
-        if not isinstance(row, (list, tuple)) or len(row) < 6:
-            raise UpstoxDataError("Upstox candle rows must include timestamp, OHLC, and volume.")
-
-        normalized.append(
-            UpstoxCandle(
-                timestamp=_normalize_timestamp(row[0]),
-                open=_finite_float(row[1], "open"),
-                high=_finite_float(row[2], "high"),
-                low=_finite_float(row[3], "low"),
-                close=_finite_float(row[4], "close"),
-                volume=_finite_float(row[5], "volume"),
-                oi=_optional_float(row[6] if len(row) > 6 else None),
-            )
-        )
-
-    return normalized
+    return [_normalize_candle_row(row) for row in candles]
 
 
 def normalize_upstox_instruments(payload: Any) -> List[UpstoxInstrument]:
@@ -150,7 +119,7 @@ def normalize_upstox_instruments(payload: Any) -> List[UpstoxInstrument]:
 
     status = payload.get("status")
     if status and status != "success":
-        raise UpstoxDataError(_upstox_error_message(payload))
+        raise UpstoxDataError(_upstox_error_message(payload, "instrument search"))
 
     rows = payload.get("data")
     if rows is None:
@@ -163,22 +132,17 @@ def normalize_upstox_instruments(payload: Any) -> List[UpstoxInstrument]:
         if not isinstance(row, dict):
             raise UpstoxDataError("Upstox instrument rows must be objects.")
 
-        instrument_key = str(row.get("instrument_key") or "").strip()
+        instrument_key = _first_text(row, ("instrument_key",))
         if not instrument_key:
             raise UpstoxDataError("Upstox instrument row is missing instrument_key.")
 
-        trading_symbol = str(
-            row.get("trading_symbol")
-            or row.get("tradingsymbol")
-            or row.get("symbol")
-            or ""
-        ).strip()
-        name = str(row.get("name") or row.get("company_name") or trading_symbol or instrument_key).strip()
-        exchange = str(row.get("exchange") or "").strip()
-        segment = str(row.get("segment") or "").strip()
-        instrument_type = str(row.get("instrument_type") or row.get("instrumentType") or "").strip()
-        isin = row.get("isin")
-        short_name = row.get("short_name")
+        trading_symbol = _first_text(row, ("trading_symbol", "tradingsymbol", "symbol"))
+        name = _first_text(row, ("name", "company_name")) or trading_symbol or instrument_key
+        exchange = _clean_string(row.get("exchange"))
+        segment = _clean_string(row.get("segment"))
+        instrument_type = _first_text(row, ("instrument_type", "instrumentType"))
+        isin = _first_text(row, ("isin",)) or None
+        short_name = _first_text(row, ("short_name",)) or None
 
         instruments.append(
             UpstoxInstrument(
@@ -188,8 +152,8 @@ def normalize_upstox_instruments(payload: Any) -> List[UpstoxInstrument]:
                 exchange=exchange,
                 segment=segment,
                 instrument_type=instrument_type,
-                isin=str(isin).strip() if isin else None,
-                short_name=str(short_name).strip() if short_name else None,
+                isin=isin,
+                short_name=short_name,
             )
         )
 
@@ -347,24 +311,12 @@ class UpstoxHistoricalProvider:
         if from_date:
             url = f"{url}/{from_date.strip()}"
 
-        try:
-            response = self._client.get(
-                url,
-                headers=self._headers(),
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in {401, 403}:
-                raise UpstoxCredentialsError(
-                    f"Upstox rejected historical candle access ({status}). Check UPSTOX_ACCESS_TOKEN/UPSTOX_ANALYTICS_TOKEN and market-data permissions."
-                ) from exc
-            raise UpstoxProviderError(f"Upstox historical candle request failed ({status}): {exc.response.text}") from exc
-        except httpx.RequestError as exc:
-            raise UpstoxProviderError(f"Upstox historical candle request failed: {exc}") from exc
-        except ValueError as exc:
-            raise UpstoxDataError("Upstox returned a non-JSON historical candle response.") from exc
+        payload = self._get_json(
+            url=url,
+            request_label="historical candle request",
+            access_label="historical candle",
+            non_json_label="historical candle",
+        )
 
         candles = normalize_upstox_candles(payload)
         return upstox_candles_to_stock_info(
@@ -401,75 +353,70 @@ class UpstoxHistoricalProvider:
         if segments.strip():
             params["segments"] = segments.strip().upper()
 
-        try:
-            response = self._client.get(
-                f"{self._v2_base_url}/instruments/search",
-                headers=self._headers(),
-                params=params,
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in {401, 403}:
-                raise UpstoxCredentialsError(
-                    f"Upstox rejected instrument-search access ({status}). Check UPSTOX_ACCESS_TOKEN/UPSTOX_ANALYTICS_TOKEN and market-data permissions."
-                ) from exc
-            raise UpstoxProviderError(f"Upstox instrument search failed ({status}): {exc.response.text}") from exc
-        except httpx.RequestError as exc:
-            raise UpstoxProviderError(f"Upstox instrument search failed: {exc}") from exc
-        except ValueError as exc:
-            raise UpstoxDataError("Upstox returned a non-JSON instrument-search response.") from exc
+        payload = self._get_json(
+            url=f"{self._v2_base_url}/instruments/search",
+            params=params,
+            request_label="instrument search",
+            access_label="instrument-search",
+            non_json_label="instrument-search",
+        )
 
         return normalize_upstox_instruments(payload)
 
     def fetch_ltp(self, *, instrument_key: str) -> UpstoxQuote:
         key = normalize_upstox_instrument_key(instrument_key)
-        try:
-            response = self._client.get(
-                f"{self._base_url}/market-quote/ltp",
-                headers=self._headers(),
-                params={"instrument_key": key},
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in {401, 403}:
-                raise UpstoxCredentialsError(
-                    f"Upstox rejected LTP quote access ({status}). Check UPSTOX_ACCESS_TOKEN/UPSTOX_ANALYTICS_TOKEN and market-data permissions."
-                ) from exc
-            raise UpstoxProviderError(f"Upstox LTP quote request failed ({status}): {exc.response.text}") from exc
-        except httpx.RequestError as exc:
-            raise UpstoxProviderError(f"Upstox LTP quote request failed: {exc}") from exc
-        except ValueError as exc:
-            raise UpstoxDataError("Upstox returned a non-JSON LTP quote response.") from exc
+        payload = self._get_json(
+            url=f"{self._base_url}/market-quote/ltp",
+            params={"instrument_key": key},
+            request_label="LTP quote request",
+            access_label="LTP quote",
+            non_json_label="LTP quote",
+        )
 
         return normalize_upstox_ltp(payload, key)
 
     def fetch_full_quote(self, *, instrument_key: str) -> UpstoxQuote:
         key = normalize_upstox_instrument_key(instrument_key)
+        payload = self._get_json(
+            url=f"{self._v2_base_url}/market-quote/quotes",
+            params={"instrument_key": key},
+            request_label="full quote request",
+            access_label="full quote",
+            non_json_label="full quote",
+        )
+
+        return normalize_upstox_full_quote(payload, key)
+
+    def _get_json(
+        self,
+        *,
+        url: str,
+        request_label: str,
+        access_label: str,
+        non_json_label: str,
+        params: Optional[dict[str, Any]] = None,
+    ) -> Any:
         try:
+            kwargs: dict[str, Any] = {"headers": self._headers()}
+            if params is not None:
+                kwargs["params"] = params
             response = self._client.get(
-                f"{self._v2_base_url}/market-quote/quotes",
-                headers=self._headers(),
-                params={"instrument_key": key},
+                url,
+                **kwargs,
             )
             response.raise_for_status()
-            payload = response.json()
+            return response.json()
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status in {401, 403}:
                 raise UpstoxCredentialsError(
-                    f"Upstox rejected full quote access ({status}). Check UPSTOX_ACCESS_TOKEN/UPSTOX_ANALYTICS_TOKEN and market-data permissions."
+                    f"Upstox rejected {access_label} access ({status}). Check UPSTOX_ACCESS_TOKEN/UPSTOX_ANALYTICS_TOKEN and market-data permissions."
                 ) from exc
-            raise UpstoxProviderError(f"Upstox full quote request failed ({status}): {exc.response.text}") from exc
+            raise UpstoxProviderError(f"Upstox {request_label} failed ({status}): {exc.response.text}") from exc
         except httpx.RequestError as exc:
-            raise UpstoxProviderError(f"Upstox full quote request failed: {exc}") from exc
+            raise UpstoxProviderError(f"Upstox {request_label} failed: {exc}") from exc
         except ValueError as exc:
-            raise UpstoxDataError("Upstox returned a non-JSON full quote response.") from exc
-
-        return normalize_upstox_full_quote(payload, key)
+            raise UpstoxDataError(f"Upstox returned a non-JSON {non_json_label} response.") from exc
 
 
 def fetch_upstox_historical_stock(
@@ -551,6 +498,32 @@ def _normalize_timestamp(value: Any) -> str:
     return str(value)
 
 
+def _normalize_candle_row(row: Any) -> UpstoxCandle:
+    if isinstance(row, dict):
+        return UpstoxCandle(
+            timestamp=_normalize_timestamp(row.get("timestamp") or row.get("time")),
+            open=_finite_float(row.get("open"), "open"),
+            high=_finite_float(row.get("high"), "high"),
+            low=_finite_float(row.get("low"), "low"),
+            close=_finite_float(row.get("close"), "close"),
+            volume=_finite_float(row.get("volume", 0), "volume"),
+            oi=_optional_float(row.get("oi") if "oi" in row else row.get("open_interest")),
+        )
+
+    if not isinstance(row, (list, tuple)) or len(row) < 6:
+        raise UpstoxDataError("Upstox candle rows must include timestamp, OHLC, and volume.")
+
+    return UpstoxCandle(
+        timestamp=_normalize_timestamp(row[0]),
+        open=_finite_float(row[1], "open"),
+        high=_finite_float(row[2], "high"),
+        low=_finite_float(row[3], "low"),
+        close=_finite_float(row[4], "close"),
+        volume=_finite_float(row[5], "volume"),
+        oi=_optional_float(row[6] if len(row) > 6 else None),
+    )
+
+
 def _finite_float(value: Any, field: str) -> float:
     try:
         parsed = float(value)
@@ -579,24 +552,23 @@ def _select_quote_payload(payload: Any, instrument_key: str, label: str) -> dict
     if not isinstance(data, dict) or not data:
         raise UpstoxDataError(f"Upstox returned no {label} quote data.")
 
-    selected = None
+    direct_quote = data.get(instrument_key)
+    if isinstance(direct_quote, dict):
+        return direct_quote
+
+    first_quote = None
     for quote_payload in data.values():
         if not isinstance(quote_payload, dict):
             continue
-        token = str(
-            quote_payload.get("instrument_token")
-            or quote_payload.get("instrument_key")
-            or ""
-        ).strip()
+        if first_quote is None:
+            first_quote = quote_payload
+        token = _first_text(quote_payload, ("instrument_token", "instrument_key"))
         if token == instrument_key:
-            selected = quote_payload
-            break
-        if selected is None:
-            selected = quote_payload
+            return quote_payload
 
-    if selected is None:
+    if first_quote is None:
         raise UpstoxDataError(f"Upstox {label} response did not include a usable quote.")
-    return selected
+    return first_quote
 
 
 def _normalize_depth_side(entries: Any, side: str) -> list[dict[str, Any]]:
@@ -634,6 +606,20 @@ def _first_present(row: dict[str, Any], keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _first_text(row: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value:
+            return str(value).strip()
+    return ""
+
+
+def _clean_string(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def _bars_per_year(unit: str, interval: str) -> float:
     interval_value = max(1, int(interval))
     if unit == "minutes":
@@ -647,7 +633,7 @@ def _bars_per_year(unit: str, interval: str) -> float:
     return 252
 
 
-def _upstox_error_message(payload: dict) -> str:
+def _upstox_error_message(payload: dict, context: str = "historical candle") -> str:
     if isinstance(payload.get("message"), str):
         return payload["message"]
     errors = payload.get("errors")
@@ -656,4 +642,4 @@ def _upstox_error_message(payload: dict) -> str:
         if isinstance(first, dict):
             return str(first.get("message") or first.get("errorCode") or first)
         return str(first)
-    return "Upstox historical candle request was rejected."
+    return f"Upstox {context} request was rejected."

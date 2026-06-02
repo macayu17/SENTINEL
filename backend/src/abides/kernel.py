@@ -30,18 +30,36 @@ class EventKernel:
         self.current_time: float = 0.0
         self._event_counter: int = 0
 
-    def schedule_in(self, delay: float, event_type: EventType, callback: Callable[[Any], None], data: Any = None) -> int:
+    def schedule_in(
+        self,
+        delay: float,
+        event_type: EventType,
+        callback: Callable[[Any], None],
+        data: Any = None,
+    ) -> int:
         """Schedule an event delay seconds in the future."""
-        self._event_counter += 1
         trigger_time = self.current_time + max(0.0, float(delay))
-        event = Event(trigger_time, self._event_counter, event_type, callback, data)
-        heapq.heappush(self.queue, event)
-        return self._event_counter
+        return self._schedule(trigger_time, event_type, callback, data)
 
-    def schedule_at(self, timestamp: float, event_type: EventType, callback: Callable[[Any], None], data: Any = None) -> int:
+    def schedule_at(
+        self,
+        timestamp: float,
+        event_type: EventType,
+        callback: Callable[[Any], None],
+        data: Any = None,
+    ) -> int:
         """Schedule an event at an absolute timestamp."""
+        return self._schedule(float(timestamp), event_type, callback, data)
+
+    def _schedule(
+        self,
+        timestamp: float,
+        event_type: EventType,
+        callback: Callable[[Any], None],
+        data: Any = None,
+    ) -> int:
         self._event_counter += 1
-        event = Event(float(timestamp), self._event_counter, event_type, callback, data)
+        event = Event(timestamp, self._event_counter, event_type, callback, data)
         heapq.heappush(self.queue, event)
         return self._event_counter
 

@@ -2,7 +2,7 @@
 
 from typing import List, Dict
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
+from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 import random
 
@@ -74,26 +74,22 @@ class InstitutionalAgent(BaseAgent):
                 self.max_slice_size,
                 remaining // num_remaining_slices + 1,
             )
-            depth_limited_size = self.risk_profile.target_size(
+            urgent = elapsed_execution > self.execution_window * 0.85
+            order_type = OrderType.MARKET if urgent and spread <= 0.05 else OrderType.LIMIT
+            order = risk_limited_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 side=self.side,
+                order_type=order_type,
+                price=price if order_type == OrderType.MARKET else near_touch_price(price, self.side, spread),
                 position=self.position,
-                available_depth=displayed_depth_for_side(market_state, self.side),
+                market_state=market_state,
                 volatility=volatility,
                 aggression=1.0,
+                quantity_cap=twap_size,
             )
-            slice_size = min(twap_size, depth_limited_size)
-            if slice_size > 0:
-                urgent = elapsed_execution > self.execution_window * 0.85
-                order_type = OrderType.MARKET if urgent and spread <= 0.05 else OrderType.LIMIT
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=self.side,
-                        order_type=order_type,
-                        price=price if order_type == OrderType.MARKET else near_touch_price(price, self.side, spread),
-                        quantity=slice_size,
-                    )
-                )
+            if order is not None:
+                orders.append(order)
                 self._last_slice_time = current_time
 
         return orders

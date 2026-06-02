@@ -1,13 +1,20 @@
 import { create } from 'zustand';
-import { MarketUpdate, Alert } from '@/types/market';
+import type { Alert, MarketUpdate, SimulationMode } from '@/types/market';
+
+type PriceHistoryPoint = {
+  time: number;
+  receivedAt: number;
+  price: number;
+  spread: number;
+};
 
 interface MarketStore {
   marketData: MarketUpdate | null;
-  priceHistory: { time: number; receivedAt: number; price: number; spread: number }[];
+  priceHistory: PriceHistoryPoint[];
   connected: boolean;
   alerts: Alert[];
   simulationRunning: boolean;
-  simulationMode: 'SANDBOX' | 'LIVE_SHADOW';
+  simulationMode: SimulationMode;
 
   setMarketData: (data: MarketUpdate) => void;
   setConnected: (connected: boolean) => void;
@@ -16,10 +23,57 @@ interface MarketStore {
   clearAlerts: () => void;
   resetSimulationData: () => void;
   setSimulationRunning: (running: boolean) => void;
-  setSimulationMode: (mode: 'SANDBOX' | 'LIVE_SHADOW') => void;
+  setSimulationMode: (mode: SimulationMode) => void;
 }
 
 const MAX_PRICE_HISTORY = 240;
+const MAX_ALERTS = 20;
+
+function appendBoundedPricePoint(
+  history: PriceHistoryPoint[],
+  point: PriceHistoryPoint
+): PriceHistoryPoint[] {
+  if (history.length < MAX_PRICE_HISTORY) {
+    return [...history, point];
+  }
+  return [...history.slice(history.length - MAX_PRICE_HISTORY + 1), point];
+}
+
+function buildNextAlerts(
+  state: Pick<MarketStore, 'alerts'>,
+  data: MarketUpdate,
+  receivedAt: number
+): Alert[] {
+  const prediction = data.liquidity_prediction;
+  if (
+    !prediction ||
+    (prediction.warning_level !== 'warning' && prediction.warning_level !== 'critical')
+  ) {
+    return state.alerts;
+  }
+  const level = prediction.warning_level;
+
+  const existing = state.alerts.some(
+    (alert) => !alert.dismissed && alert.level === level
+  );
+  if (existing) {
+    return state.alerts;
+  }
+
+  const nextAlerts =
+    state.alerts.length >= MAX_ALERTS
+      ? state.alerts.slice(state.alerts.length - MAX_ALERTS + 1)
+      : [...state.alerts];
+
+  nextAlerts.push({
+    id: `alert-${receivedAt}-${level}`,
+    message: `Liquidity ${level.toUpperCase()}: Health ${prediction.health_score.toFixed(1)}% | Shock probability ${(prediction.probability * 100).toFixed(1)}%`,
+    level,
+    timestamp: data.timestamp,
+    dismissed: false,
+  });
+  return nextAlerts;
+}
 
 export const useMarketStore = create<MarketStore>((set) => ({
   marketData: null,
@@ -31,39 +85,20 @@ export const useMarketStore = create<MarketStore>((set) => ({
 
   setMarketData: (data: MarketUpdate) =>
     set((state) => {
+      const receivedAt = Date.now();
       const newPoint = {
         time: data.timestamp,
-        receivedAt: Date.now(),
+        receivedAt,
         price: data.price,
         spread: data.spread,
       };
-      const history = [...state.priceHistory, newPoint];
-      if (history.length > MAX_PRICE_HISTORY) {
-        history.shift();
-      }
-
-      // Auto-generate alerts from warning levels
-      const newAlerts = [...state.alerts];
-      const pred = data.liquidity_prediction;
-      if (pred && (pred.warning_level === 'warning' || pred.warning_level === 'critical')) {
-        const existing = newAlerts.find(
-          (a) => !a.dismissed && a.level === pred.warning_level
-        );
-        if (!existing) {
-          newAlerts.push({
-            id: `alert-${Date.now()}`,
-            message: `Liquidity ${pred.warning_level.toUpperCase()}: Health ${pred.health_score.toFixed(1)}% | Shock probability ${(pred.probability * 100).toFixed(1)}%`,
-            level: pred.warning_level as 'warning' | 'critical',
-            timestamp: data.timestamp,
-            dismissed: false,
-          });
-        }
-      }
+      const history = appendBoundedPricePoint(state.priceHistory, newPoint);
+      const alerts = buildNextAlerts(state, data, receivedAt);
 
       return {
         marketData: data,
         priceHistory: history,
-        alerts: newAlerts.slice(-20), // keep max 20 alerts
+        alerts,
         simulationMode: data.mode,
       };
     }),
@@ -71,7 +106,12 @@ export const useMarketStore = create<MarketStore>((set) => ({
   setConnected: (connected: boolean) => set({ connected }),
 
   addAlert: (alert: Alert) =>
-    set((state) => ({ alerts: [...state.alerts, alert].slice(-20) })),
+    set((state) => ({
+      alerts:
+        state.alerts.length >= MAX_ALERTS
+          ? [...state.alerts.slice(state.alerts.length - MAX_ALERTS + 1), alert]
+          : [...state.alerts, alert],
+    })),
 
   dismissAlert: (id: string) =>
     set((state) => ({
@@ -93,5 +133,5 @@ export const useMarketStore = create<MarketStore>((set) => ({
 
   setSimulationRunning: (running: boolean) => set({ simulationRunning: running }),
 
-  setSimulationMode: (mode: 'SANDBOX' | 'LIVE_SHADOW') => set({ simulationMode: mode }),
+  setSimulationMode: (mode: SimulationMode) => set({ simulationMode: mode }),
 }));

@@ -109,15 +109,14 @@ class LargeOrderDetector:
         if len(self._order_history) < 5:
             return None
 
-        orders = list(self._order_history)
-
         for side in ["buy", "sell"]:
-            side_orders = [o for o in orders if o.get("side") == side]
+            side_orders = [o for o in self._order_history if o.get("side") == side]
             if len(side_orders) < 5:
                 continue
 
-            sizes = np.array([o["size"] for o in side_orders[-20:]])
-            times = np.array([o["timestamp"] for o in side_orders[-20:]])
+            recent_orders = side_orders[-20:]
+            sizes = np.fromiter((o["size"] for o in recent_orders), dtype=np.float64)
+            times = np.fromiter((o["timestamp"] for o in recent_orders), dtype=np.float64)
 
             if len(sizes) < 3:
                 continue
@@ -161,15 +160,14 @@ class LargeOrderDetector:
         if len(self._order_history) < 5:
             return None
 
-        orders = list(self._order_history)
-
         for side in ["buy", "sell"]:
-            side_orders = [o for o in orders if o.get("side") == side]
+            side_orders = [o for o in self._order_history if o.get("side") == side]
             if len(side_orders) < 5:
                 continue
 
-            times = np.array([o["timestamp"] for o in side_orders[-20:]])
-            sizes = np.array([o["size"] for o in side_orders[-20:]])
+            recent_orders = side_orders[-20:]
+            times = np.fromiter((o["timestamp"] for o in recent_orders), dtype=np.float64)
+            sizes = np.fromiter((o["size"] for o in recent_orders), dtype=np.float64)
 
             if len(times) < 3:
                 continue

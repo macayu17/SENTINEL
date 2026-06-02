@@ -9,8 +9,24 @@ if str(ROOT) not in sys.path:
 
 from backend.src.agents.rl_agent import RLAgent
 from backend.src.market.gp_policy import GeneticPolicyModel, GPNode, GPPolicyGenome
+from backend.src.market.rl_features import extract_market_maker_observation
 from backend.src.market.rl_policy import RLPolicyController
 from backend.src.market.simulator import MarketSimulator
+
+
+class CountingSimulator(MarketSimulator):
+    def __init__(self, *args, **kwargs) -> None:
+        self.agent_lookup_count = 0
+        self.state_lookup_count = 0
+        super().__init__(*args, **kwargs)
+
+    def get_agent(self, agent_id):
+        self.agent_lookup_count += 1
+        return super().get_agent(agent_id)
+
+    def get_market_state(self):
+        self.state_lookup_count += 1
+        return super().get_market_state()
 
 
 class StubPolicyModel:
@@ -41,6 +57,26 @@ def test_rl_policy_controller_queues_model_action_for_rl_agent():
     assert action == (0.0, 0.0, 0.0)
     assert stub_model.last_observation.shape == (13,)
     assert len(rl_agent.active_orders) == 2
+
+
+def test_observation_extraction_reuses_supplied_state_and_agent():
+    rl_agent = RLAgent("RL_MM", initial_capital=100000.0)
+    simulator = CountingSimulator(agents=[rl_agent], initial_price=100.0, duration_seconds=10)
+    state = simulator.reset(seed=11)
+    simulator.agent_lookup_count = 0
+    simulator.state_lookup_count = 0
+
+    observation = extract_market_maker_observation(
+        simulator,
+        rl_agent_id="RL_MM",
+        state=state,
+        agent=rl_agent,
+    )
+
+    assert observation.shape == (13,)
+    assert observation.dtype == np.float32
+    assert simulator.agent_lookup_count == 0
+    assert simulator.state_lookup_count == 0
 
 
 def test_rl_policy_controller_sanitizes_non_finite_actions():

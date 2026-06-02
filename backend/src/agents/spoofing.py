@@ -3,7 +3,7 @@
 from typing import List, Dict, Optional
 import random
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side
+from .risk import AgentRiskProfile, displayed_depth_for_side, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -132,24 +132,20 @@ class SpoofingAgent(BaseAgent):
 
             # Trade in the OPPOSITE direction of the spoof
             real_side = OrderSide.SELL if self._spoof_side == OrderSide.BUY else OrderSide.BUY
-            real_size = self.risk_profile.target_size(
+            order = risk_limited_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 side=real_side,
+                order_type=OrderType.MARKET,
+                price=price,
                 position=self.position,
-                available_depth=displayed_depth_for_side(market_state, real_side),
+                market_state=market_state,
                 volatility=volatility,
                 aggression=1.2,
             )
-            if real_size <= 0:
+            if order is None:
                 return orders
-            orders.append(
-                Order(
-                    agent_id=self.agent_id,
-                    side=real_side,
-                    order_type=OrderType.MARKET,
-                    price=price,
-                    quantity=real_size,
-                )
-            )
+            orders.append(order)
             # Enter cooldown
             self._state = self.COOLDOWN
             self._steps_in_state = 0

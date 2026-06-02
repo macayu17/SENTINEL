@@ -8,8 +8,9 @@ DASHBOARD_PAGE = ROOT / "frontend" / "app" / "dashboard" / "page.tsx"
 API_CLIENT = ROOT / "frontend" / "lib" / "api-client.ts"
 MARKET_STORE = ROOT / "frontend" / "store" / "market-store.ts"
 MARKET_TYPES = ROOT / "frontend" / "types" / "market.ts"
+API_TYPES = ROOT / "frontend" / "types" / "api.ts"
 WEBSOCKET = ROOT / "frontend" / "lib" / "websocket.ts"
-MOCK_SIMULATION = ROOT / "frontend" / "lib" / "mock-simulation.ts"
+DASHBOARD_DATA = ROOT / "frontend" / "lib" / "dashboard-data.ts"
 
 
 def test_live_shadow_provider_launches_do_not_pre_switch_backend_mode():
@@ -30,6 +31,30 @@ def test_frontend_exposes_simulation_export_endpoint():
 
     assert "exportSimulation" in source
     assert "/api/simulation/export" in source
+
+
+def test_api_request_contract_types_are_shared_outside_client():
+    api_source = API_CLIENT.read_text(encoding="utf-8")
+
+    assert API_TYPES.exists()
+    api_types_source = API_TYPES.read_text(encoding="utf-8")
+    assert "from '@/types/api'" in api_source
+    assert "} from '@/types/api';" in api_source
+    for type_name in (
+        "LatencyMode",
+        "SandboxPreset",
+        "SandboxScenario",
+        "SandboxCreateRequest",
+        "AbidesSandboxCreateRequest",
+        "GrowwReplayRequest",
+        "GrowwLiveRequest",
+        "UpstoxReplayRequest",
+        "UpstoxLiveRequest",
+        "UpstoxInstrumentResult",
+    ):
+        assert f"export interface {type_name}" not in api_source
+        assert f"export type {type_name}" not in api_source
+        assert type_name in api_types_source
 
 
 def test_api_client_cannot_request_generic_live_shadow_mode():
@@ -54,6 +79,25 @@ def test_reset_simulation_data_restores_sandbox_mode():
     reset_end = source.index("setSimulationRunning:", reset_start)
     reset_block = source[reset_start:reset_end]
     assert "simulationMode: 'SANDBOX'" in reset_block
+
+
+def test_market_store_uses_shared_simulation_mode_type():
+    store_source = MARKET_STORE.read_text(encoding="utf-8")
+    market_types_source = MARKET_TYPES.read_text(encoding="utf-8")
+
+    assert "export type SimulationMode = 'SANDBOX' | 'LIVE_SHADOW';" in market_types_source
+    assert "mode: SimulationMode;" in market_types_source
+    assert "simulationMode: SimulationMode;" in store_source
+    assert "setSimulationMode: (mode: SimulationMode) => void;" in store_source
+
+
+def test_market_store_bounds_history_and_alerts_without_unneeded_array_churn():
+    source = MARKET_STORE.read_text(encoding="utf-8")
+
+    assert "appendBoundedPricePoint" in source
+    assert "buildNextAlerts" in source
+    assert "return state.alerts;" in source
+    assert "history.shift()" not in source
 
 
 def test_sandbox_panel_has_export_command_for_running_runs():
@@ -134,8 +178,17 @@ def test_market_update_trace_fields_are_typed_and_normalized():
     assert "recent_orders: data.recent_orders ?? []" in websocket_source
 
 
+def test_websocket_batches_market_updates_on_animation_frame():
+    source = WEBSOCKET.read_text(encoding="utf-8")
+
+    assert "requestAnimationFrame" in source
+    assert "cancelAnimationFrame" in source
+    assert "WebSocket.CONNECTING" in source
+    assert "setTimeout(flushLatestUpdate, 250)" not in source
+
+
 def test_dashboard_trace_panels_prefer_backend_market_update_fields():
-    source = MOCK_SIMULATION.read_text(encoding="utf-8")
+    source = DASHBOARD_DATA.read_text(encoding="utf-8")
 
     assert "mapBackendEvents" in source
     assert "buildBackendAgentActivity" in source

@@ -2,7 +2,7 @@
 
 from typing import List, Dict
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, passive_depth_for_side
+from .risk import AgentRiskProfile, passive_depth_for_side, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -76,23 +76,20 @@ class MarketMakerAgent(BaseAgent):
         for side, price, enabled in quote_specs:
             if not enabled:
                 continue
-            size = self.risk_profile.target_size(
+            order = risk_limited_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 side=side,
+                order_type=OrderType.LIMIT,
+                price=price,
                 position=self.position,
-                available_depth=passive_depth_for_side(market_state, side),
+                market_state=market_state,
                 volatility=volatility,
                 aggression=0.7 if inv_ratio > 0.5 else 1.0,
+                depth_fn=passive_depth_for_side,
             )
-            if size > 0:
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=side,
-                        order_type=OrderType.LIMIT,
-                        price=price,
-                        quantity=size,
-                    )
-                )
+            if order is not None:
+                orders.append(order)
         return orders
 
     def consume_cancellations(self) -> List[str]:

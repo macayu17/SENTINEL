@@ -129,7 +129,13 @@ class RLPolicyController:
         if not isinstance(agent, RLAgent):
             return None
 
-        observation = extract_market_maker_observation(simulator, self.rl_agent_id)
+        state = simulator.get_market_state()
+        observation = extract_market_maker_observation(
+            simulator,
+            self.rl_agent_id,
+            state=state,
+            agent=agent,
+        )
         if not np.isfinite(observation).all():
             logger.warning("RL observation contained non-finite values; replacing with zeros")
             observation = np.nan_to_num(observation, nan=0.0, posinf=0.0, neginf=0.0)
@@ -137,10 +143,11 @@ class RLPolicyController:
             observation = self.obs_normalizer.normalize_obs(observation.reshape(1, -1)).reshape(-1)
 
         action, _ = self.model.predict(observation, deterministic=True)
-        action_array = np.asarray(action, dtype=np.float32)
+        action_array = np.asarray(action, dtype=np.float32).reshape(-1)
         if not np.isfinite(action_array).all():
             logger.warning("RL policy returned non-finite action; falling back to neutral quote")
             action_array = np.zeros(3, dtype=np.float32)
-        action_array = np.clip(action_array, -1.0, 1.0)
+        else:
+            np.clip(action_array, -1.0, 1.0, out=action_array)
         agent.set_action(action_array)
         return tuple(float(value) for value in action_array)

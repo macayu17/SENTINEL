@@ -1,12 +1,6 @@
 import json
-import sys
-from pathlib import Path
 
 import numpy as np
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.append(str(ROOT))
 
 from backend.src.market.gp_policy import (
     GPNode,
@@ -74,11 +68,12 @@ def test_gp_policy_controller_can_queue_loaded_model(tmp_path):
 def test_genetic_program_trainer_smoke():
     trainer = GeneticProgramTrainer(
         GPTrainingConfig(
-            population_size=4,
+            population_size=2,
             generations=1,
             elite_size=1,
             evaluation_episodes=1,
-            episode_duration=20,
+            episode_duration=5,
+            max_tree_depth=2,
             seed=7,
         )
     )

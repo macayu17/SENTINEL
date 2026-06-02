@@ -25,15 +25,26 @@ class ConnectionManager:
 
     async def broadcast(self, data: dict) -> None:
         """Send data to all connected clients."""
+        if not self.active_connections:
+            return
+
         disconnected = []
-        for connection in self.active_connections:
+        for connection in tuple(self.active_connections):
             try:
                 await connection.send_json(data)
             except Exception:
                 disconnected.append(connection)
 
-        for conn in disconnected:
-            self.disconnect(conn)
+        if disconnected:
+            disconnected_ids = {id(connection) for connection in disconnected}
+            before_count = len(self.active_connections)
+            self.active_connections = [
+                connection
+                for connection in self.active_connections
+                if id(connection) not in disconnected_ids
+            ]
+            removed_count = before_count - len(self.active_connections)
+            logger.info(f"Removed {removed_count} disconnected clients. Total: {len(self.active_connections)}")
 
     @property
     def client_count(self) -> int:

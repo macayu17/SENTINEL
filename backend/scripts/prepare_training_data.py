@@ -4,17 +4,19 @@ Prepare training data by combining individual stock CSVs into a single historica
 """
 
 import sys
-from pathlib import Path
 
 import pandas as pd
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from _path_setup import BACKEND_ROOT
+except ModuleNotFoundError:
+    from backend.scripts._path_setup import BACKEND_ROOT
+
 
 def prepare_historical_data():
     """Load individual stock CSVs and combine into historical_1m.csv"""
 
-    data_dir = Path(__file__).parent.parent / "data"
+    data_dir = BACKEND_ROOT / "data"
     output_file = data_dir / "historical_1m.csv"
 
     print(f"[info] Looking for stock CSV files in {data_dir}")

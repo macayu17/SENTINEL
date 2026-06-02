@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
-import sys
+try:
+    from _path_setup import add_backend_to_path
+except ModuleNotFoundError:
+    from backend.scripts._path_setup import add_backend_to_path
 
-_HERE = os.path.abspath(os.path.dirname(__file__))
-_BACKEND_ROOT = os.path.abspath(os.path.join(_HERE, ".."))
-if _BACKEND_ROOT not in sys.path:
-    sys.path.insert(0, _BACKEND_ROOT)
+add_backend_to_path()
 
 from src.abides.simulation import AbidesSimulation
 from src.abides.agents.exchange import ExchangeAgent

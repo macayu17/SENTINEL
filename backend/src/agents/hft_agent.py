@@ -3,7 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
+from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -64,86 +64,70 @@ class HFTAgent(BaseAgent):
 
         # Mean reversion signal
         if z_score > self.z_threshold and self.position > -self.position_limit:
-            qty = self.risk_profile.target_size(
+            order = risk_limited_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 side=OrderSide.SELL,
+                order_type=OrderType.LIMIT,
+                price=round(price + 0.01, 2),
                 position=self.position,
-                available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                market_state=market_state,
                 volatility=volatility,
                 aggression=min(1.6, abs(z_score) / self.z_threshold),
             )
-            if qty > 0:
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.SELL,
-                        order_type=OrderType.LIMIT,
-                        price=round(price + 0.01, 2),
-                        quantity=qty,
-                    )
-                )
+            if order is not None:
+                orders.append(order)
         elif z_score < -self.z_threshold and self.position < self.position_limit:
-            qty = self.risk_profile.target_size(
+            order = risk_limited_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 side=OrderSide.BUY,
+                order_type=OrderType.LIMIT,
+                price=round(price - 0.01, 2),
                 position=self.position,
-                available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                market_state=market_state,
                 volatility=volatility,
                 aggression=min(1.6, abs(z_score) / self.z_threshold),
             )
-            if qty > 0:
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.BUY,
-                        order_type=OrderType.LIMIT,
-                        price=round(price - 0.01, 2),
-                        quantity=qty,
-                    )
-                )
+            if order is not None:
+                orders.append(order)
 
         # Momentum override
         if abs(momentum) > self.momentum_threshold:
             side = OrderSide.BUY if momentum > 0 else OrderSide.SELL
-            qty = self.risk_profile.target_size(
+            order_type = OrderType.MARKET if spread <= 0.03 and volatility < 0.04 else OrderType.LIMIT
+            order = risk_limited_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 side=side,
+                order_type=order_type,
+                price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
                 position=self.position,
-                available_depth=displayed_depth_for_side(market_state, side),
+                market_state=market_state,
                 volatility=volatility,
                 aggression=min(1.5, abs(momentum) / self.momentum_threshold),
             )
-            if qty > 0:
-                order_type = OrderType.MARKET if spread <= 0.03 and volatility < 0.04 else OrderType.LIMIT
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=side,
-                        order_type=order_type,
-                        price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
-                        quantity=qty,
-                    )
-                )
+            if order is not None:
+                orders.append(order)
 
         # Imbalance scalp: small passive quote on pressured side when spread supports it.
         if spread >= 0.02 and abs(imbalance) > 0.2:
             quote_side = OrderSide.BUY if imbalance > 0 else OrderSide.SELL
             quote_px = round(price - 0.01, 2) if quote_side == OrderSide.BUY else round(price + 0.01, 2)
-            qty = self.risk_profile.target_size(
+            order = risk_limited_order(
+                self.risk_profile,
+                agent_id=self.agent_id,
                 side=quote_side,
+                order_type=OrderType.LIMIT,
+                price=quote_px,
                 position=self.position,
-                available_depth=displayed_depth_for_side(market_state, quote_side),
+                market_state=market_state,
                 volatility=volatility,
                 aggression=0.3,
             )
-            if qty <= 0:
+            if order is None:
                 return orders
-            orders.append(
-                Order(
-                    agent_id=self.agent_id,
-                    side=quote_side,
-                    order_type=OrderType.LIMIT,
-                    price=quote_px,
-                    quantity=qty,
-                )
-            )
+            orders.append(order)
         return orders
 
     def reset(self) -> None:

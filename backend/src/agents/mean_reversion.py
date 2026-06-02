@@ -4,7 +4,7 @@ from typing import List, Dict
 from collections import deque
 import math
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side
+from .risk import AgentRiskProfile, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -118,45 +118,37 @@ class MeanReversionAgent(BaseAgent):
         if self.position == 0 and std > 0:
             # Buy at lower band with oversold RSI
             if price <= lower_band and rsi < self.rsi_oversold:
-                qty = self.risk_profile.target_size(
+                order = risk_limited_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
                     side=OrderSide.BUY,
+                    order_type=OrderType.LIMIT,
+                    price=round(price + 0.01, 2),
                     position=self.position,
-                    available_depth=displayed_depth_for_side(market_state, OrderSide.BUY),
+                    market_state=market_state,
                     volatility=volatility,
                     aggression=0.9,
                 )
-                if qty <= 0:
+                if order is None:
                     return orders
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.BUY,
-                        order_type=OrderType.LIMIT,
-                        price=round(price + 0.01, 2),
-                        quantity=qty,
-                    )
-                )
+                orders.append(order)
 
             # Sell at upper band with overbought RSI
             elif price >= upper_band and rsi > self.rsi_overbought:
-                qty = self.risk_profile.target_size(
+                order = risk_limited_order(
+                    self.risk_profile,
+                    agent_id=self.agent_id,
                     side=OrderSide.SELL,
+                    order_type=OrderType.LIMIT,
+                    price=round(price - 0.01, 2),
                     position=self.position,
-                    available_depth=displayed_depth_for_side(market_state, OrderSide.SELL),
+                    market_state=market_state,
                     volatility=volatility,
                     aggression=0.9,
                 )
-                if qty <= 0:
+                if order is None:
                     return orders
-                orders.append(
-                    Order(
-                        agent_id=self.agent_id,
-                        side=OrderSide.SELL,
-                        order_type=OrderType.LIMIT,
-                        price=round(price - 0.01, 2),
-                        quantity=qty,
-                    )
-                )
+                orders.append(order)
 
         return orders
 

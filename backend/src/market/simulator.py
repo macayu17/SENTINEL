@@ -43,6 +43,8 @@ class MarketSimulator:
         depth_profile: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.agents = sorted(agents, key=lambda agent: agent.latency_seconds)
+        self._agents_by_id: Dict[str, BaseAgent] = {}
+        self._index_agents()
         self.order_book = OrderBook()
         self.kernel = EventKernel()
         self.initial_price = initial_price
@@ -85,12 +87,18 @@ class MarketSimulator:
 
         self.reset()
 
+    def _index_agents(self) -> None:
+        self._agents_by_id.clear()
+        for agent in self.agents:
+            self._agents_by_id.setdefault(agent.agent_id, agent)
+
     @property
     def current_time(self) -> float:
         return self.kernel.current_time
 
     def reset(self, seed: Optional[int] = None) -> Dict:
         """Reset the simulator for a new episode and return the initial state."""
+        self._index_agents()
         if seed is not None:
             self.seed = seed
             random.seed(seed)
@@ -297,6 +305,13 @@ class MarketSimulator:
         self.order_book = next_book
         return True
 
+    def _shadow_matching_book(self, levels: int = 20) -> OrderBook:
+        """Return a temporary copy so live/provider depth is never consumed by fills."""
+        depth = self.order_book.get_depth(levels=levels)
+        book = OrderBook()
+        book.replace_depth(depth["bids"], depth["asks"])
+        return book
+
     def _agent_type_for(self, agent_id: str) -> str:
         agent = self.get_agent(agent_id)
         if agent is not None:
@@ -391,16 +406,12 @@ class MarketSimulator:
             status="submitted",
         )
         reference_mid = self.order_book.mid_price or self.current_price or self.initial_price
-        book_for_matching = self.order_book
-        if self.mode != "SANDBOX":
-            depth = self.order_book.get_depth(levels=20)
-            book_for_matching = OrderBook()
-            book_for_matching.replace_depth(depth.get("bids", []), depth.get("asks", []))
+        book_for_matching = self.order_book if self.mode == "SANDBOX" else self._shadow_matching_book()
 
         trades = book_for_matching.add_order(order)
         self._all_trades.extend(trades)
 
-        owner = next((agent for agent in self.agents if agent.agent_id == order.agent_id), None)
+        owner = self.get_agent(order.agent_id)
         if (
             self.mode == "SANDBOX"
             and owner is not None
@@ -454,12 +465,21 @@ class MarketSimulator:
                 status=self._order_trace_status(order),
             )
 
-            for agent in self.agents:
-                if agent.agent_id in (trade.buyer_agent_id, trade.seller_agent_id):
+            buyer = self.get_agent(trade.buyer_agent_id)
+            if buyer is not None:
+                self.kernel.schedule(
+                    buyer.latency_seconds,
+                    EventType.MARKET_DATA,
+                    buyer.update_position,
+                    trade,
+                )
+            if trade.seller_agent_id != trade.buyer_agent_id:
+                seller = self.get_agent(trade.seller_agent_id)
+                if seller is not None:
                     self.kernel.schedule(
-                        agent.latency_seconds,
+                        seller.latency_seconds,
                         EventType.MARKET_DATA,
-                        agent.update_position,
+                        seller.update_position,
                         trade,
                     )
 
@@ -610,18 +630,18 @@ class MarketSimulator:
 
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
         """Return the simulator agent with the requested ID, if present."""
-        return next((agent for agent in self.agents if agent.agent_id == agent_id), None)
+        return self._agents_by_id.get(agent_id)
 
     def get_market_state(self) -> Dict:
         """Return the current market state snapshot."""
         depth_data = self.order_book.get_depth(levels=10)
-        total_depth = self.order_book.get_total_depth(levels=10)
         volatility = self._compute_volatility()
 
-        prices = list(self._price_history)
         recent_price_change = 0.0
-        if len(prices) >= 5 and prices[-5] > 0:
-            recent_price_change = (prices[-1] - prices[-5]) / prices[-5]
+        if len(self._price_history) >= 5 and self._price_history[-5] > 0:
+            recent_price_change = (
+                self._price_history[-1] - self._price_history[-5]
+            ) / self._price_history[-5]
 
         volume_window = 10.0
         recent_signed_volume = sum(
@@ -630,6 +650,7 @@ class MarketSimulator:
 
         bid_sum = sum(level["size"] for level in depth_data["bids"])
         ask_sum = sum(level["size"] for level in depth_data["asks"])
+        total_depth = bid_sum + ask_sum
         imbalance = (bid_sum - ask_sum) / max(1, bid_sum + ask_sum)
         fill_rate = len(self._all_trades) / max(1.0, self.current_time)
 
@@ -684,11 +705,17 @@ class MarketSimulator:
 
     def get_recent_events(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Return recent exchange events newest first."""
-        return list(reversed(list(self._event_log)))[0:max(0, limit)]
+        limit = max(0, limit)
+        if limit == 0:
+            return []
+        return list(reversed(self._event_log))[:limit]
 
     def get_recent_orders(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Return recent order status snapshots newest first."""
-        return list(reversed(list(self._recent_orders)))[0:max(0, limit)]
+        limit = max(0, limit)
+        if limit == 0:
+            return []
+        return list(reversed(self._recent_orders))[:limit]
 
     def get_order_flow_summary(self, window_seconds: float = 10.0) -> Dict[str, Any]:
         """Summarize recent aggressor flow and run-level execution counters."""
@@ -816,11 +843,14 @@ class MarketSimulator:
 
     def _compute_volatility(self) -> float:
         """Compute annualized volatility from recent log returns."""
-        prices = list(self._price_history)
-        if len(prices) < 20:
+        if len(self._price_history) < 20:
             return 0.0
 
-        window = prices[-20:]
+        window_size = 20
+        window = [
+            self._price_history[-window_size + i]
+            for i in range(window_size)
+        ]
         log_returns = []
         for i in range(1, len(window)):
             if window[i] > 0 and window[i - 1] > 0:

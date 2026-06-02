@@ -157,6 +157,10 @@ def test_live_shadow_agent_orders_shadow_fill_without_moving_provider_price():
     assert len(simulator._all_trades) == 1
     assert simulator._all_trades[0].price == 101.3
     assert simulator._all_trades[0].quantity == 40
+    assert simulator.order_book.get_depth(levels=10) == {
+        "bids": [{"price": 101.2, "size": 100}],
+        "asks": [{"price": 101.3, "size": 80}],
+    }
     assert agent.position == 40
     assert agent.num_trades == 1
     assert simulator.get_market_state()["recent_signed_volume"] == 40

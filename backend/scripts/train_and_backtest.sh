@@ -6,6 +6,21 @@
 MODEL_NAME="${1:-experiment_1}"
 TIMESTEPS="${2:-250000}"
 CSV_PATH="../data/historical_1m.csv"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-}"
+
+cd "$SCRIPT_DIR"
+
+if [ -z "$PYTHON_BIN" ]; then
+  if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  else
+    echo "[error] Python not found. Install Python or set PYTHON_BIN."
+    exit 1
+  fi
+fi
 
 echo "Starting train -> backtest workflow..."
 echo "   Model: $MODEL_NAME"
@@ -16,7 +31,7 @@ echo ""
 echo "------------------------------------------------------------------"
 echo "STEP 1: Training..."
 echo "------------------------------------------------------------------"
-python3 train_backtest_rl_system.py train \
+"$PYTHON_BIN" train_backtest_rl_system.py train \
   --csv "$CSV_PATH" \
   --name "$MODEL_NAME" \
   --algo ppo \
@@ -54,7 +69,7 @@ echo "------------------------------------------------------------------"
 echo "STEP 3: Backtesting..."
 echo "------------------------------------------------------------------"
 
-python3 train_backtest_rl_system.py backtest \
+"$PYTHON_BIN" train_backtest_rl_system.py backtest \
   --csv "$CSV_PATH" \
   --model "$LATEST_CHECKPOINT" \
   --algo ppo

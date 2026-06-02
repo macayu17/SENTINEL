@@ -9,6 +9,7 @@ DATA_DIR="$BACKEND_DIR/data"
 MODELS_DIR="$BACKEND_DIR/models"
 CHECKPOINTS_DIR="$BACKEND_DIR/checkpoints"
 RESULTS_DIR="$BACKEND_DIR/results"
+PYTHON_BIN="${PYTHON_BIN:-}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -33,6 +34,26 @@ print_error() {
 
 print_warning() {
   echo -e "${YELLOW}[warning] $1${NC}"
+}
+
+find_python() {
+  if [ -n "$PYTHON_BIN" ]; then
+    return 0
+  fi
+
+  if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  else
+    print_error "Python not found. Install Python or set PYTHON_BIN."
+    return 1
+  fi
+}
+
+run_python() {
+  find_python || return 1
+  "$PYTHON_BIN" "$@"
 }
 
 check_data() {
@@ -73,7 +94,7 @@ cmd_train() {
   if ! check_data; then return 1; fi
   setup_dirs
 
-  python "$BACKEND_DIR/scripts/train_backtest_rl_system.py" train \
+  run_python "$BACKEND_DIR/scripts/train_backtest_rl_system.py" train \
     --csv "$DATA_DIR/historical_1m.csv" \
     --name "$name" \
     --algo "$algo" \
@@ -113,7 +134,7 @@ cmd_backtest() {
   if ! check_data; then return 1; fi
   setup_dirs
 
-  python "$BACKEND_DIR/scripts/train_backtest_rl_system.py" backtest \
+  run_python "$BACKEND_DIR/scripts/train_backtest_rl_system.py" backtest \
     --csv "$DATA_DIR/historical_1m.csv" \
     --model "$model_path" \
     --algo "$algo" \
@@ -139,7 +160,7 @@ cmd_sweep() {
     rm -rf "$CHECKPOINTS_DIR/rl_sweep/sweep_checkpoint.json"
   fi
 
-  python "$BACKEND_DIR/scripts/train_backtest_rl_system.py" sweep \
+  run_python "$BACKEND_DIR/scripts/train_backtest_rl_system.py" sweep \
     --csv "$DATA_DIR/historical_1m.csv" \
     --output-dir "$MODELS_DIR/rl_sweep" \
     --results-dir "$RESULTS_DIR/rl_sweep" \

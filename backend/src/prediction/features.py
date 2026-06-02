@@ -48,22 +48,19 @@ class FeatureExtractor:
         volatility_ratio = volatility / self.baseline_volatility if self.baseline_volatility > 0 else 0.0
 
         # Market maker inventory stress
-        mm_agents = {
-            k: v for k, v in agents.items()
-            if v.get("type") == "MarketMaker"
-        }
-        if mm_agents:
-            mm_inventory_stress = sum(
-                abs(v.get("inventory_ratio", 0.0)) for v in mm_agents.values()
-            ) / len(mm_agents)
-            # Count active MMs (not near max capacity)
-            active_mm_count = sum(
-                1 for v in mm_agents.values()
-                if abs(v.get("position", 0)) < 4500
-            )
-        else:
-            mm_inventory_stress = 0.0
-            active_mm_count = 0
+        mm_inventory_stress = 0.0
+        mm_count = 0
+        active_mm_count = 0
+        for agent_info in agents.values():
+            if agent_info.get("type") != "MarketMaker":
+                continue
+            mm_count += 1
+            mm_inventory_stress += abs(agent_info.get("inventory_ratio", 0.0))
+            if abs(agent_info.get("position", 0)) < 4500:
+                active_mm_count += 1
+
+        if mm_count:
+            mm_inventory_stress /= mm_count
 
         return {
             "spread_ratio": round(spread_ratio, 6),

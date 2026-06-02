@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
 from backend.src.data import upstox_provider
 from backend.src.data.upstox_provider import (
     UpstoxCredentialsError,
+    UpstoxDataError,
     UpstoxHistoricalProvider,
     UpstoxInstrument,
     UpstoxQuote,
@@ -127,6 +128,11 @@ def test_upstox_instrument_search_normalizes_documented_response():
             short_name="Reliance",
         )
     ]
+
+
+def test_upstox_instrument_search_rejection_names_search_context():
+    with pytest.raises(UpstoxDataError, match="Upstox instrument search request was rejected."):
+        normalize_upstox_instruments({"status": "error", "errors": []})
 
 
 def test_upstox_provider_searches_instruments_with_v2_filters():

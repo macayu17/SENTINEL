@@ -8,6 +8,7 @@ import {
   Milestone,
   PriceSpreadPoint,
   RecentOrder,
+  SimulationMetrics,
   SimulationDashboardData,
   TimeSeriesPoint,
   TradeFlowPoint,
@@ -159,6 +160,45 @@ function mergeBackendTradeFlow(
   });
 }
 
+function buildDashboardMetrics(
+  marketData: MarketUpdate | null,
+  feedActive: boolean,
+  seedPrice: number,
+): SimulationMetrics {
+  if (!feedActive || !marketData) {
+    return {
+      midPrice: Number(seedPrice.toFixed(3)),
+      bestBid: Number(seedPrice.toFixed(3)),
+      bestAsk: Number(seedPrice.toFixed(3)),
+      spread: 0,
+      orderBookImbalance: 0,
+      inventory: 0,
+      realizedPnl: 0,
+      unrealizedPnl: 0,
+      cumulativeReward: 0,
+    };
+  }
+
+  const agentMetrics = Object.values(marketData.agent_metrics ?? {});
+  const inventory = agentMetrics.reduce((sum, metric) => sum + metric.position, 0);
+  const realizedPnl = agentMetrics.reduce((sum, metric) => sum + metric.realized_pnl, 0);
+  const unrealizedPnl = agentMetrics.reduce((sum, metric) => sum + metric.unrealized_pnl, 0);
+  const spread = Number((marketData.spread ?? 0).toFixed(4));
+  const midPrice = Number(marketData.price.toFixed(3));
+
+  return {
+    midPrice,
+    bestBid: Number((midPrice - spread / 2).toFixed(3)),
+    bestAsk: Number((midPrice + spread / 2).toFixed(3)),
+    spread,
+    orderBookImbalance: Number(computeOrderBookImbalance(marketData.order_book).toFixed(3)),
+    inventory,
+    realizedPnl: Number(realizedPnl.toFixed(2)),
+    unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
+    cumulativeReward: Number(((realizedPnl + unrealizedPnl) / 1000).toFixed(3)),
+  };
+}
+
 const defaultMilestones: Milestone[] = [
   {
     phase: 'Phase 1',
@@ -194,14 +234,6 @@ export function useSimulationDashboardData(): SimulationDashboardData {
 
   const seedPrice = marketData?.price ?? 100;
 
-  const [midPrice, setMidPrice] = useState(seedPrice);
-  const [spread, setSpread] = useState(0);
-  const [inventory, setInventory] = useState(0);
-  const [realizedPnl, setRealizedPnl] = useState(0);
-  const [unrealizedPnl, setUnrealizedPnl] = useState(0);
-  const [reward, setReward] = useState(0);
-  const [imbalance, setImbalance] = useState(0);
-
   const [priceSeries, setPriceSeries] = useState<PriceSpreadPoint[]>([]);
   const [spreadSeries, setSpreadSeries] = useState<TimeSeriesPoint[]>([]);
   const [inventorySeries, setInventorySeries] = useState<TimeSeriesPoint[]>([]);
@@ -209,6 +241,11 @@ export function useSimulationDashboardData(): SimulationDashboardData {
   const [tradeFlow, setTradeFlow] = useState<TradeFlowPoint[]>([]);
   const [depthHeatmap, setDepthHeatmap] = useState<DepthHeatLevel[]>(nextDepthHeat(seedPrice));
   const [events, setEvents] = useState<KernelEvent[]>([]);
+
+  const metrics = useMemo(
+    () => buildDashboardMetrics(marketData, feedActive, seedPrice),
+    [feedActive, marketData, seedPrice],
+  );
 
   useEffect(() => {
     if (!feedActive || !marketData) {
@@ -218,19 +255,6 @@ export function useSimulationDashboardData(): SimulationDashboardData {
     const now = timestampLabel(new Date());
     const observedPrice = marketData.price;
     const observedSpread = marketData.spread;
-    const agentMetrics = Object.values(marketData.agent_metrics ?? {});
-    const aggregateInventory = agentMetrics.reduce((sum, metric) => sum + metric.position, 0);
-    const aggregateRealized = agentMetrics.reduce((sum, metric) => sum + metric.realized_pnl, 0);
-    const aggregateUnrealized = agentMetrics.reduce((sum, metric) => sum + metric.unrealized_pnl, 0);
-    const aggregateReward = Number(((aggregateRealized + aggregateUnrealized) / 1000).toFixed(3));
-
-    setMidPrice(observedPrice);
-    setSpread(observedSpread);
-    setInventory(aggregateInventory);
-    setRealizedPnl(Number(aggregateRealized.toFixed(2)));
-    setUnrealizedPnl(Number(aggregateUnrealized.toFixed(2)));
-    setReward(aggregateReward);
-    setImbalance(Number(computeOrderBookImbalance(marketData.order_book).toFixed(3)));
 
     setPriceSeries((prev) => pushPoint(prev, {
       time: now,
@@ -245,32 +269,25 @@ export function useSimulationDashboardData(): SimulationDashboardData {
 
     setInventorySeries((prev) => pushPoint(prev, {
       time: now,
-      value: aggregateInventory,
+      value: metrics.inventory,
     }));
 
     setRewardSeries((prev) => pushPoint(prev, {
       time: now,
-      value: aggregateReward,
+      value: metrics.cumulativeReward,
     }));
 
     setTradeFlow((prev) => mergeBackendTradeFlow(prev, marketData.order_flow, marketData.step, now));
 
     setDepthHeatmap(buildDepthHeatmap(marketData.order_book, observedPrice));
     setEvents(mapBackendEvents(marketData.events));
-  }, [feedActive, marketData]);
+  }, [feedActive, marketData, metrics.cumulativeReward, metrics.inventory]);
 
   useEffect(() => {
     if (feedActive) {
       return;
     }
 
-    setMidPrice(seedPrice);
-    setSpread(0);
-    setInventory(0);
-    setRealizedPnl(0);
-    setUnrealizedPnl(0);
-    setReward(0);
-    setImbalance(0);
     setPriceSeries([]);
     setSpreadSeries([]);
     setInventorySeries([]);
@@ -307,9 +324,6 @@ export function useSimulationDashboardData(): SimulationDashboardData {
     };
   }, [connected, feedActive, marketData]);
 
-  const bestBid = Number((midPrice - spread / 2).toFixed(3));
-  const bestAsk = Number((midPrice + spread / 2).toFixed(3));
-
   return {
     projectOverview: {
       name: 'SENTINEL',
@@ -329,17 +343,7 @@ export function useSimulationDashboardData(): SimulationDashboardData {
         'Production deployment path with monitoring and controls',
       ],
     },
-    metrics: {
-      midPrice: Number(midPrice.toFixed(3)),
-      bestBid,
-      bestAsk,
-      spread: Number(spread.toFixed(4)),
-      orderBookImbalance: Number(imbalance.toFixed(3)),
-      inventory,
-      realizedPnl,
-      unrealizedPnl,
-      cumulativeReward: reward,
-    },
+    metrics,
     priceSeries,
     spreadSeries,
     inventorySeries,

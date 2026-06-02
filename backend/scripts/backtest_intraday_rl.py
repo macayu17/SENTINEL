@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from _path_setup import add_backend_to_path
+except ModuleNotFoundError:
+    from backend.scripts._path_setup import add_backend_to_path
+
+add_backend_to_path()
 
 from stable_baselines3 import DQN, PPO
 

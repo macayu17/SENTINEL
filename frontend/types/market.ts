@@ -1,5 +1,7 @@
 // ── SENTINEL Market Types ──────────────────────────────────────────────────
 
+export type SimulationMode = 'SANDBOX' | 'LIVE_SHADOW';
+
 export interface OrderLevel {
   price: number;
   size: number;
@@ -126,7 +128,7 @@ export interface MarketUpdate {
   agent_metrics: Record<string, AgentMetric>;
   step: number;
   volatility: number;
-  mode: "SANDBOX" | "LIVE_SHADOW";
+  mode: SimulationMode;
   engine?: "ABIDES";
   data_source?: MarketDataSource | null;
   events?: MarketEvent[];

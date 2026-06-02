@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type {
   AgentActivity,
   KernelEvent,
   Milestone,
   ProjectOverview,
+  RecentOrder,
   TradeFlowPoint,
 } from '@/types/dashboard';
 import AlertBanner from '@/components/AlertBanner';
@@ -16,11 +17,18 @@ import OrderBookHeatmap from '@/components/OrderBookHeatmap';
 import AgentMetricsPanel from '@/components/AgentMetricsPanel';
 import SandboxControlPanel from '@/components/dashboard/SandboxControlPanel';
 import { useMarketWebSocket } from '@/lib/websocket';
-import { useSimulationDashboardData } from '@/lib/mock-simulation';
+import { useSimulationDashboardData } from '@/lib/dashboard-data';
 import { api } from '@/lib/api-client';
 import { useMarketStore } from '@/store/market-store';
+import type { MarketUpdate } from '@/types/market';
 
 type MetricTone = 'positive' | 'negative' | 'warning' | 'accent' | 'neutral';
+
+interface DashboardMetricCell {
+  label: string;
+  value: string;
+  tone: MetricTone;
+}
 
 function finiteNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -103,8 +111,207 @@ function sourceBadgeLabel(
   return simulationMode === 'LIVE_SHADOW' ? 'SOURCE: WAITING' : 'SOURCE: SYNTHETIC';
 }
 
-function TerminalOverviewPanel({ overview }: { overview: ProjectOverview }) {
+function sourceBadgeToneClass(
+  simulationMode: 'SANDBOX' | 'LIVE_SHADOW',
+  status?: string,
+): string {
+  if (status === 'error' || status === 'disconnected') {
+    return 'border-[#ff0040] text-[#ff0040]';
+  }
+  if (status === 'loading') {
+    return 'border-[#ffb800] text-[#ffb800]';
+  }
+  if (simulationMode === 'LIVE_SHADOW') {
+    return 'border-[#00bfff] text-[#00bfff]';
+  }
+  return 'border-gray-800 text-cyan-400';
+}
+
+function modeBadgeClass(simulationMode: 'SANDBOX' | 'LIVE_SHADOW'): string {
+  const tone =
+    simulationMode === 'LIVE_SHADOW'
+      ? 'border-[#00bfff] bg-[#00bfff]/10 text-[#00bfff]'
+      : 'border-[#00ff41] bg-[#00ff41]/10 text-[#00ff41]';
+
+  return `border px-3 py-1 text-[11px] font-bold tracking-[0.16em] ${tone}`;
+}
+
+function simulationStatusBadgeClass(running: boolean): string {
+  const tone = running
+    ? 'border-[#00ff41] bg-[#00ff41]/10 text-[#00ff41]'
+    : 'border-gray-800 bg-black text-gray-500';
+
+  return `border px-3 py-1 text-[11px] font-bold tracking-[0.16em] ${tone}`;
+}
+
+interface MarketSnapshot {
+  bidAskLabel: string;
+  spreadLabel: string;
+  imbalanceLabel: string;
+  depthLabel: string;
+  inventoryLabel: string;
+  realizedPnlLabel: string;
+  unrealizedPnlLabel: string;
+  totalPnlLabel: string;
+  midLabel: string;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  totalPnl: number;
+  imbalance: number;
+}
+
+function formatCurrency(value: number, digits = 2): string {
+  if (!Number.isFinite(value)) {
+    return '--';
+  }
+  return `$${value.toFixed(digits)}`;
+}
+
+function buildMarketSnapshot(marketData: MarketUpdate | null): MarketSnapshot {
+  if (!marketData) {
+    return {
+      bidAskLabel: '-',
+      spreadLabel: '-',
+      imbalanceLabel: '-',
+      depthLabel: '-',
+      inventoryLabel: '-',
+      realizedPnlLabel: '-',
+      unrealizedPnlLabel: '-',
+      totalPnlLabel: '-',
+      midLabel: '--',
+      realizedPnl: 0,
+      unrealizedPnl: 0,
+      totalPnl: 0,
+      imbalance: 0,
+    };
+  }
+
+  const mid = finiteNumber(marketData.price);
+  const spread = finiteNumber(marketData.spread);
+  const bestBid = marketData.order_book?.bids?.[0]?.price ?? mid - spread / 2;
+  const bestAsk = marketData.order_book?.asks?.[0]?.price ?? mid + spread / 2;
+  const bidDepth = sumFinite(marketData.order_book?.bids ?? [], (level) => level.size);
+  const askDepth = sumFinite(marketData.order_book?.asks ?? [], (level) => level.size);
+  const totalDepth = finiteNumber(marketData.depth, bidDepth + askDepth);
+  const imbalance = (bidDepth - askDepth) / Math.max(1, bidDepth + askDepth);
+  const agentMetrics = Object.values(marketData.agent_metrics ?? {});
+  const inventory = sumFinite(agentMetrics, (metric) => metric.position);
+  const realizedPnl = sumFinite(agentMetrics, (metric) => metric.realized_pnl);
+  const unrealizedPnl = sumFinite(agentMetrics, (metric) => metric.unrealized_pnl);
+  const totalPnl = realizedPnl + unrealizedPnl;
+
+  return {
+    bidAskLabel: `${bestBid.toFixed(2)} / ${bestAsk.toFixed(2)}`,
+    spreadLabel: spread.toFixed(4),
+    imbalanceLabel: imbalance.toFixed(3),
+    depthLabel: totalDepth.toLocaleString(),
+    inventoryLabel: inventory.toLocaleString(),
+    realizedPnlLabel: formatSigned(realizedPnl),
+    unrealizedPnlLabel: formatSigned(unrealizedPnl),
+    totalPnlLabel: formatSigned(totalPnl),
+    midLabel: formatCurrency(mid),
+    realizedPnl,
+    unrealizedPnl,
+    totalPnl,
+    imbalance,
+  };
+}
+
+function buildMetricCells(snapshot: MarketSnapshot): DashboardMetricCell[] {
+  return [
+    { label: 'BID/ASK', value: snapshot.bidAskLabel, tone: 'neutral' },
+    { label: 'SPREAD', value: snapshot.spreadLabel, tone: snapshot.spreadLabel === '-' ? 'neutral' : 'accent' },
+    {
+      label: 'IMBALANCE',
+      value: snapshot.imbalanceLabel,
+      tone: Math.abs(snapshot.imbalance) > 0.35 ? 'warning' : 'neutral',
+    },
+    { label: 'DEPTH', value: snapshot.depthLabel, tone: 'neutral' },
+    { label: 'INVENTORY', value: snapshot.inventoryLabel, tone: 'accent' },
+    {
+      label: 'REALIZED PNL',
+      value: snapshot.realizedPnlLabel,
+      tone: snapshot.realizedPnl >= 0 ? 'positive' : 'negative',
+    },
+    {
+      label: 'UNREALIZED PNL',
+      value: snapshot.unrealizedPnlLabel,
+      tone: snapshot.unrealizedPnl >= 0 ? 'positive' : 'negative',
+    },
+    {
+      label: 'TOTAL PNL',
+      value: snapshot.totalPnlLabel,
+      tone: snapshot.totalPnl >= 0 ? 'positive' : 'negative',
+    },
+  ];
+}
+
+function buildFooterFeedLabel(
+  marketData: MarketUpdate | null,
+  simulationRunning: boolean,
+  stage: string,
+): string {
+  if (!simulationRunning) {
+    return `SIM IDLE | STAGE ${stage.toUpperCase()}`;
+  }
+
+  if (!marketData) {
+    return 'SIM RUNNING | FEED SYNCING';
+  }
+
+  return [
+    formatCurrency(marketData.price),
+    `SPR ${finiteNumber(marketData.spread).toFixed(4)}`,
+    `DEPTH ${finiteNumber(marketData.depth).toLocaleString()}`,
+    `VOL ${finiteNumber(marketData.volatility).toFixed(4)}`,
+  ].join(' | ');
+}
+
+function orderSideClass(side: RecentOrder['side']): string {
+  return side === 'BUY' ? 'text-[#00ff41]' : 'text-[#ff0040]';
+}
+
+function orderStatusClass(status: RecentOrder['status']): string {
+  if (status === 'Filled') return 'text-[#00ff41]';
+  if (status === 'Cancelled') return 'text-[#ff0040]';
+  if (status === 'Partial Fill') return 'text-[#ffb800]';
+  return 'text-[#00bfff]';
+}
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => item === right[index]);
+}
+
+function sameProjectOverview(left: ProjectOverview, right: ProjectOverview): boolean {
   return (
+    left.name === right.name &&
+    left.summary === right.summary &&
+    left.currentStage === right.currentStage &&
+    sameStringArray(left.completed, right.completed) &&
+    sameStringArray(left.inProgress, right.inProgress)
+  );
+}
+
+function sameMilestone(left: Milestone, right: Milestone): boolean {
+  return (
+    left.phase === right.phase &&
+    left.title === right.title &&
+    left.status === right.status &&
+    left.detail === right.detail
+  );
+}
+
+function sameMilestones(left: Milestone[], right: Milestone[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((milestone, index) => sameMilestone(milestone, right[index]));
+}
+
+const TerminalOverviewPanel = memo(
+  function TerminalOverviewPanel({ overview }: { overview: ProjectOverview }) {
+    return (
     <div className="terminal-panel h-full">
       <div className="panel-header">
         <span className="panel-tag">SYSTEM BRIEF</span>
@@ -146,11 +353,14 @@ function TerminalOverviewPanel({ overview }: { overview: ProjectOverview }) {
         </div>
       </div>
     </div>
-  );
-}
+    );
+  },
+  (previous, next) => sameProjectOverview(previous.overview, next.overview),
+);
 
-function TerminalMilestonesPanel({ milestones }: { milestones: Milestone[] }) {
-  return (
+const TerminalMilestonesPanel = memo(
+  function TerminalMilestonesPanel({ milestones }: { milestones: Milestone[] }) {
+    return (
     <div className="terminal-panel h-full">
       <div className="panel-header">
         <span className="panel-tag">PROGRAM TRACKER</span>
@@ -177,10 +387,12 @@ function TerminalMilestonesPanel({ milestones }: { milestones: Milestone[] }) {
         ))}
       </div>
     </div>
-  );
-}
+    );
+  },
+  (previous, next) => sameMilestones(previous.milestones, next.milestones),
+);
 
-function TerminalEventPanel({
+const TerminalEventPanel = memo(function TerminalEventPanel({
   events,
   connected,
   simulationRunning,
@@ -221,9 +433,9 @@ function TerminalEventPanel({
       </div>
     </div>
   );
-}
+});
 
-function TerminalTradeFlowPanel({
+const TerminalTradeFlowPanel = memo(function TerminalTradeFlowPanel({
   data,
   connected,
   simulationRunning,
@@ -232,10 +444,10 @@ function TerminalTradeFlowPanel({
   connected: boolean;
   simulationRunning: boolean;
 }) {
-  const rows = data.slice(-8).reverse();
-  const peakVolume = Math.max(
-    1,
-    ...rows.flatMap((row) => [row.buyVolume, row.sellVolume]),
+  const rows = useMemo(() => data.slice(-8).reverse(), [data]);
+  const peakVolume = useMemo(
+    () => Math.max(1, ...rows.flatMap((row) => [row.buyVolume, row.sellVolume])),
+    [rows],
   );
   const statusLabel = feedStateLabel(connected, simulationRunning, 'BUY VS SELL');
   const emptyLabel = !connected ? 'BACKEND OFFLINE' : 'FLOW BUFFER IDLE';
@@ -281,9 +493,9 @@ function TerminalTradeFlowPanel({
       </div>
     </div>
   );
-}
+});
 
-function TerminalActivityPanel({
+const TerminalActivityPanel = memo(function TerminalActivityPanel({
   activity,
   connected,
   simulationRunning,
@@ -366,26 +578,12 @@ function TerminalActivityPanel({
                 >
                   <div className="col-span-2 text-gray-500">{order.id}</div>
                   <div className="col-span-3 truncate">{order.agent}</div>
-                  <div
-                    className={`col-span-1 text-center ${
-                      order.side === 'BUY' ? 'text-[#00ff41]' : 'text-[#ff0040]'
-                    }`}
-                  >
+                  <div className={`col-span-1 text-center ${orderSideClass(order.side)}`}>
                     {order.side === 'BUY' ? 'B' : 'S'}
                   </div>
                   <div className="col-span-2 text-right">{order.price.toFixed(3)}</div>
                   <div className="col-span-2 text-right">{order.quantity}</div>
-                  <div
-                    className={`col-span-2 text-right ${
-                      order.status === 'Filled'
-                        ? 'text-[#00ff41]'
-                        : order.status === 'Cancelled'
-                          ? 'text-[#ff0040]'
-                          : order.status === 'Partial Fill'
-                            ? 'text-[#ffb800]'
-                            : 'text-[#00bfff]'
-                    }`}
-                  >
+                  <div className={`col-span-2 text-right ${orderStatusClass(order.status)}`}>
                     {order.status.toUpperCase()}
                   </div>
                 </div>
@@ -396,6 +594,17 @@ function TerminalActivityPanel({
       </div>
     </div>
   );
+});
+
+function TerminalClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return <span>{formatISTWallClock(now)}</span>;
 }
 
 export default function DashboardPage() {
@@ -409,8 +618,6 @@ export default function DashboardPage() {
   const setSimulationRunning = useMarketStore((state) => state.setSimulationRunning);
   const simulationMode = useMarketStore((state) => state.simulationMode);
   const setSimulationMode = useMarketStore((state) => state.setSimulationMode);
-
-  const [currentTime, setCurrentTime] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -438,141 +645,35 @@ export default function DashboardPage() {
     };
   }, [resetSimulationData, setSimulationMode, setSimulationRunning]);
 
-  useEffect(() => {
-    setCurrentTime(formatISTWallClock(new Date()));
-    const timer = setInterval(() => setCurrentTime(formatISTWallClock(new Date())), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const bids = marketData?.order_book?.bids ?? [];
-  const asks = marketData?.order_book?.asks ?? [];
-  const bidDepth = bids.reduce((sum, level) => sum + level.size, 0);
-  const askDepth = asks.reduce((sum, level) => sum + level.size, 0);
-  const depth = marketData?.depth ?? (bidDepth + askDepth > 0 ? bidDepth + askDepth : null);
-  const midPrice = marketData?.price ?? null;
-  const spread =
-    bids[0]?.price != null && asks[0]?.price != null
-      ? Math.max(0, asks[0].price - bids[0].price)
-      : marketData?.spread ?? null;
-  const derivedBid = midPrice != null && spread != null ? midPrice - spread / 2 : null;
-  const derivedAsk = midPrice != null && spread != null ? midPrice + spread / 2 : null;
-  const bestBid = bids[0]?.price ?? derivedBid;
-  const bestAsk = asks[0]?.price ?? derivedAsk;
-  const imbalance =
-    bidDepth + askDepth > 0
-      ? (bidDepth - askDepth) / (bidDepth + askDepth)
-      : null;
-  const liveAgentMetrics = Object.values(marketData?.agent_metrics ?? {});
-  const inventory = sumFinite(liveAgentMetrics, (agent) => agent.position);
-  const realizedPnl = sumFinite(liveAgentMetrics, (agent) => agent.realized_pnl);
-  const unrealizedPnl = sumFinite(liveAgentMetrics, (agent) => agent.unrealized_pnl);
-  const totalPnl = realizedPnl + unrealizedPnl;
-  const hasMarketSnapshot = marketData !== null;
-  const midLabel = hasMarketSnapshot && midPrice != null ? `$${midPrice.toFixed(2)}` : '--';
-  const depthLabel = hasMarketSnapshot && depth != null ? depth.toLocaleString() : '—';
+  const marketSnapshot = useMemo(() => buildMarketSnapshot(marketData), [marketData]);
   const dataSource = marketData?.data_source ?? null;
-  const sourceLabel = sourceBadgeLabel(
-    connected,
-    simulationMode,
-    dataSource?.provider,
-    dataSource?.source,
-    dataSource?.depth_source,
-  );
-  const sourceTone =
-    dataSource?.status === 'connected'
-      ? 'border-[#00ff41] text-[#00ff41]'
-      : simulationMode === 'LIVE_SHADOW'
-        ? 'border-[#ffb800] text-[#ffb800]'
-        : 'border-gray-800 text-cyan-400';
-
-  const metricCells = useMemo(
-    () => [
-      {
-        label: 'BID/ASK',
-        value:
-          bestBid != null && bestAsk != null
-            ? `${bestBid.toFixed(2)} / ${bestAsk.toFixed(2)}`
-            : '—',
-        tone: 'neutral' as const,
-      },
-      {
-        label: 'SPREAD',
-        value: spread != null ? spread.toFixed(4) : '—',
-        tone:
-          spread == null
-            ? ('neutral' as const)
-            : spread > 0.1
-              ? ('warning' as const)
-              : ('accent' as const),
-      },
-      {
-        label: 'IMBALANCE',
-        value: imbalance != null ? formatSigned(imbalance, 3) : '—',
-        tone:
-          imbalance == null
-            ? ('neutral' as const)
-            : imbalance >= 0
-              ? ('positive' as const)
-              : ('negative' as const),
-      },
-      {
-        label: 'DEPTH',
-        value: depthLabel,
-        tone: 'neutral' as const,
-      },
-      {
-        label: 'INVENTORY',
-        value: hasMarketSnapshot ? inventory.toLocaleString() : '—',
-        tone:
-          !hasMarketSnapshot
-            ? ('neutral' as const)
-            : inventory >= 0
-              ? ('accent' as const)
-              : ('warning' as const),
-      },
-      {
-        label: 'REALIZED PNL',
-        value: hasMarketSnapshot ? formatSigned(realizedPnl) : '—',
-        tone:
-          !hasMarketSnapshot
-            ? ('neutral' as const)
-            : realizedPnl >= 0
-              ? ('positive' as const)
-              : ('negative' as const),
-      },
-      {
-        label: 'UNREALIZED PNL',
-        value: hasMarketSnapshot ? formatSigned(unrealizedPnl) : '—',
-        tone:
-          !hasMarketSnapshot
-            ? ('neutral' as const)
-            : unrealizedPnl >= 0
-              ? ('positive' as const)
-              : ('negative' as const),
-      },
-      {
-        label: 'TOTAL PNL',
-        value: hasMarketSnapshot ? formatSigned(totalPnl) : '—',
-        tone:
-          !hasMarketSnapshot
-            ? ('neutral' as const)
-            : totalPnl >= 0
-              ? ('positive' as const)
-              : ('negative' as const),
-      },
-    ],
+  const sourceLabel = useMemo(
+    () =>
+      sourceBadgeLabel(
+        connected,
+        simulationMode,
+        dataSource?.provider,
+        dataSource?.source,
+        dataSource?.depth_source,
+      ),
     [
-      bestAsk,
-      bestBid,
-      depthLabel,
-      hasMarketSnapshot,
-      inventory,
-      imbalance,
-      realizedPnl,
-      spread,
-      totalPnl,
-      unrealizedPnl,
+      connected,
+      dataSource?.depth_source,
+      dataSource?.provider,
+      dataSource?.source,
+      simulationMode,
     ],
+  );
+  const sourceTone = sourceBadgeToneClass(simulationMode, dataSource?.status);
+  const metricCells = useMemo(() => buildMetricCells(marketSnapshot), [marketSnapshot]);
+  const footerFeedLabel = useMemo(
+    () =>
+      buildFooterFeedLabel(
+        marketData,
+        simulationRunning,
+        dashboard.projectOverview.currentStage,
+      ),
+    [dashboard.projectOverview.currentStage, marketData, simulationRunning],
   );
 
   return (
@@ -606,7 +707,7 @@ export default function DashboardPage() {
             </span>
             <span>
               MID:{' '}
-              <span className="text-gray-200">{midLabel}</span>
+              <span className="text-gray-200">{marketSnapshot.midLabel}</span>
             </span>
             <span>
               STEP:{' '}
@@ -614,7 +715,7 @@ export default function DashboardPage() {
             </span>
             <span>
               MODELED DEPTH:{' '}
-              <span className="text-cyan-400">{depthLabel}</span>
+              <span className="text-cyan-400">{marketSnapshot.depthLabel}</span>
             </span>
           </div>
 
@@ -624,30 +725,11 @@ export default function DashboardPage() {
               <span className="text-gray-500">{connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
             </div>
 
-            <span
-              className="border px-3 py-1 text-xs font-bold tracking-[0.12em]"
-              style={{
-                borderColor: simulationMode === 'SANDBOX' ? '#00ff41' : '#ffb800',
-                color: simulationMode === 'SANDBOX' ? '#00ff41' : '#ffb800',
-                backgroundColor:
-                  simulationMode === 'SANDBOX'
-                    ? 'rgba(0, 255, 65, 0.08)'
-                    : 'rgba(255, 184, 0, 0.08)',
-              }}
-            >
+            <span className={modeBadgeClass(simulationMode)}>
               {simulationMode === 'SANDBOX' ? 'MODE: SANDBOX' : 'MODE: LIVE SHADOW'}
             </span>
 
-            <span
-              className="border px-3 py-1 text-xs font-bold tracking-[0.12em]"
-              style={{
-                borderColor: simulationRunning ? '#ff0040' : '#00ff41',
-                color: simulationRunning ? '#ff0040' : '#00ff41',
-                backgroundColor: simulationRunning
-                  ? 'rgba(255, 0, 64, 0.08)'
-                  : 'rgba(0, 255, 65, 0.08)',
-              }}
-            >
+            <span className={simulationStatusBadgeClass(simulationRunning)}>
               {simulationRunning ? 'SIM RUNNING' : 'SIM IDLE'}
             </span>
           </div>
@@ -717,14 +799,8 @@ export default function DashboardPage() {
 
       <footer className="fixed bottom-0 left-0 right-0 z-50 flex justify-between border-t border-gray-800 bg-black px-4 py-1 text-xs text-gray-600">
         <span>SENTINEL v2.0 TERMINAL</span>
-        <span>
-          {marketData
-            ? `$${marketData.price.toFixed(2)} | SPR ${marketData.spread.toFixed(4)} | DEPTH ${marketData.depth.toLocaleString()} | VOL ${marketData.volatility.toFixed(4)}`
-            : simulationRunning
-              ? 'SYNCING LIVE FEED...'
-              : `SIM IDLE | STAGE ${dashboard.projectOverview.currentStage.toUpperCase()}`}
-        </span>
-        <span>{currentTime}</span>
+        <span>{footerFeedLabel}</span>
+        <TerminalClock />
       </footer>
     </div>
   );

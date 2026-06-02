@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import math
 import os
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
 import numpy as np
 
@@ -118,49 +118,18 @@ def normalize_groww_symbol(exchange: str, groww_symbol: str) -> str:
     symbol = groww_symbol.strip().upper()
     if not symbol:
         raise GrowwDataError("Groww symbol is required.")
-    exchange_code = exchange.strip().upper() or "NSE"
+    exchange_code = _normalize_exchange(exchange)
     if "-" in symbol:
         return symbol
     return f"{exchange_code}-{symbol}"
 
 
 def normalize_groww_candles(payload: Any) -> List[GrowwCandle]:
-    candles = payload.get("candles") if isinstance(payload, dict) else payload
+    candles = _extract_candle_rows(payload)
     if not isinstance(candles, list) or not candles:
         raise GrowwDataError("Groww returned no historical candles.")
 
-    normalized: List[GrowwCandle] = []
-    for row in candles:
-        if isinstance(row, dict):
-            normalized.append(
-                GrowwCandle(
-                    timestamp=_normalize_timestamp(row.get("timestamp") or row.get("time")),
-                    open=_finite_float(row.get("open"), "open"),
-                    high=_finite_float(row.get("high"), "high"),
-                    low=_finite_float(row.get("low"), "low"),
-                    close=_finite_float(row.get("close"), "close"),
-                    volume=_finite_float(row.get("volume", 0), "volume"),
-                    oi=_optional_float(row.get("oi") if "oi" in row else row.get("open_interest")),
-                )
-            )
-            continue
-
-        if not isinstance(row, (list, tuple)) or len(row) < 6:
-            raise GrowwDataError("Groww candle rows must include timestamp, OHLC, and volume.")
-
-        normalized.append(
-            GrowwCandle(
-                timestamp=_normalize_timestamp(row[0]),
-                open=_finite_float(row[1], "open"),
-                high=_finite_float(row[2], "high"),
-                low=_finite_float(row[3], "low"),
-                close=_finite_float(row[4], "close"),
-                volume=_finite_float(row[5], "volume"),
-                oi=_optional_float(row[6] if len(row) > 6 else None),
-            )
-        )
-
-    return normalized
+    return [_normalize_candle_row(row) for row in candles]
 
 
 def normalize_groww_quote(
@@ -181,15 +150,15 @@ def normalize_groww_quote(
 
     return GrowwQuote(
         groww_symbol=symbol,
-        exchange=exchange.strip().upper() or "NSE",
+        exchange=_normalize_exchange(exchange),
         segment=segment.strip().upper() or "CASH",
         last_price=_finite_float(payload.get("last_price"), "quote last price"),
-        ltq=_optional_float(payload.get("last_trade_quantity")),
-        volume=_optional_float(payload.get("volume")),
-        previous_close=_optional_float(ohlc.get("close")),
+        ltq=_optional_float(payload.get("last_trade_quantity"), "last trade quantity"),
+        volume=_optional_float(payload.get("volume"), "volume"),
+        previous_close=_optional_float(ohlc.get("close"), "previous close"),
         timestamp=str(payload.get("last_trade_time")).strip() if payload.get("last_trade_time") is not None else None,
-        total_buy_quantity=_optional_float(payload.get("total_buy_quantity")),
-        total_sell_quantity=_optional_float(payload.get("total_sell_quantity")),
+        total_buy_quantity=_optional_float(payload.get("total_buy_quantity"), "total buy quantity"),
+        total_sell_quantity=_optional_float(payload.get("total_sell_quantity"), "total sell quantity"),
         depth_source="provider_live" if bids or asks else None,
         order_book={"bids": bids, "asks": asks} if bids or asks else None,
     )
@@ -291,13 +260,11 @@ class GrowwHistoricalProvider:
         end_time: str,
         candle_interval: str = "MIN_30",
     ) -> StockInfo:
-        segment_code = segment.strip().upper() or "CASH"
-        if segment_code not in SUPPORTED_SEGMENTS:
-            supported = ", ".join(sorted(SUPPORTED_SEGMENTS))
-            raise GrowwDataError(f"Unsupported Groww segment '{segment}'. Supported: {supported}.")
+        segment_code = _normalize_supported_segment(segment)
 
         symbol = normalize_groww_symbol(exchange, groww_symbol)
-        exchange_value = _client_constant(self._client, f"EXCHANGE_{exchange.strip().upper()}", exchange.strip().upper())
+        exchange_code = _normalize_exchange(exchange)
+        exchange_value = _client_constant(self._client, f"EXCHANGE_{exchange_code}", exchange_code)
         segment_value = _client_constant(self._client, f"SEGMENT_{segment_code}", segment_code)
         interval_value = _resolve_interval_constant(self._client, candle_interval)
 
@@ -311,12 +278,14 @@ class GrowwHistoricalProvider:
                 candle_interval=interval_value,
             )
         except Exception as exc:
-            message = str(exc) or exc.__class__.__name__
-            if "forbidden" in message.lower() or "access" in message.lower():
-                raise GrowwDataError(
-                    "Groww rejected historical candle access. Verify this Groww API key has historical/backtesting data permission."
-                ) from exc
-            raise GrowwProviderError(f"Groww historical candle request failed: {message}") from exc
+            _raise_groww_request_error(
+                exc,
+                request_label="historical candle",
+                access_message=(
+                    "Groww rejected historical candle access. Verify this Groww API key has "
+                    "historical/backtesting data permission."
+                ),
+            )
         candles = normalize_groww_candles(response)
         return groww_candles_to_stock_info(
             groww_symbol=symbol,
@@ -333,13 +302,10 @@ class GrowwHistoricalProvider:
         segment: str,
         groww_symbol: str,
     ) -> GrowwQuote:
-        segment_code = segment.strip().upper() or "CASH"
-        if segment_code not in SUPPORTED_SEGMENTS:
-            supported = ", ".join(sorted(SUPPORTED_SEGMENTS))
-            raise GrowwDataError(f"Unsupported Groww segment '{segment}'. Supported: {supported}.")
+        segment_code = _normalize_supported_segment(segment)
 
         symbol = normalize_groww_symbol(exchange, groww_symbol)
-        exchange_code = exchange.strip().upper() or "NSE"
+        exchange_code = _normalize_exchange(exchange)
         exchange_value = _client_constant(self._client, f"EXCHANGE_{exchange_code}", exchange_code)
         segment_value = _client_constant(self._client, f"SEGMENT_{segment_code}", segment_code)
         trading_symbol = _quote_trading_symbol(exchange_code, symbol)
@@ -351,12 +317,11 @@ class GrowwHistoricalProvider:
                 trading_symbol=trading_symbol,
             )
         except Exception as exc:
-            message = str(exc) or exc.__class__.__name__
-            if "forbidden" in message.lower() or "access" in message.lower():
-                raise GrowwDataError(
-                    "Groww rejected live quote access. Verify this Groww API key has live data permission."
-                ) from exc
-            raise GrowwProviderError(f"Groww live quote request failed: {message}") from exc
+            _raise_groww_request_error(
+                exc,
+                request_label="live quote",
+                access_message="Groww rejected live quote access. Verify this Groww API key has live data permission.",
+            )
 
         return normalize_groww_quote(
             response,
@@ -414,16 +379,16 @@ def _finite_float(value: Any, field: str) -> float:
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise GrowwDataError(f"Groww candle {field} is not numeric.") from exc
+        raise GrowwDataError(f"Groww {field} is not numeric.") from exc
     if not math.isfinite(parsed):
-        raise GrowwDataError(f"Groww candle {field} is not finite.")
+        raise GrowwDataError(f"Groww {field} is not finite.")
     return parsed
 
 
-def _optional_float(value: Any) -> Optional[float]:
+def _optional_float(value: Any, field: str = "candle open interest") -> Optional[float]:
     if value is None:
         return None
-    return _finite_float(value, "open interest")
+    return _finite_float(value, field)
 
 
 def _normalize_depth_side(entries: Any, side: str) -> list[dict[str, Any]]:
@@ -436,7 +401,7 @@ def _normalize_depth_side(entries: Any, side: str) -> list[dict[str, Any]]:
             continue
         try:
             price = _finite_float(row.get("price"), f"{side} depth price")
-            size = int(_finite_float(row.get("quantity", row.get("qty")), f"{side} depth quantity"))
+            size = int(_finite_float(_first_present(row, ("quantity", "qty")), f"{side} depth quantity"))
         except GrowwDataError:
             continue
         if price <= 0 or size <= 0:
@@ -444,6 +409,62 @@ def _normalize_depth_side(entries: Any, side: str) -> list[dict[str, Any]]:
         levels.append({"price": round(price, 2), "size": size})
 
     return sorted(levels, key=lambda level: level["price"], reverse=(side == "bid"))
+
+
+def _extract_candle_rows(payload: Any) -> Any:
+    return payload.get("candles") if isinstance(payload, dict) else payload
+
+
+def _normalize_candle_row(row: Any) -> GrowwCandle:
+    if isinstance(row, dict):
+        return GrowwCandle(
+            timestamp=_normalize_timestamp(row.get("timestamp") or row.get("time")),
+            open=_finite_float(row.get("open"), "candle open"),
+            high=_finite_float(row.get("high"), "candle high"),
+            low=_finite_float(row.get("low"), "candle low"),
+            close=_finite_float(row.get("close"), "candle close"),
+            volume=_finite_float(row.get("volume", 0), "candle volume"),
+            oi=_optional_float(row.get("oi") if "oi" in row else row.get("open_interest")),
+        )
+
+    if not isinstance(row, (list, tuple)) or len(row) < 6:
+        raise GrowwDataError("Groww candle rows must include timestamp, OHLC, and volume.")
+
+    return GrowwCandle(
+        timestamp=_normalize_timestamp(row[0]),
+        open=_finite_float(row[1], "candle open"),
+        high=_finite_float(row[2], "candle high"),
+        low=_finite_float(row[3], "candle low"),
+        close=_finite_float(row[4], "candle close"),
+        volume=_finite_float(row[5], "candle volume"),
+        oi=_optional_float(row[6] if len(row) > 6 else None),
+    )
+
+
+def _normalize_exchange(exchange: str) -> str:
+    return exchange.strip().upper() or "NSE"
+
+
+def _normalize_supported_segment(segment: str) -> str:
+    segment_code = segment.strip().upper() or "CASH"
+    if segment_code not in SUPPORTED_SEGMENTS:
+        supported = ", ".join(sorted(SUPPORTED_SEGMENTS))
+        raise GrowwDataError(f"Unsupported Groww segment '{segment}'. Supported: {supported}.")
+    return segment_code
+
+
+def _first_present(row: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in row:
+            return row[key]
+    return None
+
+
+def _raise_groww_request_error(exc: Exception, *, request_label: str, access_message: str) -> None:
+    message = str(exc) or exc.__class__.__name__
+    if "forbidden" in message.lower() or "access" in message.lower():
+        raise GrowwDataError(access_message) from exc
+    raise GrowwProviderError(f"Groww {request_label} request failed: {message}") from exc
 
 
 def _quote_trading_symbol(exchange: str, groww_symbol: str) -> str:

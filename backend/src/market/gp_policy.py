@@ -42,24 +42,25 @@ class GPNode:
         if not self.children:
             return 0.0
 
-        child_values = [child.evaluate(features) for child in self.children]
         op = self.kind
+        left = self.children[0].evaluate(features)
 
         if op == "neg":
-            result = -child_values[0]
+            result = -left
         elif op == "abs":
-            result = abs(child_values[0])
+            result = abs(left)
         elif op == "tanh":
-            result = math.tanh(child_values[0])
-        elif op == "add":
-            result = child_values[0] + child_values[1]
-        elif op == "sub":
-            result = child_values[0] - child_values[1]
-        elif op == "mul":
-            result = child_values[0] * child_values[1]
-        elif op == "div":
-            denom = child_values[1]
-            result = child_values[0] / denom if abs(denom) > 1e-6 else child_values[0]
+            result = math.tanh(left)
+        elif op in BINARY_OPS:
+            right = self.children[1].evaluate(features)
+            if op == "add":
+                result = left + right
+            elif op == "sub":
+                result = left - right
+            elif op == "mul":
+                result = left * right
+            else:
+                result = left / right if abs(right) > 1e-6 else left
         else:
             result = 0.0
 
@@ -152,12 +153,12 @@ class GPPolicyGenome:
 
     def predict(self, observation: np.ndarray, deterministic: bool = True) -> tuple[np.ndarray, None]:
         features = np.asarray(observation, dtype=np.float32)
-        raw_actions = np.array(
-            [tree.evaluate(features) for tree in self.action_trees],
-            dtype=np.float32,
-        )
-        action = np.tanh(np.nan_to_num(raw_actions, nan=0.0, posinf=0.0, neginf=0.0))
-        return action.astype(np.float32), None
+        actions = np.empty(3, dtype=np.float32)
+        for index, tree in enumerate(self.action_trees):
+            actions[index] = tree.evaluate(features)
+        np.nan_to_num(actions, nan=0.0, posinf=0.0, neginf=0.0, copy=False)
+        np.tanh(actions, out=actions)
+        return actions, None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -297,18 +298,20 @@ class GeneticProgramTrainer:
             inventories.append(abs(float(last_info.get("inventory", 0.0))) / 5000.0)
             fill_rates.append(float(last_info.get("fill_rate", 0.0)))
 
-        avg_reward = float(np.mean(rewards)) if rewards else 0.0
-        avg_pnl = float(np.mean(pnls)) / 50.0 if pnls else 0.0
-        avg_drawdown = float(np.mean(drawdowns)) / 75.0 if drawdowns else 0.0
-        avg_inventory = float(np.mean(inventories)) if inventories else 0.0
-        avg_fill = float(np.mean(fill_rates)) if fill_rates else 0.0
+        avg_reward = (sum(rewards) / len(rewards)) if rewards else 0.0
+        raw_avg_pnl = (sum(pnls) / len(pnls)) if pnls else 0.0
+        raw_avg_drawdown = (sum(drawdowns) / len(drawdowns)) if drawdowns else 0.0
+        avg_pnl = raw_avg_pnl / 50.0
+        avg_drawdown = raw_avg_drawdown / 75.0
+        avg_inventory = (sum(inventories) / len(inventories)) if inventories else 0.0
+        avg_fill = (sum(fill_rates) / len(fill_rates)) if fill_rates else 0.0
 
         fitness = avg_reward + avg_pnl + (0.05 * avg_fill) - (0.8 * avg_inventory) - (0.4 * avg_drawdown)
         genome.fitness = float(fitness)
         genome.metrics = {
             "avg_reward": avg_reward,
-            "avg_pnl": float(np.mean(pnls)) if pnls else 0.0,
-            "avg_drawdown": float(np.mean(drawdowns)) if drawdowns else 0.0,
+            "avg_pnl": raw_avg_pnl,
+            "avg_drawdown": raw_avg_drawdown,
             "avg_inventory_ratio": avg_inventory,
             "avg_fill_rate": avg_fill,
         }
@@ -331,9 +334,8 @@ class GeneticProgramTrainer:
             population.sort(key=lambda genome: genome.fitness if genome.fitness is not None else -float("inf"), reverse=True)
 
             best = population[0]
-            avg_fitness = float(
-                np.mean([genome.fitness for genome in population if genome.fitness is not None])
-            )
+            scored_fitness = [genome.fitness for genome in population if genome.fitness is not None]
+            avg_fitness = sum(scored_fitness) / len(scored_fitness) if scored_fitness else 0.0
             history.append(
                 {
                     "generation": float(generation),

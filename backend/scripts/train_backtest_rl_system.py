@@ -17,23 +17,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
+
+try:
+    from _path_setup import add_backend_to_path
+except ModuleNotFoundError:
+    from backend.scripts._path_setup import add_backend_to_path
+
+add_backend_to_path()
 
 import numpy as np
-import pandas as pd
 from stable_baselines3 import DQN, PPO
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.prediction.intraday_rl.backtest import backtest_model
-from src.prediction.intraday_rl.environment import IntradayEnvConfig, IntradayTradingEnv
+from src.prediction.intraday_rl.environment import IntradayEnvConfig
 from src.prediction.intraday_rl.features import (
-    MinuteDataAugmenter,
     build_intraday_features,
     load_ohlcv_csv,
     resample_ohlcv,
@@ -47,7 +48,6 @@ from src.prediction.intraday_rl.trainer import (
     train_dqn_baseline,
     train_ppo,
 )
-from stable_baselines3.common.vec_env import DummyVecEnv
 
 
 def resolve_model_path(model_path: str | Path) -> Path:
