@@ -25,6 +25,95 @@ def test_invalid_simulation_mode_returns_bad_request():
     assert response.json()["detail"] == "Invalid mode"
 
 
+def test_generic_mode_endpoint_rejects_live_shadow_without_provider():
+    api_main.simulator = None
+    api_main.config.simulation_mode = "SANDBOX"
+    client = TestClient(api_main.app)
+
+    response = client.post("/api/simulation/mode", json={"mode": "LIVE_SHADOW"})
+
+    assert response.status_code == 400
+    assert "Live-shadow mode requires" in response.json()["detail"]
+    assert api_main.config.simulation_mode == "SANDBOX"
+
+
+def test_default_start_always_uses_sandbox_mode():
+    api_main.simulator = None
+    api_main.config.simulation_mode = "LIVE_SHADOW"
+
+    async def start_default():
+        response = await api_main.start_simulation()
+        if api_main._sim_task:
+            api_main._sim_task.cancel()
+            try:
+                await api_main._sim_task
+            except asyncio.CancelledError:
+                pass
+            api_main._sim_task = None
+        return response
+
+    try:
+        response = asyncio.run(start_default())
+        assert response["status"] == "started"
+        assert api_main.simulator is not None
+        assert api_main.simulator.mode == "SANDBOX"
+        assert api_main.config.simulation_mode == "SANDBOX"
+    finally:
+        if api_main.simulator:
+            api_main.simulator.stop()
+        api_main.simulator = None
+        api_main._sim_task = None
+        api_main.config.simulation_mode = "SANDBOX"
+
+
+def test_stock_replay_always_uses_sandbox_mode(monkeypatch):
+    sample = StockInfo(
+        ticker="AAPL",
+        name="Apple Inc.",
+        currency="USD",
+        last_close=103.0,
+        period_start="2025-01-01T09:30:00",
+        period_end="2025-01-01T10:30:00",
+        bars=3,
+        prices=[100.0, 101.0, 103.0],
+        volumes=[1000, 1100, 1200],
+        highs=[101.0, 102.0, 104.0],
+        lows=[99.0, 100.5, 102.0],
+        returns=[0.01, 0.0198],
+        realized_vol=0.2,
+        mean_return=0.0149,
+    )
+
+    monkeypatch.setattr(api_main, "fetch_stock", lambda **kwargs: sample)
+    api_main.simulator = None
+    api_main.config.simulation_mode = "LIVE_SHADOW"
+    request = api_main.StockReplayRequest(ticker="AAPL", period="1d", interval="30m")
+
+    async def start_replay():
+        response = await api_main.start_stock_replay(request)
+        if api_main._sim_task:
+            api_main._sim_task.cancel()
+            try:
+                await api_main._sim_task
+            except asyncio.CancelledError:
+                pass
+            api_main._sim_task = None
+        return response
+
+    try:
+        response = asyncio.run(start_replay())
+        assert response["status"] == "started"
+        assert api_main.simulator is not None
+        assert api_main.simulator.mode == "SANDBOX"
+        assert api_main.config.simulation_mode == "SANDBOX"
+    finally:
+        if api_main.simulator:
+            api_main.simulator.stop()
+        api_main.simulator = None
+        api_main._sim_task = None
+        api_main.config.simulation_mode = "SANDBOX"
+
+
 def test_market_data_endpoints_require_active_simulation():
     api_main.simulator = None
     client = TestClient(api_main.app)
@@ -549,6 +638,47 @@ def test_groww_live_depth_starts_after_successful_provider_fetch(monkeypatch):
         assert state["bid_levels"] == [{"price": 150.2, "size": 1100}]
         assert state["ask_levels"] == [{"price": 150.3, "size": 950}]
         assert api_main.simulator.data_source["last_price"] == 150.25
+    finally:
+        if api_main.simulator:
+            api_main.simulator.stop()
+        if api_main._sim_task:
+            api_main._sim_task.cancel()
+        api_main.simulator = None
+        api_main._sim_task = None
+
+
+def test_groww_live_depth_marks_synthetic_fallback_when_provider_has_no_depth(monkeypatch):
+    quote = GrowwQuote(
+        groww_symbol="NSE-RELIANCE",
+        exchange="NSE",
+        segment="CASH",
+        last_price=149.5,
+        ltq=20,
+        volume=10000,
+        previous_close=148.5,
+        depth_source=None,
+        order_book=None,
+    )
+
+    monkeypatch.setattr(api_main, "fetch_groww_quote", lambda **kwargs: quote)
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/api/live-shadow/groww/live",
+        json={
+            "groww_symbol": "RELIANCE",
+            "exchange": "NSE",
+            "segment": "CASH",
+            "speed": 2.0,
+            "poll_interval_seconds": 1,
+        },
+    )
+
+    try:
+        assert response.status_code == 200
+        assert response.json()["depth_source"] == "synthetic_fallback"
+        assert api_main.simulator is not None
+        assert api_main.simulator.data_source["depth_source"] == "synthetic_fallback"
     finally:
         if api_main.simulator:
             api_main.simulator.stop()

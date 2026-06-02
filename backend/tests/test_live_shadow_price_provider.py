@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+from backend.src.market import simulator as simulator_module
 from backend.src.market.simulator import MarketSimulator
 
 
@@ -15,7 +16,7 @@ def test_live_shadow_external_price_provider_drives_price_and_book():
     ]
     simulator = MarketSimulator([], initial_price=100.0, mode="LIVE_SHADOW")
     simulator.data_source = {"provider": "upstox", "source": "live_ltp", "status": "connected"}
-    simulator.set_external_price_provider(lambda: quotes.pop(0), poll_interval_steps=1)
+    simulator.set_external_price_provider(lambda: quotes.pop(0), poll_interval_seconds=1)
 
     state = simulator.step()
 
@@ -46,7 +47,7 @@ def test_live_shadow_external_depth_replaces_synthetic_order_book():
     }
     simulator = MarketSimulator([], initial_price=100.0, mode="LIVE_SHADOW")
     simulator.data_source = {"provider": "upstox", "source": "live_depth", "status": "connected"}
-    simulator.set_external_price_provider(lambda: quote, poll_interval_steps=1)
+    simulator.set_external_price_provider(lambda: quote, poll_interval_seconds=1)
 
     state = simulator.step()
 
@@ -76,7 +77,7 @@ def test_live_shadow_external_partial_depth_is_preserved():
     }
     simulator = MarketSimulator([], initial_price=100.0, mode="LIVE_SHADOW")
     simulator.data_source = {"provider": "upstox", "source": "live_depth", "status": "connected"}
-    simulator.set_external_price_provider(lambda: quote, poll_interval_steps=1)
+    simulator.set_external_price_provider(lambda: quote, poll_interval_seconds=1)
 
     state = simulator.step()
 
@@ -92,10 +93,31 @@ def test_live_shadow_external_price_errors_preserve_last_price():
 
     simulator = MarketSimulator([], initial_price=100.0, mode="LIVE_SHADOW")
     simulator.data_source = {"provider": "upstox", "source": "live_ltp", "status": "connected"}
-    simulator.set_external_price_provider(failing_provider, poll_interval_steps=1)
+    simulator.set_external_price_provider(failing_provider, poll_interval_seconds=1)
 
     state = simulator.step()
 
     assert state["current_price"] == 100.0
     assert simulator.data_source["status"] == "error"
     assert "quote permission denied" in simulator.data_source["error"]
+
+
+def test_live_shadow_external_provider_poll_interval_uses_wall_clock(monkeypatch):
+    calls = 0
+
+    def provider():
+        nonlocal calls
+        calls += 1
+        return {"last_price": 101.0 + calls}
+
+    monkeypatch.setattr(simulator_module.time, "monotonic", lambda: 100.0)
+    simulator = MarketSimulator([], initial_price=100.0, mode="LIVE_SHADOW")
+    simulator.data_source = {"provider": "upstox", "source": "live_ltp", "status": "connected"}
+    simulator.set_external_price_provider(provider, poll_interval_seconds=1)
+
+    first = simulator.step()
+    second = simulator.step()
+
+    assert calls == 1
+    assert first["current_price"] == 102.0
+    assert second["current_price"] == 102.0

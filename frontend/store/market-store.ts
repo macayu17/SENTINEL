@@ -88,6 +88,7 @@ export const useMarketStore = create<MarketStore>((set) => ({
       priceHistory: [],
       alerts: [],
       simulationRunning: false,
+      simulationMode: 'SANDBOX',
     }),
 
   setSimulationRunning: (running: boolean) => set({ simulationRunning: running }),

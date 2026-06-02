@@ -170,11 +170,16 @@ def _record_warning_event(event: dict) -> None:
 async def set_simulation_mode(request: ModeRequest):
     if request.mode not in ["SANDBOX", "LIVE_SHADOW"]:
         raise HTTPException(status_code=400, detail="Invalid mode")
-    
+    if request.mode == "LIVE_SHADOW":
+        raise HTTPException(
+            status_code=400,
+            detail="Live-shadow mode requires launching a Groww or Upstox data source.",
+        )
+
     config.simulation_mode = request.mode
     if simulator:
         simulator.mode = request.mode
-        
+
     return {"status": "mode_updated", "mode": request.mode}
 
 
@@ -186,6 +191,7 @@ async def start_simulation():
         return {"status": "already_running", "step": simulator.step_count}
 
     _stop_abides()
+    config.simulation_mode = "SANDBOX"
 
     large_order_detector.reset()
     if rl_policy:
@@ -201,7 +207,7 @@ async def start_simulation():
         agents,
         initial_price=config.initial_price,
         duration_seconds=config.simulation_duration,
-        mode=config.simulation_mode,
+        mode="SANDBOX",
         scenario=scenario.name,
     )
 
@@ -230,6 +236,7 @@ async def stop_simulation():
 
     large_order_detector.reset()
     _warning_timeline = []
+    config.simulation_mode = "SANDBOX"
 
     return {"status": "stopped"}
 
@@ -336,6 +343,7 @@ async def create_sandbox(request: SandboxCreateRequest):
             _sim_task.cancel()
 
     _stop_abides()
+    config.simulation_mode = "SANDBOX"
 
     large_order_detector.reset()
     if rl_policy:
@@ -356,7 +364,7 @@ async def create_sandbox(request: SandboxCreateRequest):
 
     simulator = MarketSimulator(
         agents, initial_price=request.initial_price,
-        duration_seconds=config.simulation_duration, mode=config.simulation_mode,
+        duration_seconds=config.simulation_duration, mode="SANDBOX",
         oracle_config=oracle_cfg, latency_config=latency_cfg, speed_multiplier=request.speed,
         scenario=scenario.name,
     )
@@ -579,6 +587,7 @@ async def start_stock_replay(request: StockReplayRequest):
             _sim_task.cancel()
     _stop_abides()
     large_order_detector.reset()
+    config.simulation_mode = "SANDBOX"
 
     oracle_path = build_oracle_path(info, target_steps=500)
     initial_price = float(info.prices[0])
@@ -593,7 +602,7 @@ async def start_stock_replay(request: StockReplayRequest):
 
     simulator = MarketSimulator(
         agents, initial_price=initial_price, duration_seconds=config.simulation_duration,
-        mode=config.simulation_mode, oracle_config=oracle_cfg, latency_config=latency_cfg,
+        mode="SANDBOX", oracle_config=oracle_cfg, latency_config=latency_cfg,
         speed_multiplier=request.speed, scenario=scenario.name, depth_profile=depth_profile,
     )
     _sim_task = asyncio.create_task(_run_simulation_loop())
@@ -804,6 +813,7 @@ async def start_groww_live_shadow(request: GrowwLiveRequest):
         "poll_interval_seconds": poll_interval,
         "scenario": scenario.name,
         **asdict(initial_quote),
+        "depth_source": initial_quote.depth_source or "synthetic_fallback",
     }
 
     def _groww_live_quote_provider():
@@ -814,7 +824,7 @@ async def start_groww_live_shadow(request: GrowwLiveRequest):
         )
         return asdict(quote)
 
-    simulator.set_external_price_provider(_groww_live_quote_provider, poll_interval_steps=poll_interval)
+    simulator.set_external_price_provider(_groww_live_quote_provider, poll_interval_seconds=poll_interval)
     _sim_task = asyncio.create_task(_run_simulation_loop())
 
     return {
@@ -1055,13 +1065,14 @@ async def start_upstox_live_shadow(request: UpstoxLiveRequest):
         "poll_interval_seconds": poll_interval,
         "scenario": scenario.name,
         **asdict(initial_quote),
+        "depth_source": initial_quote.depth_source or "synthetic_fallback",
     }
 
     def _upstox_live_quote_provider():
         quote = fetch_upstox_full_quote(instrument_key=instrument_key)
         return asdict(quote)
 
-    simulator.set_external_price_provider(_upstox_live_quote_provider, poll_interval_steps=poll_interval)
+    simulator.set_external_price_provider(_upstox_live_quote_provider, poll_interval_seconds=poll_interval)
     _sim_task = asyncio.create_task(_run_simulation_loop())
 
     return {

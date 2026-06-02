@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Play, Search, SlidersHorizontal, Square } from 'lucide-react';
+import { Download, Play, Search, SlidersHorizontal, Square } from 'lucide-react';
 import {
   api,
   type LatencyMode,
@@ -740,6 +740,33 @@ export default function SandboxControlPanel() {
     }
   };
 
+  const exportRun = async () => {
+    setCommandState('loading');
+    setCommandMessage('Exporting run snapshot...');
+
+    try {
+      const snapshot = await api.exportSimulation();
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      anchor.href = url;
+      anchor.download = `sentinel-run-${timestamp}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      setCommandState('success');
+      setCommandMessage('Run snapshot exported.');
+    } catch (error) {
+      setCommandState('error');
+      setCommandMessage(error instanceof Error ? error.message : 'Export failed.');
+    }
+  };
+
   return (
     <div className="terminal-panel">
       <div className="panel-header">
@@ -1252,6 +1279,15 @@ export default function SandboxControlPanel() {
           >
             <SlidersHorizontal size={13} />
             APPLY SPEED
+          </button>
+          <button
+            type="button"
+            onClick={exportRun}
+            disabled={commandState === 'loading' || !simulationRunning || activeEngine === 'abides'}
+            className="inline-flex items-center gap-2 border border-[#ffb800] bg-[#ffb800]/10 px-3 py-1.5 text-xs font-bold tracking-[0.12em] text-[#ffb800] disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+          >
+            <Download size={13} />
+            EXPORT
           </button>
           <button
             type="button"

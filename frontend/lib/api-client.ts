@@ -151,7 +151,7 @@ class SentinelAPI {
     return this.request<{ status: string }>('/api/simulation/stop', { method: 'POST' });
   }
 
-  async setSimulationMode(mode: SimulationMode) {
+  async setSimulationMode(mode: 'SANDBOX') {
     return this.request<{ status: string; mode: string }>('/api/simulation/mode', {
       method: 'POST',
       body: JSON.stringify({ mode }),
@@ -403,6 +403,10 @@ class SentinelAPI {
 
   async getMarketSnapshot() {
     return this.request('/api/market/snapshot');
+  }
+
+  async exportSimulation() {
+    return this.request<Record<string, unknown>>('/api/simulation/export');
   }
 }
 

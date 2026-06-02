@@ -3,6 +3,7 @@
 from typing import Any, Callable, Dict, List, Optional
 import math
 import random
+import time
 from collections import deque
 
 from .kernel import EventKernel, EventType
@@ -63,8 +64,8 @@ class MarketSimulator:
         self.mode: str = mode
         self.data_source: Optional[Dict[str, Any]] = None
         self._external_price_provider: Optional[Callable[[], Any]] = None
-        self._external_price_poll_interval_steps: int = 1
-        self._external_price_last_poll_step: int = -1_000_000
+        self._external_price_poll_interval_seconds: float = 1.0
+        self._external_price_last_poll_monotonic: float = -math.inf
         self._external_order_book_levels: Optional[Dict[str, list]] = None
 
         self._price_history: deque[float] = deque(maxlen=1_000)
@@ -194,20 +195,24 @@ class MarketSimulator:
     def set_external_price_provider(
         self,
         provider: Callable[[], Any],
-        poll_interval_steps: int = 1,
+        poll_interval_seconds: float = 1.0,
+        *,
+        poll_interval_steps: Optional[int] = None,
     ) -> None:
         """Attach a read-only price source for LIVE_SHADOW mode."""
         self._external_price_provider = provider
-        self._external_price_poll_interval_steps = max(1, int(poll_interval_steps))
-        self._external_price_last_poll_step = -1_000_000
+        interval = poll_interval_seconds if poll_interval_steps is None else poll_interval_steps
+        self._external_price_poll_interval_seconds = max(1.0, float(interval))
+        self._external_price_last_poll_monotonic = -math.inf
 
     def _poll_external_price(self) -> bool:
         if self._external_price_provider is None:
             return False
-        if (self.step_count - self._external_price_last_poll_step) < self._external_price_poll_interval_steps:
+        now = time.monotonic()
+        if (now - self._external_price_last_poll_monotonic) < self._external_price_poll_interval_seconds:
             return False
 
-        self._external_price_last_poll_step = self.step_count
+        self._external_price_last_poll_monotonic = now
         self._external_order_book_levels = None
         try:
             quote = self._external_price_provider()

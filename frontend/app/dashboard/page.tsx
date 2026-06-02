@@ -444,32 +444,6 @@ export default function DashboardPage() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleStartStop = async () => {
-    try {
-      if (simulationRunning) {
-        await api.stopSimulation();
-        resetSimulationData();
-        setSimulationRunning(false);
-      } else {
-        resetSimulationData();
-        await api.startSimulation();
-        setSimulationRunning(true);
-      }
-    } catch (error) {
-      console.error('Simulation control error:', error);
-    }
-  };
-
-  const handleModeToggle = async () => {
-    const nextMode = simulationMode === 'SANDBOX' ? 'LIVE_SHADOW' : 'SANDBOX';
-    try {
-      await api.setSimulationMode(nextMode);
-      setSimulationMode(nextMode);
-    } catch (error) {
-      console.error('Failed to change mode:', error);
-    }
-  };
-
   const bids = marketData?.order_book?.bids ?? [];
   const asks = marketData?.order_book?.asks ?? [];
   const bidDepth = bids.reduce((sum, level) => sum + level.size, 0);
@@ -650,9 +624,8 @@ export default function DashboardPage() {
               <span className="text-gray-500">{connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
             </div>
 
-            <button
-              onClick={handleModeToggle}
-              className="border px-3 py-1 text-xs font-bold tracking-[0.12em] transition-colors"
+            <span
+              className="border px-3 py-1 text-xs font-bold tracking-[0.12em]"
               style={{
                 borderColor: simulationMode === 'SANDBOX' ? '#00ff41' : '#ffb800',
                 color: simulationMode === 'SANDBOX' ? '#00ff41' : '#ffb800',
@@ -663,11 +636,10 @@ export default function DashboardPage() {
               }}
             >
               {simulationMode === 'SANDBOX' ? 'MODE: SANDBOX' : 'MODE: LIVE SHADOW'}
-            </button>
+            </span>
 
-            <button
-              onClick={handleStartStop}
-              className="border px-3 py-1 text-xs font-bold tracking-[0.12em] transition-colors"
+            <span
+              className="border px-3 py-1 text-xs font-bold tracking-[0.12em]"
               style={{
                 borderColor: simulationRunning ? '#ff0040' : '#00ff41',
                 color: simulationRunning ? '#ff0040' : '#00ff41',
@@ -676,8 +648,8 @@ export default function DashboardPage() {
                   : 'rgba(0, 255, 65, 0.08)',
               }}
             >
-              {simulationRunning ? 'STOP SIM' : 'START SIM'}
-            </button>
+              {simulationRunning ? 'SIM RUNNING' : 'SIM IDLE'}
+            </span>
           </div>
         </div>
       </header>

@@ -4,12 +4,61 @@ import re
 
 ROOT = Path(__file__).resolve().parents[2]
 SANDBOX_PANEL = ROOT / "frontend" / "components" / "dashboard" / "SandboxControlPanel.tsx"
+DASHBOARD_PAGE = ROOT / "frontend" / "app" / "dashboard" / "page.tsx"
+API_CLIENT = ROOT / "frontend" / "lib" / "api-client.ts"
+MARKET_STORE = ROOT / "frontend" / "store" / "market-store.ts"
 
 
 def test_live_shadow_provider_launches_do_not_pre_switch_backend_mode():
     source = SANDBOX_PANEL.read_text(encoding="utf-8")
 
     assert "api.setSimulationMode('LIVE_SHADOW')" not in source
+
+
+def test_dashboard_header_mode_indicator_is_not_a_generic_live_shadow_toggle():
+    source = DASHBOARD_PAGE.read_text(encoding="utf-8")
+
+    assert "handleModeToggle" not in source
+    assert "api.setSimulationMode(nextMode)" not in source
+
+
+def test_frontend_exposes_simulation_export_endpoint():
+    source = API_CLIENT.read_text(encoding="utf-8")
+
+    assert "exportSimulation" in source
+    assert "/api/simulation/export" in source
+
+
+def test_api_client_cannot_request_generic_live_shadow_mode():
+    source = API_CLIENT.read_text(encoding="utf-8")
+
+    assert "async setSimulationMode(mode: 'SANDBOX')" in source
+    assert "async setSimulationMode(mode: SimulationMode)" not in source
+
+
+def test_dashboard_header_does_not_bypass_sandbox_control_panel():
+    source = DASHBOARD_PAGE.read_text(encoding="utf-8")
+
+    assert "handleStartStop" not in source
+    assert "api.startSimulation()" not in source
+    assert "api.stopSimulation()" not in source
+
+
+def test_reset_simulation_data_restores_sandbox_mode():
+    source = MARKET_STORE.read_text(encoding="utf-8")
+
+    reset_start = source.rindex("resetSimulationData:")
+    reset_end = source.index("setSimulationRunning:", reset_start)
+    reset_block = source[reset_start:reset_end]
+    assert "simulationMode: 'SANDBOX'" in reset_block
+
+
+def test_sandbox_panel_has_export_command_for_running_runs():
+    source = SANDBOX_PANEL.read_text(encoding="utf-8")
+
+    assert "exportSimulation" in source
+    assert "EXPORT" in source
+    assert "URL.createObjectURL" in source
 
 
 def test_failed_provider_launch_preserves_existing_running_state():
