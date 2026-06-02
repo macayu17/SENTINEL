@@ -7,6 +7,9 @@ SANDBOX_PANEL = ROOT / "frontend" / "components" / "dashboard" / "SandboxControl
 DASHBOARD_PAGE = ROOT / "frontend" / "app" / "dashboard" / "page.tsx"
 API_CLIENT = ROOT / "frontend" / "lib" / "api-client.ts"
 MARKET_STORE = ROOT / "frontend" / "store" / "market-store.ts"
+MARKET_TYPES = ROOT / "frontend" / "types" / "market.ts"
+WEBSOCKET = ROOT / "frontend" / "lib" / "websocket.ts"
+MOCK_SIMULATION = ROOT / "frontend" / "lib" / "mock-simulation.ts"
 
 
 def test_live_shadow_provider_launches_do_not_pre_switch_backend_mode():
@@ -114,3 +117,30 @@ def test_sandbox_panel_exposes_scenario_selection():
     assert "scenario" in source
     assert "SCENARIO" in source
     assert "spoofing_stress" in source
+
+
+def test_market_update_trace_fields_are_typed_and_normalized():
+    types_source = MARKET_TYPES.read_text(encoding="utf-8")
+    websocket_source = WEBSOCKET.read_text(encoding="utf-8")
+
+    assert "export interface MarketEvent" in types_source
+    assert "export interface MarketOrderFlow" in types_source
+    assert "export interface MarketRecentOrder" in types_source
+    assert "events?: MarketEvent[]" in types_source
+    assert "order_flow?: MarketOrderFlow" in types_source
+    assert "recent_orders?: MarketRecentOrder[]" in types_source
+    assert "events: data.events ?? []" in websocket_source
+    assert "order_flow: data.order_flow" in websocket_source
+    assert "recent_orders: data.recent_orders ?? []" in websocket_source
+
+
+def test_dashboard_trace_panels_prefer_backend_market_update_fields():
+    source = MOCK_SIMULATION.read_text(encoding="utf-8")
+
+    assert "mapBackendEvents" in source
+    assert "buildBackendAgentActivity" in source
+    assert "marketData.events" in source
+    assert "marketData.order_flow" in source
+    assert "marketData.recent_orders" in source
+    assert "setTradeFlow((prev) => mergeBackendTradeFlow" in source
+    assert "setEvents(mapBackendEvents(marketData.events))" in source

@@ -7,18 +7,22 @@ import {
   KernelEvent,
   Milestone,
   PriceSpreadPoint,
+  RecentOrder,
   SimulationDashboardData,
   TimeSeriesPoint,
   TradeFlowPoint,
 } from '@/types/dashboard';
+import {
+  MarketEvent,
+  MarketOrderFlow,
+  MarketRecentOrder,
+  MarketUpdate,
+  OrderBook,
+} from '@/types/market';
 import { useMarketStore } from '@/store/market-store';
 
 const MAX_POINTS = 60;
 const MAX_EVENTS = 14;
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 function timestampLabel(date: Date): string {
   return date.toLocaleTimeString('en-IN', {
@@ -29,92 +33,130 @@ function timestampLabel(date: Date): string {
   });
 }
 
+function simulationTimeLabel(timestamp: number | undefined): string {
+  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
+    return timestampLabel(new Date());
+  }
+
+  if (timestamp > 1_000_000_000) {
+    return timestampLabel(new Date(timestamp * 1000));
+  }
+
+  return `T+${timestamp.toFixed(2)}`;
+}
+
 function nextDepthHeat(midPrice: number): DepthHeatLevel[] {
-  return Array.from({ length: 12 }, (_, idx) => {
-    const level = idx + 1;
-    const distance = Math.abs(level - 6) + 1;
-    const base = 240 / distance;
-    const noise = (Math.random() - 0.5) * 20;
-    return {
-      level,
-      bidDepth: Math.max(20, base + noise + (midPrice % 2) * 6),
-      askDepth: Math.max(20, base - noise + ((100 - midPrice) % 2) * 6),
-    };
-  });
+  return Array.from({ length: 12 }, (_, idx) => ({
+    level: idx + 1,
+    bidDepth: Math.max(0, Math.round(midPrice ? 120 / (idx + 1) : 0)),
+    askDepth: Math.max(0, Math.round(midPrice ? 120 / (idx + 1) : 0)),
+  }));
 }
 
 function pushPoint<T>(series: T[], point: T): T[] {
   return [...series.slice(-(MAX_POINTS - 1)), point];
 }
 
-function nextEvent(step: number, spread: number, imbalance: number): KernelEvent {
-  const categories: KernelEvent['type'][] = [
-    'Kernel',
-    'Order Submission',
-    'Order Match',
-    'Fill',
-    'Cancellation',
-    'Latency',
-  ];
-  const type = categories[Math.floor(Math.random() * categories.length)];
-  const severity: KernelEvent['severity'] = spread > 0.12 || Math.abs(imbalance) > 0.4
-    ? 'warning'
-    : 'info';
+function buildDepthHeatmap(orderBook: OrderBook | undefined, fallbackPrice: number): DepthHeatLevel[] {
+  const bids = orderBook?.bids ?? [];
+  const asks = orderBook?.asks ?? [];
+  if (!bids.length && !asks.length) {
+    return nextDepthHeat(fallbackPrice);
+  }
 
-  const templates: Record<KernelEvent['type'], string[]> = {
-    Kernel: ['Kernel tick committed', 'Synchronized RL step acknowledged'],
-    'Order Submission': ['Market maker posted layered quotes', 'Noise agent submitted market order'],
-    'Order Match': ['Bid-ask crossed at top level', 'Matching engine resolved queued orders'],
-    Fill: ['Passive quote filled by aggressive order', 'Partial fill detected on sell ladder'],
-    Cancellation: ['Market maker cancelled stale quote', 'Order timeout triggered cancellation'],
-    Latency: ['Injected delayed event reached kernel', 'Latency queue released batched orders'],
-  };
+  return Array.from({ length: 12 }, (_, idx) => ({
+    level: idx + 1,
+    bidDepth: bids[idx]?.size ?? 0,
+    askDepth: asks[idx]?.size ?? 0,
+  }));
+}
 
-  const messageList = templates[type];
-  const message = messageList[Math.floor(Math.random() * messageList.length)];
+function computeOrderBookImbalance(orderBook: OrderBook | undefined): number {
+  const bidDepth = (orderBook?.bids ?? []).reduce((sum, level) => sum + level.size, 0);
+  const askDepth = (orderBook?.asks ?? []).reduce((sum, level) => sum + level.size, 0);
+  return (bidDepth - askDepth) / Math.max(1, bidDepth + askDepth);
+}
+
+function mapBackendEventType(type: string): KernelEvent['type'] {
+  if (type === 'order_submission') return 'Order Submission';
+  if (type === 'order_match') return 'Order Match';
+  if (type === 'fill') return 'Fill';
+  if (type === 'cancellation') return 'Cancellation';
+  if (type === 'latency') return 'Latency';
+  return 'Kernel';
+}
+
+function mapBackendEvents(backendEvents: MarketEvent[] | undefined): KernelEvent[] {
+  return (backendEvents ?? []).slice(0, MAX_EVENTS).map((event) => ({
+    id: event.id,
+    time: simulationTimeLabel(event.timestamp),
+    type: mapBackendEventType(event.type),
+    message: event.message,
+    severity: event.severity,
+  }));
+}
+
+function mapBackendOrderStatus(status: string): RecentOrder['status'] {
+  if (status === 'filled') return 'Filled';
+  if (status === 'cancelled') return 'Cancelled';
+  if (status === 'partial') return 'Partial Fill';
+  return 'Submitted';
+}
+
+function mapBackendRecentOrders(backendOrders: MarketRecentOrder[]): RecentOrder[] {
+  return backendOrders.slice(0, 8).map((order) => ({
+    id: order.id,
+    agent: order.agent_type ? `${order.agent_type} ${order.agent_id}` : order.agent_id,
+    side: order.side === 'SELL' ? 'SELL' : 'BUY',
+    price: Number(order.price.toFixed(3)),
+    quantity: order.quantity,
+    status: mapBackendOrderStatus(order.status),
+  }));
+}
+
+function buildBackendAgentActivity(marketData: MarketUpdate): AgentActivity {
+  const flow = marketData.order_flow;
+  const metrics = Object.values(marketData.agent_metrics ?? {});
+  const marketMakerCount = metrics.filter((metric) => /market/i.test(metric.agent_type)).length;
+  const noiseCount = metrics.filter((metric) => /noise/i.test(metric.agent_type)).length;
+  const rlCount = metrics.filter((metric) => /rl|policy/i.test(metric.agent_type)).length;
 
   return {
-    id: `ev-${Date.now()}-${step}`,
-    time: timestampLabel(new Date()),
-    type,
-    message,
-    severity,
+    marketMakerAction: marketMakerCount > 0
+      ? `Tracking ${marketMakerCount} market-maker agents against the live book.`
+      : 'No active market-maker agent trace in the latest packet.',
+    noiseAgentAction: flow
+      ? `Recent aggressor flow B ${flow.buy_volume} / S ${flow.sell_volume} across ${noiseCount} noise agents.`
+      : 'Awaiting order-flow counters from the exchange loop.',
+    rlAgentStatus: rlCount > 0
+      ? `Policy agent active across ${rlCount} trace streams.`
+      : 'No active RL policy agent in this run.',
+    recentOrders: mapBackendRecentOrders(marketData.recent_orders ?? []),
+    executionSummary: {
+      submitted: flow?.submitted ?? 0,
+      fills: flow?.fills ?? 0,
+      cancelled: flow?.cancelled ?? 0,
+      matchRate: Number((flow?.match_rate ?? 0).toFixed(1)),
+    },
   };
 }
 
-function nextAgentActivity(midPrice: number, step: number): AgentActivity {
-  const submitted = 850 + step * 3;
-  const fills = 590 + step * 2;
-  const cancelled = 170 + step;
+function mergeBackendTradeFlow(
+  previous: TradeFlowPoint[],
+  orderFlow: MarketOrderFlow | undefined,
+  step: number,
+  time: string,
+): TradeFlowPoint[] {
+  if (!orderFlow) {
+    return previous;
+  }
 
-  const orderStatuses: Array<'Submitted' | 'Filled' | 'Cancelled' | 'Partial Fill'> = [
-    'Submitted',
-    'Filled',
-    'Cancelled',
-    'Partial Fill',
-  ];
-
-  return {
-    marketMakerAction: 'Refreshing two-sided quotes around microprice',
-    noiseAgentAction: Math.random() > 0.5
-      ? 'Submitting opportunistic BUY market order'
-      : 'Submitting opportunistic SELL market order',
-    rlAgentStatus: step % 4 === 0 ? 'Policy update pending' : 'Acting with synchronized environment step',
-    recentOrders: Array.from({ length: 6 }, (_, idx) => ({
-      id: `O-${step}-${idx}`,
-      agent: idx % 3 === 0 ? 'RL Agent' : idx % 2 === 0 ? 'Noise Agent' : 'Market Maker',
-      side: idx % 2 === 0 ? 'BUY' : 'SELL',
-      price: Number((midPrice + (Math.random() - 0.5) * 0.18).toFixed(3)),
-      quantity: Math.floor(30 + Math.random() * 220),
-      status: orderStatuses[Math.floor(Math.random() * orderStatuses.length)],
-    })),
-    executionSummary: {
-      submitted,
-      fills,
-      cancelled,
-      matchRate: Number(((fills / submitted) * 100).toFixed(1)),
-    },
-  };
+  return pushPoint(previous, {
+    id: `tf-${step}-${orderFlow.submitted}-${orderFlow.fills}`,
+    time,
+    buyVolume: orderFlow.buy_volume,
+    sellVolume: orderFlow.sell_volume,
+  });
 }
 
 const defaultMilestones: Milestone[] = [
@@ -152,7 +194,6 @@ export function useSimulationDashboardData(): SimulationDashboardData {
 
   const seedPrice = marketData?.price ?? 100;
 
-  const [step, setStep] = useState(0);
   const [midPrice, setMidPrice] = useState(seedPrice);
   const [spread, setSpread] = useState(0);
   const [inventory, setInventory] = useState(0);
@@ -170,32 +211,26 @@ export function useSimulationDashboardData(): SimulationDashboardData {
   const [events, setEvents] = useState<KernelEvent[]>([]);
 
   useEffect(() => {
-    if (!feedActive) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setStep((prev) => prev + 1);
-      setMidPrice((prev) => clamp(prev + (Math.random() - 0.5) * 0.18, 96, 106));
-      setSpread((prev) => clamp(prev + (Math.random() - 0.5) * 0.015, 0.03, 0.16));
-      setInventory((prev) => clamp(prev + Math.floor((Math.random() - 0.5) * 12), -220, 220));
-      setRealizedPnl((prev) => Number((prev + (Math.random() - 0.4) * 12).toFixed(2)));
-      setUnrealizedPnl((prev) => Number((prev + (Math.random() - 0.45) * 10).toFixed(2)));
-      setReward((prev) => Number((prev + (Math.random() - 0.4) * 2.5).toFixed(3)));
-      setImbalance((prev) => clamp(prev + (Math.random() - 0.5) * 0.14, -0.85, 0.85));
-    }, 1200);
-
-    return () => clearInterval(interval);
-  }, [feedActive]);
-
-  useEffect(() => {
-    if (!feedActive) {
+    if (!feedActive || !marketData) {
       return;
     }
 
     const now = timestampLabel(new Date());
-    const observedPrice = marketData?.price ?? midPrice;
-    const observedSpread = marketData?.spread ?? spread;
+    const observedPrice = marketData.price;
+    const observedSpread = marketData.spread;
+    const agentMetrics = Object.values(marketData.agent_metrics ?? {});
+    const aggregateInventory = agentMetrics.reduce((sum, metric) => sum + metric.position, 0);
+    const aggregateRealized = agentMetrics.reduce((sum, metric) => sum + metric.realized_pnl, 0);
+    const aggregateUnrealized = agentMetrics.reduce((sum, metric) => sum + metric.unrealized_pnl, 0);
+    const aggregateReward = Number(((aggregateRealized + aggregateUnrealized) / 1000).toFixed(3));
+
+    setMidPrice(observedPrice);
+    setSpread(observedSpread);
+    setInventory(aggregateInventory);
+    setRealizedPnl(Number(aggregateRealized.toFixed(2)));
+    setUnrealizedPnl(Number(aggregateUnrealized.toFixed(2)));
+    setReward(aggregateReward);
+    setImbalance(Number(computeOrderBookImbalance(marketData.order_book).toFixed(3)));
 
     setPriceSeries((prev) => pushPoint(prev, {
       time: now,
@@ -210,31 +245,25 @@ export function useSimulationDashboardData(): SimulationDashboardData {
 
     setInventorySeries((prev) => pushPoint(prev, {
       time: now,
-      value: inventory,
+      value: aggregateInventory,
     }));
 
     setRewardSeries((prev) => pushPoint(prev, {
       time: now,
-      value: reward,
+      value: aggregateReward,
     }));
 
-    setTradeFlow((prev) => pushPoint(prev, {
-      id: `tf-${marketData?.step ?? step}-${prev.length}-${Date.now()}`,
-      time: now,
-      buyVolume: Math.floor(100 + Math.random() * 260),
-      sellVolume: Math.floor(80 + Math.random() * 240),
-    }));
+    setTradeFlow((prev) => mergeBackendTradeFlow(prev, marketData.order_flow, marketData.step, now));
 
-    setDepthHeatmap(nextDepthHeat(observedPrice));
-    setEvents((prev) => [nextEvent(step, observedSpread, imbalance), ...prev].slice(0, MAX_EVENTS));
-  }, [feedActive, step, midPrice, spread, inventory, reward, imbalance, marketData]);
+    setDepthHeatmap(buildDepthHeatmap(marketData.order_book, observedPrice));
+    setEvents(mapBackendEvents(marketData.events));
+  }, [feedActive, marketData]);
 
   useEffect(() => {
     if (feedActive) {
       return;
     }
 
-    setStep(0);
     setMidPrice(seedPrice);
     setSpread(0);
     setInventory(0);
@@ -252,8 +281,8 @@ export function useSimulationDashboardData(): SimulationDashboardData {
   }, [feedActive, seedPrice]);
 
   const agentActivity = useMemo(() => {
-    if (feedActive) {
-      return nextAgentActivity(midPrice, step);
+    if (feedActive && marketData) {
+      return buildBackendAgentActivity(marketData);
     }
 
     const statusMessage = !connected
@@ -276,7 +305,7 @@ export function useSimulationDashboardData(): SimulationDashboardData {
         matchRate: 0,
       },
     };
-  }, [connected, feedActive, midPrice, step]);
+  }, [connected, feedActive, marketData]);
 
   const bestBid = Number((midPrice - spread / 2).toFixed(3));
   const bestAsk = Number((midPrice + spread / 2).toFixed(3));

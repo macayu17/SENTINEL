@@ -27,6 +27,9 @@ function normalizeMarketUpdate(data: Partial<MarketUpdate>): MarketUpdate {
     mode: data.mode ?? 'SANDBOX',
     engine: data.engine,
     data_source: data.data_source ?? null,
+    events: data.events ?? [],
+    order_flow: data.order_flow,
+    recent_orders: data.recent_orders ?? [],
     oracle: data.oracle,
   };
 }

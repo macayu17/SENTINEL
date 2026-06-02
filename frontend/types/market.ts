@@ -76,6 +76,44 @@ export interface MarketDataSource {
   error?: string;
 }
 
+export interface MarketEvent {
+  id: string;
+  timestamp: number;
+  step: number;
+  type: "kernel" | "order_submission" | "order_match" | "fill" | "cancellation" | "latency" | string;
+  severity: "info" | "warning" | "critical";
+  message: string;
+  agent_id?: string;
+  agent_type?: string;
+  order_id?: string;
+  trade_id?: string;
+  side?: "BUY" | "SELL" | string;
+  price?: number;
+  quantity?: number;
+  status?: "submitted" | "filled" | "cancelled" | "partial" | string;
+}
+
+export interface MarketOrderFlow {
+  submitted: number;
+  fills: number;
+  cancelled: number;
+  match_rate: number;
+  buy_volume: number;
+  sell_volume: number;
+  submitted_notional?: number;
+}
+
+export interface MarketRecentOrder {
+  id: string;
+  agent_id: string;
+  agent_type: string;
+  side: "BUY" | "SELL" | string;
+  price: number;
+  quantity: number;
+  status: "submitted" | "filled" | "cancelled" | "partial" | string;
+  timestamp: number;
+}
+
 export interface MarketUpdate {
   type: "market_update" | "abides_update";
   timestamp: number;
@@ -91,6 +129,9 @@ export interface MarketUpdate {
   mode: "SANDBOX" | "LIVE_SHADOW";
   engine?: "ABIDES";
   data_source?: MarketDataSource | null;
+  events?: MarketEvent[];
+  order_flow?: MarketOrderFlow;
+  recent_orders?: MarketRecentOrder[];
   oracle?: {
     fundamental_value?: number;
     observed_value?: number;

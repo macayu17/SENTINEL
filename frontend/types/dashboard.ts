@@ -38,7 +38,7 @@ export interface DepthHeatLevel {
 
 export interface RecentOrder {
   id: string;
-  agent: 'Market Maker' | 'Noise Agent' | 'RL Agent';
+  agent: string;
   side: 'BUY' | 'SELL';
   price: number;
   quantity: number;

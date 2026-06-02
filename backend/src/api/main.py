@@ -116,11 +116,20 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health_check():
+    native_active = simulator is not None and simulator.running
+    abides_active = abides_simulator is not None and abides_simulator.running
+    active_engine = "ABIDES" if abides_active and not native_active else "SENTINEL"
     return {
         "status": "healthy",
-        "simulation_active": simulator is not None and simulator.running,
+        "simulation_active": native_active or abides_active,
         "connected_clients": manager.client_count,
         "mode": simulator.mode if simulator else config.simulation_mode,
+        "engine": active_engine,
+        "abides": {
+            "available": ABIDES_AVAILABLE,
+            "running": abides_active,
+            "step": abides_simulator.step_count if abides_simulator else 0,
+        },
         "rl_policy_ready": rl_policy.ready if rl_policy else False,
         "rl_policy_kind": rl_policy.loaded_policy_kind if rl_policy else None,
     }
@@ -287,8 +296,11 @@ async def get_market_snapshot():
 
 @app.get("/api/simulation/export")
 async def export_simulation_run():
-    active_simulator = _require_simulator()
-    return active_simulator.get_export_snapshot(_warning_timeline)
+    if simulator is not None:
+        return simulator.get_export_snapshot(_warning_timeline)
+    if abides_simulator is not None:
+        return abides_simulator.get_export_snapshot(_warning_timeline)
+    raise HTTPException(status_code=409, detail="No active simulation")
 
 
 # ── Sandbox Endpoints ──────────────────────────────────────────────────────
@@ -1135,6 +1147,9 @@ def _build_market_update(
         "volatility": state["volatility"],
         "mode": active_simulator.mode,
         "speed": getattr(active_simulator, "speed_multiplier", 1.0),
+        "events": active_simulator.get_recent_events(limit=20),
+        "order_flow": active_simulator.get_order_flow_summary(),
+        "recent_orders": active_simulator.get_recent_orders(limit=20),
     }
 
     if "oracle" in state:
@@ -1267,6 +1282,9 @@ async def _run_abides_loop():
                 "mode": "SANDBOX",
                 "engine": "ABIDES",
                 "speed": abides_simulator.speed_multiplier,
+                "events": abides_simulator.get_recent_events(limit=20),
+                "order_flow": abides_simulator.get_order_flow_summary(),
+                "recent_orders": abides_simulator.get_recent_orders(limit=20),
             }
 
             if state.get("oracle"):

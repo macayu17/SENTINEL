@@ -6,7 +6,17 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from backend.src.market import simulator as simulator_module
+from backend.src.agents.base_agent import BaseAgent
+from backend.src.market.order import Order, OrderSide, OrderType
 from backend.src.market.simulator import MarketSimulator
+
+
+class PassiveTestAgent(BaseAgent):
+    def __init__(self, agent_id: str = "TEST_AGENT"):
+        super().__init__(agent_id, "Test", latency_seconds=0.0)
+
+    def decide_action(self, market_state):
+        return []
 
 
 def test_live_shadow_external_price_provider_drives_price_and_book():
@@ -121,3 +131,59 @@ def test_live_shadow_external_provider_poll_interval_uses_wall_clock(monkeypatch
     assert calls == 1
     assert first["current_price"] == 102.0
     assert second["current_price"] == 102.0
+
+
+def test_live_shadow_agent_orders_shadow_fill_without_moving_provider_price():
+    agent = PassiveTestAgent()
+    simulator = MarketSimulator([agent], initial_price=100.0, mode="LIVE_SHADOW")
+    simulator.current_price = 101.25
+    simulator.order_book.replace_depth(
+        bids=[{"price": 101.2, "size": 100}],
+        asks=[{"price": 101.3, "size": 80}],
+    )
+
+    simulator._process_order(
+        Order(
+            agent_id=agent.agent_id,
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            price=101.25,
+            quantity=40,
+        )
+    )
+    simulator.kernel.run_until(simulator.current_time)
+
+    assert simulator.current_price == 101.25
+    assert len(simulator._all_trades) == 1
+    assert simulator._all_trades[0].price == 101.3
+    assert simulator._all_trades[0].quantity == 40
+    assert agent.position == 40
+    assert agent.num_trades == 1
+    assert simulator.get_market_state()["recent_signed_volume"] == 40
+
+    events = simulator.get_recent_events(limit=10)
+    assert any(event["type"] == "order_submission" for event in events)
+    assert any(event["type"] == "fill" for event in events)
+    assert simulator.get_order_flow_summary()["fills"] == 1
+
+
+def test_sandbox_signed_volume_uses_actual_fill_quantity():
+    simulator = MarketSimulator([], initial_price=100.0, mode="SANDBOX")
+    simulator.order_book.replace_depth(
+        bids=[{"price": 99.9, "size": 50}],
+        asks=[{"price": 100.1, "size": 30}],
+    )
+
+    simulator._process_order(
+        Order(
+            agent_id="TEST_AGENT",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            price=100.0,
+            quantity=100,
+        )
+    )
+
+    assert len(simulator._all_trades) == 1
+    assert simulator._all_trades[0].quantity == 30
+    assert simulator.get_market_state()["recent_signed_volume"] == 30

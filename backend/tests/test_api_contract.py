@@ -13,6 +13,7 @@ from backend.src.api import main as api_main
 from backend.src.data import groww_provider, upstox_provider
 from backend.src.data.groww_provider import GrowwQuote
 from backend.src.data.upstox_provider import UpstoxCredentialsError, UpstoxInstrument, UpstoxQuote
+from backend.src.market.order import Order, OrderSide, OrderType
 from backend.src.market.market_data import StockInfo
 
 
@@ -756,6 +757,85 @@ def test_live_shadow_market_update_preserves_contract_with_groww_metadata():
     assert update["price"] == sample.prices[0]
     assert update["data_source"]["provider"] == "groww"
     assert update["data_source"]["source"] == "historical_replay"
+
+
+def test_market_update_includes_real_trace_contract_fields():
+    active_sim = api_main.MarketSimulator([], initial_price=100.0, mode="SANDBOX")
+    active_sim.order_book.replace_depth(
+        bids=[{"price": 99.9, "size": 100}],
+        asks=[{"price": 100.1, "size": 100}],
+    )
+    active_sim._process_order(
+        Order(
+            agent_id="TRACE_AGENT",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            price=100.0,
+            quantity=25,
+        )
+    )
+
+    update = api_main._build_market_update(
+        state=active_sim.get_market_state(),
+        liquidity_prediction={"warning_level": "safe"},
+        large_order_detection=None,
+        agent_metrics={},
+        active_simulator=active_sim,
+    )
+
+    assert "events" in update
+    assert "order_flow" in update
+    assert "recent_orders" in update
+    assert any(event["type"] == "order_submission" for event in update["events"])
+    assert any(event["type"] == "fill" for event in update["events"])
+    assert update["order_flow"]["submitted"] == 1
+    assert update["order_flow"]["fills"] == 1
+    assert update["order_flow"]["buy_volume"] == 25
+    assert update["recent_orders"][0]["status"] == "filled"
+
+
+def test_health_reports_abides_as_active_engine_when_abides_running():
+    exchange = api_main.AbidesExchangeAgent(initial_price=100.0)
+    abides = api_main.AbidesSimulation()
+    abides.set_exchange(exchange)
+    abides.running = True
+    abides.step_count = 7
+    api_main.simulator = None
+    api_main.abides_simulator = abides
+
+    try:
+        payload = asyncio.run(api_main.health_check())
+
+        assert payload["simulation_active"] is True
+        assert payload["engine"] == "ABIDES"
+        assert payload["abides"]["running"] is True
+        assert payload["abides"]["step"] == 7
+    finally:
+        api_main.abides_simulator = None
+
+
+def test_export_returns_abides_snapshot_when_abides_is_active():
+    exchange = api_main.AbidesExchangeAgent(initial_price=100.0)
+    abides = api_main.AbidesSimulation(speed_multiplier=2.0)
+    abides.set_exchange(exchange)
+    abides.running = True
+    abides.step_count = 3
+    api_main.simulator = None
+    api_main.abides_simulator = abides
+    client = TestClient(api_main.app)
+
+    try:
+        response = client.get("/api/simulation/export")
+        payload = response.json()
+
+        assert response.status_code == 200
+        assert payload["run_config"]["engine"] == "ABIDES"
+        assert payload["run_config"]["speed"] == 2.0
+        assert "agent_metrics" in payload
+        assert "order_flow" in payload
+    finally:
+        abides.running = False
+        api_main.abides_simulator = None
 
 
 def test_simulation_export_returns_run_config_metrics_and_warning_timeline():

@@ -75,8 +75,12 @@ class MarketSimulator:
         self._submitted_order_count: int = 0
         self._cancel_request_count: int = 0
         self._accepted_cancel_count: int = 0
+        self._terminal_cancel_count: int = 0
         self._submitted_notional: float = 0.0
         self._slippage_bps_samples: List[float] = []
+        self._event_sequence: int = 0
+        self._event_log: deque[Dict[str, Any]] = deque(maxlen=500)
+        self._recent_orders: deque[Dict[str, Any]] = deque(maxlen=200)
         self.seed: Optional[int] = None
 
         self.reset()
@@ -113,8 +117,12 @@ class MarketSimulator:
         self._submitted_order_count = 0
         self._cancel_request_count = 0
         self._accepted_cancel_count = 0
+        self._terminal_cancel_count = 0
         self._submitted_notional = 0.0
         self._slippage_bps_samples.clear()
+        self._event_sequence = 0
+        self._event_log.clear()
+        self._recent_orders.clear()
 
         self._seed_order_book()
 
@@ -289,10 +297,79 @@ class MarketSimulator:
         self.order_book = next_book
         return True
 
+    def _agent_type_for(self, agent_id: str) -> str:
+        agent = self.get_agent(agent_id)
+        if agent is not None:
+            return agent.agent_type
+        if agent_id in {"SEED", "EXTERNAL_DEPTH"}:
+            return agent_id
+        return "External"
+
+    def _record_event(
+        self,
+        event_type: str,
+        message: str,
+        *,
+        severity: str = "info",
+        agent_id: Optional[str] = None,
+        order_id: Optional[str] = None,
+        trade_id: Optional[str] = None,
+        side: Optional[str] = None,
+        price: Optional[float] = None,
+        quantity: Optional[int] = None,
+        status: Optional[str] = None,
+    ) -> None:
+        self._event_sequence += 1
+        event: Dict[str, Any] = {
+            "id": f"ev-{self._event_sequence}",
+            "timestamp": round(float(self.current_time), 6),
+            "step": self.step_count,
+            "type": event_type,
+            "severity": severity,
+            "message": message,
+        }
+        optional_values = {
+            "agent_id": agent_id,
+            "agent_type": self._agent_type_for(agent_id) if agent_id else None,
+            "order_id": order_id,
+            "trade_id": trade_id,
+            "side": side,
+            "price": round(float(price), 6) if price is not None else None,
+            "quantity": int(quantity) if quantity is not None else None,
+            "status": status,
+        }
+        for key, value in optional_values.items():
+            if value is not None:
+                event[key] = value
+        self._event_log.append(event)
+
+    @staticmethod
+    def _order_trace_status(order: Order, fallback: str = "submitted") -> str:
+        if order.is_filled:
+            return "filled"
+        if order.filled_quantity > 0:
+            return "partial"
+        if order.status == OrderStatus.CANCELLED:
+            return "cancelled"
+        return fallback
+
+    def _record_recent_order(self, order: Order, *, status: Optional[str] = None) -> None:
+        trace_status = status or self._order_trace_status(order)
+        self._recent_orders.append(
+            {
+                "id": order.order_id,
+                "agent_id": order.agent_id,
+                "agent_type": self._agent_type_for(order.agent_id),
+                "side": order.side.value.upper(),
+                "price": round(float(order.price), 6),
+                "quantity": int(order.filled_quantity or order.quantity),
+                "status": trace_status,
+                "timestamp": round(float(self.current_time), 6),
+            }
+        )
+
     def _process_order(self, order: Order) -> None:
         """Exchange receives and processes an order."""
-        if self.mode != "SANDBOX":
-            return
         if order.quantity <= 0:
             logger.warning(f"Rejected non-positive order quantity from {order.agent_id}: {order.quantity}")
             return
@@ -302,13 +379,31 @@ class MarketSimulator:
 
         self._submitted_order_count += 1
         self._submitted_notional += abs(order.price * order.quantity)
+        self._record_recent_order(order, status="submitted")
+        self._record_event(
+            "order_submission",
+            f"{order.agent_id} submitted {order.side.value.upper()} {order.order_type.value} order",
+            agent_id=order.agent_id,
+            order_id=order.order_id,
+            side=order.side.value.upper(),
+            price=order.price,
+            quantity=order.quantity,
+            status="submitted",
+        )
         reference_mid = self.order_book.mid_price or self.current_price or self.initial_price
-        trades = self.order_book.add_order(order)
+        book_for_matching = self.order_book
+        if self.mode != "SANDBOX":
+            depth = self.order_book.get_depth(levels=20)
+            book_for_matching = OrderBook()
+            book_for_matching.replace_depth(depth.get("bids", []), depth.get("asks", []))
+
+        trades = book_for_matching.add_order(order)
         self._all_trades.extend(trades)
 
         owner = next((agent for agent in self.agents if agent.agent_id == order.agent_id), None)
         if (
-            owner is not None
+            self.mode == "SANDBOX"
+            and owner is not None
             and order.order_type == OrderType.LIMIT
             and order.remaining_quantity > 0
         ):
@@ -319,17 +414,45 @@ class MarketSimulator:
                 self._cancel_order,
                 order.order_id,
             )
-
-        signed_qty = order.quantity if order.side == OrderSide.BUY else -order.quantity
+        elif (
+            self.mode != "SANDBOX"
+            and order.order_type == OrderType.LIMIT
+            and order.remaining_quantity > 0
+        ):
+            order.status = OrderStatus.CANCELLED
 
         for trade in trades:
-            self.current_price = trade.price
-            self._price_history.append(self.current_price)
+            if self.mode == "SANDBOX":
+                self.current_price = trade.price
+                self._price_history.append(self.current_price)
+            signed_qty = trade.quantity if order.side == OrderSide.BUY else -trade.quantity
             self._recent_volume_history.append((self.current_time, signed_qty))
             if reference_mid and reference_mid > 0:
                 self._slippage_bps_samples.append(
                     abs(trade.price - reference_mid) / reference_mid * 10_000
                 )
+            self._record_event(
+                "order_match",
+                f"Matched {trade.quantity} @ {trade.price:.2f}",
+                agent_id=order.agent_id,
+                order_id=order.order_id,
+                trade_id=trade.trade_id,
+                side=order.side.value.upper(),
+                price=trade.price,
+                quantity=trade.quantity,
+                status=self._order_trace_status(order),
+            )
+            self._record_event(
+                "fill",
+                f"{order.agent_id} filled {trade.quantity} @ {trade.price:.2f}",
+                agent_id=order.agent_id,
+                order_id=order.order_id,
+                trade_id=trade.trade_id,
+                side=order.side.value.upper(),
+                price=trade.price,
+                quantity=trade.quantity,
+                status=self._order_trace_status(order),
+            )
 
             for agent in self.agents:
                 if agent.agent_id in (trade.buyer_agent_id, trade.seller_agent_id):
@@ -339,6 +462,22 @@ class MarketSimulator:
                         agent.update_position,
                         trade,
                     )
+
+        if trades:
+            self._record_recent_order(order, status=self._order_trace_status(order))
+        elif order.status == OrderStatus.CANCELLED:
+            self._terminal_cancel_count += 1
+            self._record_recent_order(order, status="cancelled")
+            self._record_event(
+                "cancellation",
+                f"{order.agent_id} order cancelled with no executable liquidity",
+                agent_id=order.agent_id,
+                order_id=order.order_id,
+                side=order.side.value.upper(),
+                price=order.price,
+                quantity=order.quantity,
+                status="cancelled",
+            )
 
         self._prune_inactive_orders()
 
@@ -350,6 +489,12 @@ class MarketSimulator:
             agent.active_orders.pop(order_id, None)
         if cancelled:
             self._accepted_cancel_count += 1
+            self._record_event(
+                "cancellation",
+                f"Cancelled stale order {order_id}",
+                order_id=order_id,
+                status="cancelled",
+            )
             logger.debug(f"Cancelled stale order {order_id}")
         return cancelled
 
@@ -537,6 +682,39 @@ class MarketSimulator:
             "agent_metrics": agent_metrics,
         }
 
+    def get_recent_events(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return recent exchange events newest first."""
+        return list(reversed(list(self._event_log)))[0:max(0, limit)]
+
+    def get_recent_orders(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Return recent order status snapshots newest first."""
+        return list(reversed(list(self._recent_orders)))[0:max(0, limit)]
+
+    def get_order_flow_summary(self, window_seconds: float = 10.0) -> Dict[str, Any]:
+        """Summarize recent aggressor flow and run-level execution counters."""
+        buy_volume = 0
+        sell_volume = 0
+        for timestamp, signed_qty in self._recent_volume_history:
+            if (self.current_time - timestamp) > window_seconds:
+                continue
+            if signed_qty >= 0:
+                buy_volume += int(signed_qty)
+            else:
+                sell_volume += abs(int(signed_qty))
+
+        fills = len(self._all_trades)
+        cancelled = self._accepted_cancel_count + self._terminal_cancel_count
+        match_rate = (fills / self._submitted_order_count) * 100 if self._submitted_order_count else 0.0
+        return {
+            "submitted": self._submitted_order_count,
+            "fills": fills,
+            "cancelled": cancelled,
+            "match_rate": round(match_rate, 2),
+            "buy_volume": buy_volume,
+            "sell_volume": sell_volume,
+            "submitted_notional": round(self._submitted_notional, 4),
+        }
+
     def get_export_snapshot(self, warning_timeline: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Return a serializable research snapshot for validation and demos."""
         price_path = [
@@ -574,6 +752,8 @@ class MarketSimulator:
                 "submitted_orders": self._submitted_order_count,
                 "cancel_requests": self._cancel_request_count,
                 "accepted_cancels": self._accepted_cancel_count,
+                "terminal_cancels": self._terminal_cancel_count,
+                "summary": self.get_order_flow_summary(window_seconds=self.duration_seconds),
                 "trades": [
                     {
                         "price": trade.price,
@@ -584,6 +764,8 @@ class MarketSimulator:
                     for trade in self._all_trades
                 ],
             },
+            "events": self.get_recent_events(limit=500),
+            "recent_orders": self.get_recent_orders(limit=200),
             "agent_metrics": {
                 agent.agent_id: agent.get_metrics(self.current_price)
                 for agent in self.agents
