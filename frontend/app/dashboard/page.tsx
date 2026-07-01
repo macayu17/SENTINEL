@@ -622,6 +622,7 @@ export default function DashboardPage() {
   const setSimulationRunning = useMarketStore((state) => state.setSimulationRunning);
   const simulationMode = useMarketStore((state) => state.simulationMode);
   const setSimulationMode = useMarketStore((state) => state.setSimulationMode);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
   useEffect(() => {
     let cancelled = false;
@@ -648,6 +649,18 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [resetSimulationData, setSimulationMode, setSimulationRunning]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('sentinel-theme');
+    if (saved === 'light' || saved === 'dark') {
+      setTheme(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('theme-light', theme === 'light');
+    window.localStorage.setItem('sentinel-theme', theme);
+  }, [theme]);
 
   const marketSnapshot = useMemo(() => buildMarketSnapshot(marketData), [marketData]);
   const dataSource = marketData?.data_source ?? null;
@@ -724,6 +737,14 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setTheme((value) => (value === 'light' ? 'dark' : 'light'))}
+              className="border border-gray-800 bg-black px-3 py-1 text-[10px] font-bold tracking-[0.14em] text-gray-400 transition-colors hover:text-gray-200"
+            >
+              {theme === 'light' ? 'DARK' : 'LIGHT'}
+            </button>
+
             <div className="flex items-center gap-1.5 text-xs">
               <span className={connected ? 'blink text-[#00ff41]' : 'text-[#ff0040]'}>●</span>
               <span className="text-gray-500">{connected ? 'CONNECTED' : 'DISCONNECTED'}</span>

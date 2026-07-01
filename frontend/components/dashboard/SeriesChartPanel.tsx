@@ -52,10 +52,10 @@ export default function SeriesChartPanel({
             <Tooltip
               cursor={{ stroke: 'rgba(138, 151, 168, 0.35)' }}
               contentStyle={{
-                backgroundColor: '#131a24',
-                border: '1px solid #273347',
+                backgroundColor: 'var(--bg-panel)',
+                border: '1px solid var(--border-primary)',
                 borderRadius: '10px',
-                color: '#dbe3ee',
+                color: 'var(--text-strong)',
               }}
               formatter={(value: number) => valueFormatter(value)}
             />

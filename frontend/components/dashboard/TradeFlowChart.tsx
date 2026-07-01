@@ -25,10 +25,10 @@ export default function TradeFlowChart({ data }: TradeFlowChartProps) {
             <YAxis tick={{ fill: '#8a97a8', fontSize: 11 }} axisLine={false} tickLine={false} />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#131a24',
-                border: '1px solid #273347',
+                backgroundColor: 'var(--bg-panel)',
+                border: '1px solid var(--border-primary)',
                 borderRadius: '10px',
-                color: '#dbe3ee',
+                color: 'var(--text-strong)',
               }}
             />
             <Bar dataKey="buyVolume" fill="#63d4a4" radius={[4, 4, 0, 0]} name="Buy Volume" />
