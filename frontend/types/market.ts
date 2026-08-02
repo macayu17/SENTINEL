@@ -1,5 +1,7 @@
 // ── SENTINEL Market Types ──────────────────────────────────────────────────
 
+export type SimulationMode = 'SANDBOX' | 'LIVE_SHADOW';
+
 export interface OrderLevel {
   price: number;
   size: number;
@@ -128,6 +130,7 @@ export interface MarketScenario {
 
 export interface MarketUpdate {
   type: "market_update";
+  mode?: SimulationMode;
   market?: string;
   venue?: string;
   timestamp: number;
