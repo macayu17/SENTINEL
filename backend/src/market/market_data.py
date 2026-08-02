@@ -25,6 +25,68 @@ class StockInfo:
     mean_return: float
 
 
+def fetch_stock(ticker: str, period: str = "1mo", interval: str = "1d") -> StockInfo:
+    """Download OHLCV data only when the legacy replay endpoint requests it."""
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise RuntimeError("yfinance is not installed. Run: pip install yfinance") from exc
+
+    tkr = yf.Ticker(ticker)
+    hist = tkr.history(period=period, interval=interval, auto_adjust=True)
+    if hist.empty:
+        raise ValueError(f"No data returned for ticker '{ticker}'.")
+
+    closes = hist["Close"].dropna().tolist()
+    volumes = hist["Volume"].dropna().tolist()
+    highs = hist["High"].dropna().tolist()
+    lows = hist["Low"].dropna().tolist()
+    n = min(len(closes), len(volumes), len(highs), len(lows))
+    if n < 2:
+        raise ValueError(f"Not enough data for '{ticker}' ({n} bars).")
+
+    closes, volumes, highs, lows = closes[:n], volumes[:n], highs[:n], lows[:n]
+    log_returns = [
+        float(np.log(closes[i] / closes[i - 1]))
+        for i in range(1, n)
+        if closes[i] > 0 and closes[i - 1] > 0
+    ]
+    bars_per_year = {
+        "1m": 252 * 390,
+        "5m": 252 * 78,
+        "15m": 252 * 26,
+        "1h": 252 * 6.5,
+        "1d": 252,
+        "1wk": 52,
+    }.get(interval, 252)
+    std = float(np.std(log_returns)) if log_returns else 0.01
+
+    try:
+        info = tkr.fast_info
+        name = getattr(info, "long_name", None) or ticker
+        currency = getattr(info, "currency", "USD") or "USD"
+    except Exception:
+        name, currency = ticker, "USD"
+
+    index = hist.index
+    return StockInfo(
+        ticker=ticker.upper(),
+        name=str(name),
+        currency=str(currency),
+        last_close=float(closes[-1]),
+        period_start=str(index[0].date()) if hasattr(index[0], "date") else str(index[0])[:10],
+        period_end=str(index[-1].date()) if hasattr(index[-1], "date") else str(index[-1])[:10],
+        bars=n,
+        prices=closes,
+        volumes=volumes,
+        highs=highs,
+        lows=lows,
+        returns=log_returns,
+        realized_vol=round(std * float(np.sqrt(bars_per_year)), 4),
+        mean_return=round(float(np.mean(log_returns)) if log_returns else 0.0, 6),
+    )
+
+
 def bar_return_price_sigma(info: StockInfo, reference_price: float) -> float:
     """Convert per-bar log-return volatility into absolute price noise."""
     price = max(0.01, float(reference_price))
@@ -65,3 +127,19 @@ def build_oracle_path(info: StockInfo, target_steps: int = 500) -> List[float]:
         nxt = max(0.01, prev + kappa * (r_bar - prev) + sigma * rng.randn())
         extended.append(float(nxt))
     return extended[:target_steps]
+
+
+POPULAR_TICKERS = [
+    {"ticker": "AAPL", "name": "Apple Inc."},
+    {"ticker": "TSLA", "name": "Tesla Inc."},
+    {"ticker": "MSFT", "name": "Microsoft Corp."},
+    {"ticker": "GOOGL", "name": "Alphabet Inc."},
+    {"ticker": "AMZN", "name": "Amazon.com Inc."},
+    {"ticker": "NVDA", "name": "NVIDIA Corp."},
+    {"ticker": "META", "name": "Meta Platforms"},
+    {"ticker": "NFLX", "name": "Netflix Inc."},
+    {"ticker": "SPY", "name": "S&P 500 ETF"},
+    {"ticker": "BTC-USD", "name": "Bitcoin / USD"},
+    {"ticker": "^NSEI", "name": "NIFTY 50 (India)"},
+    {"ticker": "^BSESN", "name": "SENSEX (India)"},
+]
