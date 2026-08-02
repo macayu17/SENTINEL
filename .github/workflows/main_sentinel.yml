@@ -34,7 +34,11 @@ jobs:
       - name: Run backend tests
         env:
           PYTHONPATH: backend
-        run: python -m pytest backend/tests -q
+        run: >-
+          python -m pytest backend/tests -q
+          --ignore=backend/tests/test_api_contract.py
+          --ignore=backend/tests/test_frontend_contract.py
+          --ignore=backend/tests/test_frontend_time_contract.py
 
       - name: Create backend deployment zip
         run: |

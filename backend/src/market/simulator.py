@@ -43,6 +43,7 @@ class MarketSimulator:
         agents: List[BaseAgent],
         initial_price: float = 100.0,
         duration_seconds: int = 23_400,
+        mode: str = "SANDBOX",
         order_ttl_seconds: Optional[float] = None,
         oracle_config: Optional[OracleConfig] = None,
         latency_config: Optional[LatencyConfig] = None,
@@ -60,6 +61,7 @@ class MarketSimulator:
         self.kernel = EventKernel()
         self.initial_price = initial_price
         self.duration_seconds = duration_seconds
+        self.mode = mode
         self.speed_multiplier = speed_multiplier
         self.venue = venue
         self.scenario = scenario if isinstance(scenario, ScenarioConfig) else get_scenario_config(scenario)
