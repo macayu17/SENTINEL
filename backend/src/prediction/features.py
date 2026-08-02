@@ -56,7 +56,7 @@ class FeatureExtractor:
                 continue
             mm_count += 1
             mm_inventory_stress += abs(agent_info.get("inventory_ratio", 0.0))
-            if abs(agent_info.get("position", 0)) < 4500:
+            if abs(agent_info.get("inventory_ratio", 0.0)) < 0.9:
                 active_mm_count += 1
 
         if mm_count:
@@ -68,5 +68,7 @@ class FeatureExtractor:
             "volatility_ratio": round(volatility_ratio, 6),
             "mm_inventory_stress": round(mm_inventory_stress, 6),
             "active_mm_count": active_mm_count,
+            "market_maker_count": mm_count,
+            "active_mm_ratio": round(active_mm_count / mm_count, 6) if mm_count else 1.0,
             "time_to_close": time_to_close,
         }

@@ -1,4 +1,4 @@
-"""Mean-Reverting Fundamental Value Oracle (ABIDES-inspired).
+"""Mean-reverting fundamental value oracle.
 
 Generates a "true" hidden price via an Ornstein-Uhlenbeck process.
 Informed agents can observe a noisy version; the gap between market
@@ -104,7 +104,12 @@ class MeanRevertingOracle:
     def get_mispricing(self, market_price: float) -> Dict:
         diff = market_price - self._current_value
         pct = (diff / self._current_value * 100) if self._current_value > 0 else 0.0
-        return {"fundamental_value": self._current_value, "mispricing": diff, "mispricing_pct": pct}
+        return {
+            "fundamental_value": self._current_value,
+            "mispricing": diff,
+            "mispricing_pct": pct,
+            "observation_noise": self.config.observation_noise,
+        }
 
     def describe(self) -> Dict:
         return {

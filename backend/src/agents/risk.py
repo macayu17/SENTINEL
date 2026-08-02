@@ -191,3 +191,91 @@ def near_touch_price(mid: float, side: OrderSide, spread: float, *, ticks: int =
     half = max(tick, float(spread or tick) / 2)
     offset = half + max(0, ticks - 1) * tick
     return round(mid - offset if side == OrderSide.BUY else mid + offset, 2)
+
+
+# ── Central rule gate ────────────────────────────────────────────────────
+# Applied by the simulator to EVERY sim-mode agent order, regardless of how
+# the agent built it (risk_limited_order, raw Order, RL policy, ...).
+MAX_LEVERAGE = 2.0           # gross exposure ≤ 2× initial capital
+MAX_DRAWDOWN_PCT = 0.25      # total PnL ≤ -25% of capital → reduce-only
+PRICE_COLLAR_PCT = 0.05      # limit prices > 5% from mid are fat-fingers
+CLOSE_PHASE_SIZE_FACTOR = 0.5  # de-risk: halve opening size in CLOSE phase
+
+
+def enforce_trading_rules(
+    agent,
+    orders: list[Order],
+    market_state: Mapping,
+) -> tuple[list[Order], list[tuple[Order, str]]]:
+    """Uniform per-agent trading rules for sim mode.
+
+    Rules, in order per order:
+      1. price collar — reject limit prices > PRICE_COLLAR_PCT from mid
+      2. drawdown kill switch — latches agent.risk_halted; halted agents
+         may only reduce their position
+      3. CLOSE session phase — opening size is halved (uses session_phase)
+      4. leverage cap — worst-case same-side exposure (position + resting
+         + this batch) must stay within MAX_LEVERAGE × initial capital
+
+    Orders are clipped when possible and rejected otherwise. Returns
+    (accepted_orders, [(rejected_order, reason), ...]).
+    """
+    if not orders:
+        return [], []
+    try:
+        mid = float(market_state.get("mid_price") or market_state.get("current_price") or 0.0)
+    except (TypeError, ValueError):
+        mid = 0.0
+    if not math.isfinite(mid) or mid <= 0:
+        return list(orders), []
+
+    total_pnl = agent.realized_pnl + agent.get_unrealized_pnl(mid)
+    if math.isfinite(total_pnl) and total_pnl <= -MAX_DRAWDOWN_PCT * agent.initial_capital:
+        agent.risk_halted = True  # latches until reset()
+
+    phase = market_state.get("session_phase")
+    is_close = phase == "CLOSE"
+    is_squareoff = phase == "SQUAREOFF"
+    max_exposure = (MAX_LEVERAGE * agent.initial_capital) / mid
+    collar = PRICE_COLLAR_PCT * mid
+
+    accepted: list[Order] = []
+    rejected: list[tuple[Order, str]] = []
+    projected = agent.position  # folds in orders accepted earlier in this batch
+
+    for order in orders:
+        if order.order_type == OrderType.LIMIT and (
+            not math.isfinite(order.price) or abs(order.price - mid) > collar
+        ):
+            rejected.append((order, "price_collar"))
+            continue
+
+        sign = 1 if order.side == OrderSide.BUY else -1
+        quantity = max(0, int(order.quantity))
+        # Split into the part that shrinks |position| and the part that opens new risk.
+        reduce_part = min(quantity, max(0, -projected * sign))
+        open_part = quantity - reduce_part
+        blocked_reason = "leverage_cap"
+
+        if open_part > 0:
+            if agent.risk_halted or is_squareoff:
+                # Reduce-only: halted books and the square-off window may not open risk.
+                blocked_reason = "risk_halted" if agent.risk_halted else "squareoff"
+                open_part = 0
+            else:
+                if is_close:
+                    open_part = max(1, int(open_part * CLOSE_PHASE_SIZE_FACTOR))
+                pending = active_exposure_for_side(agent.active_orders, order.side)
+                headroom = int(max_exposure - max(0, projected * sign) - pending)
+                open_part = min(open_part, max(0, headroom))
+
+        quantity = reduce_part + open_part
+        if quantity < 1:
+            rejected.append((order, blocked_reason))
+            continue
+
+        order.quantity = quantity
+        accepted.append(order)
+        projected += sign * quantity
+
+    return accepted, rejected

@@ -10,15 +10,12 @@ interface Wave {
 }
 
 export default function ThemeToggle({ className = '' }: { className?: string }) {
-  const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [wave, setWave] = useState<Wave | null>(null);
-
-  useEffect(() => {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window === 'undefined') return 'dark';
     const saved = window.localStorage.getItem('sentinel-theme');
-    if (saved === 'light' || saved === 'dark') {
-      setTheme(saved);
-    }
-  }, []);
+    return saved === 'dark' || saved === 'light' ? saved : 'dark';
+  });
+  const [wave, setWave] = useState<Wave | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', theme === 'light');

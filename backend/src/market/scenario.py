@@ -18,6 +18,7 @@ class ScenarioConfig:
     order_ttl_seconds: float = 20.0
     volatility_multiplier: float = 1.0
     enable_spoofing: bool = False
+    enable_opening_auction: bool = False
     institutional_multiplier: float = 1.0
 
     def to_dict(self) -> dict:
@@ -33,27 +34,23 @@ SCENARIOS: dict[str, ScenarioConfig] = {
     "market_open": ScenarioConfig(
         name="market_open",
         label="Market Open",
-        description="Wide opening spread, higher displayed depth churn, and shorter order TTL.",
+        description="Pre-open order accumulation, a uniform-price uncrossing, then a wide, fast open.",
         seed_depth_multiplier=1.35,
         liquidity_floor_multiplier=1.25,
         spread_multiplier=2.5,
         order_ttl_seconds=8.0,
         volatility_multiplier=1.4,
+        enable_opening_auction=True,
     ),
     "liquidity_shock": ScenarioConfig(
         name="liquidity_shock",
         label="Liquidity Shock",
-        description="Thin book regime for stress-testing liquidity warnings.",
-        seed_depth_multiplier=0.28,
-        liquidity_floor_multiplier=0.35,
-        spread_multiplier=4.0,
-        order_ttl_seconds=5.0,
-        volatility_multiplier=2.2,
+        description="Normal book followed by quote withdrawal, aggressive flow, and measured recovery.",
     ),
     "institutional_execution": ScenarioConfig(
         name="institutional_execution",
         label="Institutional Execution",
-        description="Elevated parent-order activity for TWAP/VWAP/POV warning tests.",
+        description="Elevated institutional parent-order activity and child-order flow.",
         seed_depth_multiplier=1.15,
         liquidity_floor_multiplier=1.0,
         spread_multiplier=1.25,
@@ -74,7 +71,7 @@ SCENARIOS: dict[str, ScenarioConfig] = {
     "spoofing_stress": ScenarioConfig(
         name="spoofing_stress",
         label="Spoofing Stress",
-        description="Adversarial stress run with spoofing agents enabled for detector evaluation.",
+        description="Adversarial stress run with quote-layering agents enabled.",
         seed_depth_multiplier=0.9,
         liquidity_floor_multiplier=0.8,
         spread_multiplier=1.75,
@@ -85,7 +82,7 @@ SCENARIOS: dict[str, ScenarioConfig] = {
     "close_auction": ScenarioConfig(
         name="close_auction",
         label="Close / Auction",
-        description="Closing-style liquidity concentration and inventory flattening pressure.",
+        description="Higher displayed depth and institutional activity near a synthetic close.",
         seed_depth_multiplier=1.8,
         liquidity_floor_multiplier=1.6,
         spread_multiplier=1.6,
@@ -121,9 +118,5 @@ def apply_scenario_agent_counts(
             1,
             int(round(adjusted.get("Institutional", 0) * config.institutional_multiplier)),
         )
-
-    if config.name == "liquidity_shock":
-        adjusted["MarketMaker"] = max(1, int(round(adjusted.get("MarketMaker", 0) * 0.5)))
-        adjusted["Noise"] = max(1, int(round(adjusted.get("Noise", 0) * 1.4)))
 
     return adjusted

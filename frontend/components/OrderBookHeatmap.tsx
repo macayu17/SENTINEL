@@ -2,30 +2,10 @@
 
 import React from 'react';
 import { useMarketStore } from '@/store/market-store';
-import { OrderLevel } from '@/types/market';
 
-function buildFallbackSide(
-  side: 'bid' | 'ask',
-  midPrice: number,
-  spread: number,
-  totalDepth: number,
-): OrderLevel[] {
-  const safeSpread = spread > 0 ? spread : 0.04;
-  const halfSpread = safeSpread / 2;
-  const baseSize = Math.max(20, Math.round(totalDepth / 12) || 60);
-
-  return Array.from({ length: 8 }, (_, index) => {
-    const offset = halfSpread + index * 0.02;
-    const price =
-      side === 'bid'
-        ? Number((midPrice - offset).toFixed(2))
-        : Number((midPrice + offset).toFixed(2));
-    const taper = Math.max(0.45, 1 - index * 0.08);
-    return {
-      price,
-      size: Math.max(10, Math.round(baseSize * taper)),
-    };
-  });
+function formatPrice(value: number, symbol = '$'): string {
+  if (!Number.isFinite(value)) return `${symbol}--`;
+  return `${symbol}${value.toFixed(2)}`;
 }
 
 export default function OrderBookHeatmap() {
@@ -33,16 +13,10 @@ export default function OrderBookHeatmap() {
   const orderBook = marketData?.order_book;
 
   const midPrice = marketData?.price ?? 100;
-  const spread = marketData?.spread ?? 0.04;
-  const totalDepth = marketData?.depth ?? 800;
-  const useFallback = !orderBook || orderBook.bids.length === 0 || orderBook.asks.length === 0;
-
-  const bids = useFallback
-    ? buildFallbackSide('bid', midPrice, spread, totalDepth)
-    : orderBook.bids;
-  const asks = useFallback
-    ? buildFallbackSide('ask', midPrice, spread, totalDepth)
-    : orderBook.asks;
+  const bids = orderBook?.bids ?? [];
+  const asks = orderBook?.asks ?? [];
+  const hasBook = bids.length > 0 || asks.length > 0;
+  const currencySymbol = marketData?.market === 'NASDAQ' ? '$' : '₹';
 
   // Find max size for scaling
   const allSizes = [...bids, ...asks].map((l) => l.size);
@@ -53,18 +27,17 @@ export default function OrderBookHeatmap() {
       <div className="panel-header">
         <div className="flex items-center gap-3">
           <span className="panel-tag">ORDER BOOK</span>
-          {useFallback ? (
-            <span className="text-[10px] font-mono tracking-[0.14em] text-amber-500">
-              DERIVED LADDER
-            </span>
-          ) : null}
+          {!hasBook ? <span className="text-[10px] font-mono tracking-[0.14em] text-gray-600">NO BOOK DATA</span> : null}
         </div>
         <span className="text-xs font-mono text-gray-400">
-          MID: <span className="text-white">${midPrice.toFixed(2)}</span>
+          MID: <span className="text-white">{formatPrice(midPrice, currencySymbol)}</span>
         </span>
       </div>
 
       <div className="p-2 space-y-0.5">
+        {!hasBook ? (
+          <div className="flex h-72 items-center justify-center font-mono text-xs text-gray-600">WAITING FOR ORDER BOOK</div>
+        ) : null}
         {/* Asks (reversed so best ask is at bottom, near mid) */}
         <div className="text-xs font-mono text-gray-600 mb-1">ASKS</div>
         {[...asks].reverse().slice(0, 10).map((level, i) => {
@@ -72,7 +45,7 @@ export default function OrderBookHeatmap() {
           return (
             <div key={`ask-${i}`} className="flex items-center gap-2 h-5">
               <span className="w-16 text-right text-xs font-mono text-red-400">
-                ${level.price.toFixed(2)}
+                {formatPrice(level.price, currencySymbol)}
               </span>
               <div className="flex-1 relative h-full">
                 <div
@@ -94,7 +67,7 @@ export default function OrderBookHeatmap() {
         {/* Mid-price divider */}
         <div className="flex items-center gap-2 my-1">
           <span className="w-16 text-right text-xs font-mono font-bold text-white">
-            ${midPrice.toFixed(2)}
+            {formatPrice(midPrice, currencySymbol)}
           </span>
           <div className="flex-1 border-t border-dashed border-gray-600" />
           <span className="text-xs font-mono text-gray-500">MID</span>
@@ -107,7 +80,7 @@ export default function OrderBookHeatmap() {
           return (
             <div key={`bid-${i}`} className="flex items-center gap-2 h-5">
               <span className="w-16 text-right text-xs font-mono text-green-400">
-                ${level.price.toFixed(2)}
+                {formatPrice(level.price, currencySymbol)}
               </span>
               <div className="flex-1 relative h-full">
                 <div

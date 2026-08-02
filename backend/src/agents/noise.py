@@ -1,7 +1,6 @@
 """Noise agent — generates random orders at a configurable rate."""
 
 from typing import List, Dict
-import random
 from .base_agent import BaseAgent
 from .risk import AgentRiskProfile, displayed_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
@@ -39,10 +38,10 @@ class NoiseAgent(BaseAgent):
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
         orders: List[Order] = []
 
-        if random.random() > self.order_rate:
+        if self.rng.random() > self.order_rate:
             return orders
 
-        side = random.choice([OrderSide.BUY, OrderSide.SELL])
+        side = self.rng.choice([OrderSide.BUY, OrderSide.SELL])
         volatility = float(market_state.get("volatility", 0.0) or 0.0)
         max_child = self.risk_profile.target_size(
             side=side,
@@ -50,14 +49,14 @@ class NoiseAgent(BaseAgent):
             available_depth=displayed_depth_for_side(market_state, side),
             volatility=volatility,
             active_orders=self.active_orders,
-            aggression=random.uniform(0.4, 1.0),
+            aggression=self.rng.uniform(0.4, 1.0),
         )
         if max_child <= 0:
             return orders
-        size = min(random.randint(self.min_size, self.max_size), max_child)
+        size = min(self.rng.randint(self.min_size, self.max_size), max_child)
 
         # 50% market, 50% limit
-        if random.random() < 0.5:
+        if self.rng.random() < 0.5:
             orders.append(
                 Order(
                     agent_id=self.agent_id,
@@ -69,7 +68,7 @@ class NoiseAgent(BaseAgent):
             )
         else:
             # Limit order within 0.5% of mid price
-            offset = price * random.uniform(0.001, 0.005)
+            offset = price * self.rng.uniform(0.001, 0.005)
             limit_price = round(
                 price - offset if side == OrderSide.BUY else price + offset, 2
             )

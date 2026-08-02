@@ -47,30 +47,6 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip().rstrip("/") for item in value.split(",") if item.strip()]
 
 
-def _get_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _resolve_repo_path(value: str) -> str:
-    path = Path(value).expanduser()
-    if path.is_absolute():
-        return str(path)
-
-    candidates = [
-        Path.cwd() / path,
-        _BACKEND_ROOT / path,
-        _PROJECT_ROOT / path,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate.resolve())
-
-    return str((_BACKEND_ROOT / path).resolve())
-
-
 def _default_allowed_origins() -> list[str]:
     origins = [
         "http://localhost:3000",
@@ -99,7 +75,6 @@ class Config:
     """Global configuration loaded from environment variables."""
 
     # Simulation
-    simulation_mode: str = os.getenv("SIMULATION_MODE", "SANDBOX")
     initial_price: float = float(os.getenv("INITIAL_PRICE", "100.0"))
     simulation_duration: int = int(os.getenv("SIMULATION_DURATION", "23400"))
 
@@ -112,13 +87,5 @@ class Config:
     baseline_spread: float = 0.001
     baseline_depth: float = 1000.0
     baseline_volatility: float = 0.02
-
-    # RL policy
-    rl_policy_enabled: bool = _get_bool("RL_POLICY_ENABLED", False)
-    rl_policy_kind: str = os.getenv("RL_POLICY_KIND", "ppo").strip().lower()
-    rl_model_path: str = _resolve_repo_path(
-        os.getenv("RL_MODEL_PATH", os.path.join("models", "ppo_market_maker.zip"))
-    )
-
 
 config = Config()

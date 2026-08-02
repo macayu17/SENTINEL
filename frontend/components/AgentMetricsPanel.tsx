@@ -16,10 +16,16 @@ function finiteNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function formatSignedCurrency(value: number, digits = 0, symbol = '$'): string {
+  if (!Number.isFinite(value)) return `${symbol}--`;
+  return `${value >= 0 ? '+' : '-'}${symbol}${Math.abs(value).toFixed(digits)}`;
+}
+
 export default function AgentMetricsPanel() {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const marketData = useMarketStore((s) => s.marketData);
   const agents = marketData?.agent_metrics ?? {};
+  const currencySymbol = marketData?.market === 'NASDAQ' ? '$' : '₹';
 
   const agentList = Object.entries(agents).sort((a, b) => {
     // Sort by agent type, then by PnL
@@ -59,7 +65,7 @@ export default function AgentMetricsPanel() {
             <div className="col-span-3">AGENT</div>
             <div className="col-span-2">TYPE</div>
             <div className="col-span-2 text-right">PNL</div>
-            <div className="col-span-2 text-right">SHARPE</div>
+            <div className="col-span-2 text-right">STATE</div>
             <div className="col-span-2 text-right">POSITION</div>
             <div className="col-span-1 text-right">TRD</div>
           </div>
@@ -68,7 +74,6 @@ export default function AgentMetricsPanel() {
           {agentList.map(([id, metrics]) => {
             const color = AGENT_COLORS[metrics.agent_type] || '#888';
             const totalPnl = finiteNumber(metrics.total_pnl);
-            const sharpeRatio = finiteNumber(metrics.sharpe_ratio);
             const position = finiteNumber(metrics.position);
             const numTrades = finiteNumber(metrics.num_trades);
             const pnlColor = totalPnl >= 0 ? '#00ff41' : '#ff0040';
@@ -83,11 +88,10 @@ export default function AgentMetricsPanel() {
                   {metrics.agent_type.substring(0, 6).toUpperCase()}
                 </div>
                 <div className="col-span-2 text-right" style={{ color: pnlColor }}>
-                  {totalPnl >= 0 ? '+' : ''}
-                  {totalPnl.toFixed(0)}
+                  {formatSignedCurrency(totalPnl, 0, currencySymbol)}
                 </div>
                 <div className="col-span-2 text-right text-gray-300">
-                  {sharpeRatio.toFixed(2)}
+                  {metrics.halted ? 'HALTED' : 'ACTIVE'}
                 </div>
                 <div className="col-span-2 text-right text-gray-400">
                   {position.toLocaleString()}
@@ -107,7 +111,7 @@ export default function AgentMetricsPanel() {
               <div className="col-span-2 text-right" style={{
                 color: totalPnl >= 0 ? '#00ff41' : '#ff0040'
               }}>
-                {totalPnl.toFixed(0)}
+                {formatSignedCurrency(totalPnl, 0, currencySymbol)}
               </div>
               <div className="col-span-2 text-right text-gray-500">—</div>
               <div className="col-span-2 text-right text-gray-500">

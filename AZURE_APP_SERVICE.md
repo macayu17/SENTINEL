@@ -22,9 +22,6 @@ FRONTEND_URL=https://your-vercel-domain.vercel.app
 ALLOWED_ORIGINS=https://your-vercel-domain.vercel.app
 SIMULATION_DURATION=23400
 INITIAL_PRICE=100.0
-RL_POLICY_ENABLED=false
-RL_POLICY_KIND=ppo
-RL_MODEL_PATH=models/ppo_market_maker.zip
 ```
 
 Startup command:
@@ -32,8 +29,6 @@ Startup command:
 ```text
 python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 ```
-
-The PPO model lives under `backend/models/ppo_market_maker.zip`, which is packaged into the backend zip as `models/ppo_market_maker.zip`. PPO stays disabled in the default Azure zip deploy because the heavy `stable-baselines3` stack is intentionally excluded from `backend/requirements.txt`; enable it only after adding that optional dependency path to your deployment build.
 
 ## Azure Portal Steps
 

@@ -83,7 +83,8 @@ class MarketMakerAgent(BaseAgent):
                 self.risk_profile,
                 agent_id=self.agent_id,
                 side=side,
-                order_type=OrderType.LIMIT,
+                # Maker-only: a quote that crosses is a spread paid, not a spread earned.
+                order_type=OrderType.POST_ONLY,
                 price=price,
                 position=self.position,
                 market_state=market_state,
@@ -113,13 +114,21 @@ class MarketMakerAgent(BaseAgent):
 
     def _quote_targets(self, market_state: Dict) -> tuple[float, float, float]:
         mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        spread = float(market_state.get("spread", 0.02) or 0.02)
         volatility = float(market_state.get("volatility", 0.0) or 0.0)
         imbalance = float(market_state.get("order_book_imbalance", 0.0) or 0.0)
 
         # Inventory and volatility widen quotes; imbalance shifts reservation price.
         vol_multiplier = 1.0 + min(4.0, volatility * 40.0)
         imbalance_multiplier = 1.0 + min(0.5, abs(imbalance) * 0.5)
-        half_spread = max(0.01, (self.base_spread * mid) / 2 * vol_multiplier * imbalance_multiplier)
+        competitive_half_spread = min(
+            (self.base_spread * mid) / 2,
+            max(0.01, spread / 2),
+        )
+        half_spread = max(
+            0.01,
+            competitive_half_spread * vol_multiplier * imbalance_multiplier,
+        )
         inventory_skew = (self.position / self.max_inventory) * half_spread * 2 if self.max_inventory else 0.0
         reservation = mid - inventory_skew
 

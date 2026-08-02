@@ -1,4 +1,4 @@
-"""Latency model ported from ABIDES — simulates realistic network delays.
+"""Latency model for seeded network-delay simulation.
 
 Three modes:
   ZERO            — instant delivery (debugging)
@@ -33,7 +33,6 @@ _TIER_DELAYS = {
     "Sentiment":     0.005_000,
     "Retail":        0.010_000,   # 10 ms — consumer ISP
     "Noise":         0.015_000,   # 15 ms
-    "RL_MM":         0.000_050,   # same as market maker
     "LiquidityTrader": 0.003_000,
 }
 
@@ -57,6 +56,11 @@ class LatencyModel:
         self.config = config or LatencyConfig()
         self.rng = rng or np.random.RandomState()
 
+    def reset(self, seed: Optional[int] = None) -> None:
+        """Reset jitter sampling so seeded simulations remain reproducible."""
+        if seed is not None:
+            self.rng = np.random.RandomState(seed)
+
     def get_latency(self, agent_type: str) -> float:
         """Return one-way latency in seconds for the given agent type."""
         mode = self.config.mode
@@ -69,11 +73,11 @@ class LatencyModel:
         if mode == LatencyMode.DETERMINISTIC:
             return base
 
-        # CUBIC mode — base + heavy-tailed jitter
-        u = self.rng.uniform(0.01, 1.0)
-        jitter_ns = self.config.min_jitter_ns / (u ** (1.0 / self.config.jitter_exponent))
-        jitter_ns = min(jitter_ns, self.config.max_jitter_ns)
-        jitter_sec = jitter_ns * 1e-9
+        # Scale congestion to the tier's normal path while bounding outliers.
+        min_jitter = self.config.min_jitter_ns * 1e-9
+        max_jitter = self.config.max_jitter_ns * 1e-9
+        jitter_sec = base * self.rng.pareto(self.config.jitter_exponent)
+        jitter_sec = min(max(jitter_sec, min_jitter), max_jitter)
         return base + jitter_sec
 
     def describe(self) -> dict:

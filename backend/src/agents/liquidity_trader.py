@@ -1,7 +1,6 @@
 """Liquidity trader agent — executes exogenous buy/sell pressure via sliced orders."""
 
 from typing import List, Dict
-import random
 from .base_agent import BaseAgent
 from .risk import AgentRiskProfile, displayed_depth_for_side, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
@@ -53,12 +52,14 @@ class LiquidityTraderAgent(BaseAgent):
         volatility = float(market_state.get("volatility", 0.0) or 0.0)
 
         if self._remaining_parent_qty <= 0:
-            if random.random() < self.start_probability:
-                self._active_side = random.choice([OrderSide.BUY, OrderSide.SELL])
-                self._remaining_parent_qty = random.randint(self.min_parent_qty, self.max_parent_qty)
+            if self.rng.random() < self.start_probability:
+                self._active_side = self.rng.choice([OrderSide.BUY, OrderSide.SELL])
+                self._remaining_parent_qty = self.rng.randint(self.min_parent_qty, self.max_parent_qty)
             return orders
         if self._active_side is None:
             self._remaining_parent_qty = 0
+            return orders
+        if self.active_orders:
             return orders
 
         depth_limited_qty = self.risk_profile.target_size(
@@ -71,16 +72,15 @@ class LiquidityTraderAgent(BaseAgent):
         )
         child_qty = min(
             self._remaining_parent_qty,
-            random.randint(self.min_child_qty, self.max_child_qty),
+            self.rng.randint(self.min_child_qty, self.max_child_qty),
             depth_limited_qty,
         )
         if child_qty <= 0:
             return orders
-        self._remaining_parent_qty -= child_qty
 
         # More aggressive when spread is tight, otherwise lean to passive near-touch limits.
         spread = market_state.get("spread", 0.05)
-        use_market = random.random() < (0.55 if spread <= 0.08 else 0.35)
+        use_market = self.rng.random() < (0.55 if spread <= 0.08 else 0.35)
 
         if use_market:
             orders.append(
@@ -105,6 +105,23 @@ class LiquidityTraderAgent(BaseAgent):
             )
 
         return orders
+
+    def update_position(self, trade) -> None:
+        fill_side = (
+            OrderSide.BUY
+            if trade.buyer_agent_id == self.agent_id
+            else OrderSide.SELL
+            if trade.seller_agent_id == self.agent_id
+            else None
+        )
+        super().update_position(trade)
+        if fill_side == self._active_side:
+            self._remaining_parent_qty = max(
+                0,
+                self._remaining_parent_qty - trade.quantity,
+            )
+            if self._remaining_parent_qty == 0:
+                self._active_side = None
 
     def reset(self) -> None:
         super().reset()

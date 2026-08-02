@@ -18,6 +18,13 @@ venv/
 backend/.env
 backend/logs/
 backend/models/*.pkl
+backend/models/candidates/
+!backend/models/candidates/
+!backend/models/candidates/lobster_nasdaq_liquidity_model.pkl
+!backend/models/candidates/lobster_nasdaq_liquidity_report.json
+backend/data/liquidity_depth/
+backend/data/fi2010/
+backend/data/lobster/
 
 # Generated local artifacts
 /models/

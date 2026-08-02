@@ -1,24 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import {
+import type {
   AgentActivity,
-  DepthHeatLevel,
   KernelEvent,
-  Milestone,
-  PriceSpreadPoint,
   RecentOrder,
-  SimulationMetrics,
   SimulationDashboardData,
-  TimeSeriesPoint,
   TradeFlowPoint,
 } from '@/types/dashboard';
-import {
+import type {
   MarketEvent,
   MarketOrderFlow,
   MarketRecentOrder,
   MarketUpdate,
-  OrderBook,
 } from '@/types/market';
 import { useMarketStore } from '@/store/market-store';
 
@@ -38,44 +32,13 @@ function simulationTimeLabel(timestamp: number | undefined): string {
   if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
     return timestampLabel(new Date());
   }
-
-  if (timestamp > 1_000_000_000) {
-    return timestampLabel(new Date(timestamp * 1000));
-  }
-
-  return `T+${timestamp.toFixed(2)}`;
-}
-
-function nextDepthHeat(midPrice: number): DepthHeatLevel[] {
-  return Array.from({ length: 12 }, (_, idx) => ({
-    level: idx + 1,
-    bidDepth: Math.max(0, Math.round(midPrice ? 120 / (idx + 1) : 0)),
-    askDepth: Math.max(0, Math.round(midPrice ? 120 / (idx + 1) : 0)),
-  }));
+  return timestamp > 1_000_000_000
+    ? timestampLabel(new Date(timestamp * 1000))
+    : `T+${timestamp.toFixed(2)}`;
 }
 
 function pushPoint<T>(series: T[], point: T): T[] {
   return [...series.slice(-(MAX_POINTS - 1)), point];
-}
-
-function buildDepthHeatmap(orderBook: OrderBook | undefined, fallbackPrice: number): DepthHeatLevel[] {
-  const bids = orderBook?.bids ?? [];
-  const asks = orderBook?.asks ?? [];
-  if (!bids.length && !asks.length) {
-    return nextDepthHeat(fallbackPrice);
-  }
-
-  return Array.from({ length: 12 }, (_, idx) => ({
-    level: idx + 1,
-    bidDepth: bids[idx]?.size ?? 0,
-    askDepth: asks[idx]?.size ?? 0,
-  }));
-}
-
-function computeOrderBookImbalance(orderBook: OrderBook | undefined): number {
-  const bidDepth = (orderBook?.bids ?? []).reduce((sum, level) => sum + level.size, 0);
-  const askDepth = (orderBook?.asks ?? []).reduce((sum, level) => sum + level.size, 0);
-  return (bidDepth - askDepth) / Math.max(1, bidDepth + askDepth);
 }
 
 function mapBackendEventType(type: string): KernelEvent['type'] {
@@ -87,8 +50,8 @@ function mapBackendEventType(type: string): KernelEvent['type'] {
   return 'Kernel';
 }
 
-function mapBackendEvents(backendEvents: MarketEvent[] | undefined): KernelEvent[] {
-  return (backendEvents ?? []).slice(0, MAX_EVENTS).map((event) => ({
+function mapBackendEvents(events: MarketEvent[] | undefined): KernelEvent[] {
+  return (events ?? []).slice(0, MAX_EVENTS).map((event) => ({
     id: event.id,
     time: simulationTimeLabel(event.timestamp),
     type: mapBackendEventType(event.type),
@@ -104,8 +67,8 @@ function mapBackendOrderStatus(status: string): RecentOrder['status'] {
   return 'Submitted';
 }
 
-function mapBackendRecentOrders(backendOrders: MarketRecentOrder[]): RecentOrder[] {
-  return backendOrders.slice(0, 8).map((order) => ({
+function mapBackendRecentOrders(orders: MarketRecentOrder[]): RecentOrder[] {
+  return orders.slice(0, 8).map((order) => ({
     id: order.id,
     agent: order.agent_type ? `${order.agent_type} ${order.agent_id}` : order.agent_id,
     side: order.side === 'SELL' ? 'SELL' : 'BUY',
@@ -117,21 +80,7 @@ function mapBackendRecentOrders(backendOrders: MarketRecentOrder[]): RecentOrder
 
 function buildBackendAgentActivity(marketData: MarketUpdate): AgentActivity {
   const flow = marketData.order_flow;
-  const metrics = Object.values(marketData.agent_metrics ?? {});
-  const marketMakerCount = metrics.filter((metric) => /market/i.test(metric.agent_type)).length;
-  const noiseCount = metrics.filter((metric) => /noise/i.test(metric.agent_type)).length;
-  const rlCount = metrics.filter((metric) => /rl|policy/i.test(metric.agent_type)).length;
-
   return {
-    marketMakerAction: marketMakerCount > 0
-      ? `Tracking ${marketMakerCount} market-maker agents against the live book.`
-      : 'No active market-maker agent trace in the latest packet.',
-    noiseAgentAction: flow
-      ? `Recent aggressor flow B ${flow.buy_volume} / S ${flow.sell_volume} across ${noiseCount} noise agents.`
-      : 'Awaiting order-flow counters from the exchange loop.',
-    rlAgentStatus: rlCount > 0
-      ? `Policy agent active across ${rlCount} trace streams.`
-      : 'No active RL policy agent in this run.',
     recentOrders: mapBackendRecentOrders(marketData.recent_orders ?? []),
     executionSummary: {
       submitted: flow?.submitted ?? 0,
@@ -148,10 +97,7 @@ function mergeBackendTradeFlow(
   step: number,
   time: string,
 ): TradeFlowPoint[] {
-  if (!orderFlow) {
-    return previous;
-  }
-
+  if (!orderFlow) return previous;
   return pushPoint(previous, {
     id: `tf-${step}-${orderFlow.submitted}-${orderFlow.fills}`,
     time,
@@ -160,199 +106,40 @@ function mergeBackendTradeFlow(
   });
 }
 
-function buildDashboardMetrics(
-  marketData: MarketUpdate | null,
-  feedActive: boolean,
-  seedPrice: number,
-): SimulationMetrics {
-  if (!feedActive || !marketData) {
-    return {
-      midPrice: Number(seedPrice.toFixed(3)),
-      bestBid: Number(seedPrice.toFixed(3)),
-      bestAsk: Number(seedPrice.toFixed(3)),
-      spread: 0,
-      orderBookImbalance: 0,
-      inventory: 0,
-      realizedPnl: 0,
-      unrealizedPnl: 0,
-      cumulativeReward: 0,
-    };
-  }
-
-  const agentMetrics = Object.values(marketData.agent_metrics ?? {});
-  const inventory = agentMetrics.reduce((sum, metric) => sum + metric.position, 0);
-  const realizedPnl = agentMetrics.reduce((sum, metric) => sum + metric.realized_pnl, 0);
-  const unrealizedPnl = agentMetrics.reduce((sum, metric) => sum + metric.unrealized_pnl, 0);
-  const spread = Number((marketData.spread ?? 0).toFixed(4));
-  const midPrice = Number(marketData.price.toFixed(3));
-
-  return {
-    midPrice,
-    bestBid: Number((midPrice - spread / 2).toFixed(3)),
-    bestAsk: Number((midPrice + spread / 2).toFixed(3)),
-    spread,
-    orderBookImbalance: Number(computeOrderBookImbalance(marketData.order_book).toFixed(3)),
-    inventory,
-    realizedPnl: Number(realizedPnl.toFixed(2)),
-    unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
-    cumulativeReward: Number(((realizedPnl + unrealizedPnl) / 1000).toFixed(3)),
-  };
-}
-
-const defaultMilestones: Milestone[] = [
-  {
-    phase: 'Phase 1',
-    title: 'Simulator and LOB',
-    status: 'completed',
-    detail: 'Event-driven kernel, matching logic, and microstructure metrics are operational.',
-  },
-  {
-    phase: 'Phase 2',
-    title: 'RL Environment',
-    status: 'completed',
-    detail: 'Gymnasium-style environment with synchronized RL stepping is integrated.',
-  },
-  {
-    phase: 'Phase 3',
-    title: 'Multi-Agent Realism',
-    status: 'in-progress',
-    detail: 'Extending behavior diversity with informed and institutional style flow.',
-  },
-  {
-    phase: 'Phase 4',
-    title: 'Training, Evaluation, Deployment',
-    status: 'in-progress',
-    detail: 'Policy training loops and deployment pathways are under active development.',
-  },
-];
-
 export function useSimulationDashboardData(): SimulationDashboardData {
-  const marketData = useMarketStore((s) => s.marketData);
-  const connected = useMarketStore((s) => s.connected);
-  const simulationRunning = useMarketStore((s) => s.simulationRunning);
+  const marketData = useMarketStore((state) => state.marketData);
+  const connected = useMarketStore((state) => state.connected);
+  const simulationRunning = useMarketStore((state) => state.simulationRunning);
   const feedActive = connected && simulationRunning;
-
-  const seedPrice = marketData?.price ?? 100;
-
-  const [priceSeries, setPriceSeries] = useState<PriceSpreadPoint[]>([]);
-  const [spreadSeries, setSpreadSeries] = useState<TimeSeriesPoint[]>([]);
-  const [inventorySeries, setInventorySeries] = useState<TimeSeriesPoint[]>([]);
-  const [rewardSeries, setRewardSeries] = useState<TimeSeriesPoint[]>([]);
   const [tradeFlow, setTradeFlow] = useState<TradeFlowPoint[]>([]);
-  const [depthHeatmap, setDepthHeatmap] = useState<DepthHeatLevel[]>(nextDepthHeat(seedPrice));
   const [events, setEvents] = useState<KernelEvent[]>([]);
 
-  const metrics = useMemo(
-    () => buildDashboardMetrics(marketData, feedActive, seedPrice),
-    [feedActive, marketData, seedPrice],
-  );
-
   useEffect(() => {
-    if (!feedActive || !marketData) {
-      return;
-    }
-
+    if (!feedActive || !marketData) return;
     const now = timestampLabel(new Date());
-    const observedPrice = marketData.price;
-    const observedSpread = marketData.spread;
-
-    setPriceSeries((prev) => pushPoint(prev, {
-      time: now,
-      price: Number(observedPrice.toFixed(3)),
-      spread: Number(observedSpread.toFixed(4)),
-    }));
-
-    setSpreadSeries((prev) => pushPoint(prev, {
-      time: now,
-      value: Number(observedSpread.toFixed(4)),
-    }));
-
-    setInventorySeries((prev) => pushPoint(prev, {
-      time: now,
-      value: metrics.inventory,
-    }));
-
-    setRewardSeries((prev) => pushPoint(prev, {
-      time: now,
-      value: metrics.cumulativeReward,
-    }));
-
-    setTradeFlow((prev) => mergeBackendTradeFlow(prev, marketData.order_flow, marketData.step, now));
-
-    setDepthHeatmap(buildDepthHeatmap(marketData.order_book, observedPrice));
+    setTradeFlow((previous) => mergeBackendTradeFlow(
+      previous,
+      marketData.order_flow,
+      marketData.step,
+      now,
+    ));
     setEvents(mapBackendEvents(marketData.events));
-  }, [feedActive, marketData, metrics.cumulativeReward, metrics.inventory]);
+  }, [feedActive, marketData]);
 
   useEffect(() => {
-    if (feedActive) {
-      return;
-    }
-
-    setPriceSeries([]);
-    setSpreadSeries([]);
-    setInventorySeries([]);
-    setRewardSeries([]);
+    if (feedActive) return;
     setTradeFlow([]);
     setEvents([]);
-    setDepthHeatmap(nextDepthHeat(seedPrice));
-  }, [feedActive, seedPrice]);
+  }, [feedActive]);
 
-  const agentActivity = useMemo(() => {
-    if (feedActive && marketData) {
-      return buildBackendAgentActivity(marketData);
-    }
-
-    const statusMessage = !connected
-      ? 'Backend offline. Awaiting websocket reconnect.'
-      : 'Simulation paused. No policy steps are being issued.';
+  const agentActivity = useMemo<AgentActivity>(() => {
+    if (feedActive && marketData) return buildBackendAgentActivity(marketData);
 
     return {
-      marketMakerAction: !connected
-        ? 'Quote engine standing by for live market feed'
-        : 'Quote engine idle while simulation is stopped',
-      noiseAgentAction: !connected
-        ? 'Order flow generator paused with no backend session'
-        : 'Noise flow idle until simulation resumes',
-      rlAgentStatus: statusMessage,
       recentOrders: [],
-      executionSummary: {
-        submitted: 0,
-        fills: 0,
-        cancelled: 0,
-        matchRate: 0,
-      },
+      executionSummary: { submitted: 0, fills: 0, cancelled: 0, matchRate: 0 },
     };
-  }, [connected, feedActive, marketData]);
+  }, [feedActive, marketData]);
 
-  return {
-    projectOverview: {
-      name: 'SENTINEL',
-      summary:
-        'A market microstructure intelligence platform for early warning signals, policy training, and resilient execution research.',
-      currentStage: 'System Integration',
-      completed: [
-        'Limit order book and matching kernel',
-        'Market maker and noise agent simulation',
-        'Event-driven simulator with delayed events',
-        'Gymnasium-style RL environment with synchronized stepping',
-        'Core market microstructure metrics and test simulations',
-      ],
-      inProgress: [
-        'Multi-agent realism with institutional and informed behaviors',
-        'Training loops and evaluation harness',
-        'Production deployment path with monitoring and controls',
-      ],
-    },
-    metrics,
-    priceSeries,
-    spreadSeries,
-    inventorySeries,
-    rewardSeries,
-    depthHeatmap,
-    tradeFlow,
-    agentActivity,
-    milestones: defaultMilestones,
-    events,
-    connected,
-  };
+  return { tradeFlow, agentActivity, events };
 }

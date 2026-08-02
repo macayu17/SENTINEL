@@ -28,6 +28,7 @@ class RetailAgent(BaseAgent):
         self.order_size = order_size
         self._price_history: deque = deque(maxlen=60)
         self._entry_price: float = 0.0
+        self._stop_armed: bool = False
         self.risk_profile = AgentRiskProfile(
             max_inventory=max(500, order_size * 10),
             base_order_size=order_size,
@@ -52,13 +53,33 @@ class RetailAgent(BaseAgent):
         ma20 = sum(prices[-20:]) / 20
         ma50 = sum(prices[-50:]) / 50
 
-        # Check stop-loss / take-profit on existing position
+        # Arm a resting stop once, so the venue triggers it the instant price
+        # breaches — not on the next wakeup, several stale ticks later.
+        if self.position != 0 and self._entry_price > 0 and not self._stop_armed:
+            self._stop_armed = True
+            long_position = self.position > 0
+            trigger = self._entry_price * (
+                1 - self.stop_loss if long_position else 1 + self.stop_loss
+            )
+            orders.append(
+                Order(
+                    agent_id=self.agent_id,
+                    side=OrderSide.SELL if long_position else OrderSide.BUY,
+                    order_type=OrderType.STOP,
+                    price=round(trigger, 2),
+                    quantity=abs(self.position),
+                )
+            )
+        if self.position == 0:
+            self._stop_armed = False
+
+        # Take-profit is discretionary, so it stays a wakeup-time decision.
         if self.position != 0 and self._entry_price > 0:
             pnl_pct = (price - self._entry_price) / self._entry_price
             if self.position < 0:
                 pnl_pct = -pnl_pct
 
-            if pnl_pct <= -self.stop_loss or pnl_pct >= self.take_profit:
+            if pnl_pct >= self.take_profit:
                 # Close position
                 order = risk_limited_exit_order(
                     self.risk_profile,
@@ -123,3 +144,4 @@ class RetailAgent(BaseAgent):
         super().reset()
         self._price_history.clear()
         self._entry_price = 0.0
+        self._stop_armed = False

@@ -3,8 +3,19 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict
 import math
+import random
 from ..market.order import Order
 from ..market.trade import Trade
+
+# Indian intraday equity cost stack (NSE cash, discount-broker rates) as fractions of
+# turnover. No maker rebate exists on this venue — both sides always pay. Tune per venue.
+BROKERAGE_PCT = 0.001           # 0.1% of turnover...
+BROKERAGE_CAP = 20.0            # ...capped per executed order, not per fill
+STT_SELL_PCT = 0.00025          # securities transaction tax, sell leg only (intraday)
+STAMP_DUTY_BUY_PCT = 0.00003    # buy leg only
+EXCHANGE_TXN_PCT = 0.0000307    # NSE cash transaction charge from March 2026
+SEBI_TURNOVER_PCT = 0.000001    # both legs
+GST_PCT = 0.18                  # levied on brokerage + exchange + SEBI charges
 
 
 class BaseAgent(ABC):
@@ -34,9 +45,18 @@ class BaseAgent(ABC):
         self.position: int = 0  # net shares held (positive=long, negative=short)
         self.avg_entry_price: float = 0.0
         self.realized_pnl: float = 0.0
+        self.fees_paid: float = 0.0
         self.num_trades: int = 0
-        self._trade_returns: List[float] = []
         self.active_orders: Dict[str, Order] = {}
+        self._brokerage_charged: Dict[str, float] = {}
+        self.risk_halted: bool = False  # latched by the sim rule gate on max drawdown
+        self._random_seed: int | None = None
+        self.rng = random.Random()
+
+    def set_random_seed(self, seed: int) -> None:
+        """Give this agent an independent reproducible random stream."""
+        self._random_seed = int(seed)
+        self.rng.seed(self._random_seed)
 
     @abstractmethod
     def decide_action(self, market_state: Dict) -> List[Order]:
@@ -66,7 +86,30 @@ class BaseAgent(ABC):
             self._apply_fill(trade.quantity, trade.price, is_buy=True)
         elif trade.seller_agent_id == self.agent_id:
             self._apply_fill(trade.quantity, trade.price, is_buy=False)
+        self._charge_fee(trade)
         self.num_trades += 1
+
+    def _charge_fee(self, trade: Trade) -> None:
+        """Charge this agent's side of the trade under the venue cost stack."""
+        is_buy = trade.buyer_agent_id == self.agent_id
+        order_id = trade.buyer_order_id if is_buy else trade.seller_order_id
+        notional = trade.value
+
+        # Brokerage is per executed order, so a sweep across levels is charged once.
+        charged = self._brokerage_charged.get(order_id, 0.0)
+        updated = min(charged + notional * BROKERAGE_PCT, BROKERAGE_CAP)
+        brokerage = updated - charged
+        self._brokerage_charged[order_id] = updated
+
+        taxable = brokerage + notional * (EXCHANGE_TXN_PCT + SEBI_TURNOVER_PCT)
+        levy = STT_SELL_PCT if not is_buy else STAMP_DUTY_BUY_PCT
+        fee = taxable * (1 + GST_PCT) + notional * levy
+
+        if not math.isfinite(fee):
+            return
+        self.fees_paid += fee
+        self.cash -= fee
+        self.realized_pnl -= fee
 
     def _apply_fill(self, quantity: int, price: float, is_buy: bool) -> None:
         """Apply a fill to the position, tracking average entry and realized PnL."""
@@ -96,7 +139,6 @@ class BaseAgent(ABC):
             else:
                 pnl = (price - self.avg_entry_price) * close_qty  # closing long
             self.realized_pnl += pnl
-            self._trade_returns.append(pnl)
             self.position += new_qty
 
             # If flipped, the remainder is a new position at the trade price
@@ -105,14 +147,18 @@ class BaseAgent(ABC):
 
     def reset(self) -> None:
         """Reset mutable state for a fresh simulation episode."""
+        if self._random_seed is not None:
+            self.rng.seed(self._random_seed)
         self.capital = self.initial_capital
         self.cash = self.initial_capital
         self.position = 0
         self.avg_entry_price = 0.0
         self.realized_pnl = 0.0
+        self.fees_paid = 0.0
         self.num_trades = 0
-        self._trade_returns.clear()
         self.active_orders.clear()
+        self._brokerage_charged.clear()
+        self.risk_halted = False
 
     def get_unrealized_pnl(self, current_price: float) -> float:
         """Mark-to-market unrealized PnL."""
@@ -132,11 +178,8 @@ class BaseAgent(ABC):
         if not math.isfinite(total_pnl):
             total_pnl = 0.0
         return_pct = (total_pnl / self.initial_capital) * 100 if self.initial_capital else 0.0
-        sharpe = self._compute_sharpe()
         if not math.isfinite(return_pct):
             return_pct = 0.0
-        if not math.isfinite(sharpe):
-            sharpe = 0.0
 
         return {
             "agent_id": self.agent_id,
@@ -146,21 +189,10 @@ class BaseAgent(ABC):
             "realized_pnl": round(realized, 2),
             "unrealized_pnl": round(unrealized, 2),
             "return_pct": round(return_pct, 4),
-            "sharpe_ratio": round(sharpe, 4),
             "num_trades": self.num_trades,
+            "fees_paid": round(self.fees_paid, 2),
+            "halted": self.risk_halted,
         }
-
-    def _compute_sharpe(self) -> float:
-        """Compute Sharpe ratio from trade returns."""
-        returns = [value for value in self._trade_returns if math.isfinite(value)]
-        if len(returns) < 2:
-            return 0.0
-        mean = sum(returns) / len(returns)
-        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-        std = math.sqrt(variance) if variance > 0 else 0.0
-        if std == 0:
-            return 0.0
-        return (mean / std) * math.sqrt(252)  # annualized
 
     def __repr__(self) -> str:
         return f"{self.agent_type}({self.agent_id}, pos={self.position}, pnl={self.realized_pnl:.2f})"

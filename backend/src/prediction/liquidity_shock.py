@@ -1,10 +1,11 @@
-"""Liquidity shock predictor using RandomForest classifier."""
+"""Liquidity stress assessment with an optional trained forecast model."""
 
-from typing import Dict, List, Optional, Tuple
+from collections import deque
+from statistics import median
+from typing import Any, Dict, Optional
 import pickle
 import os
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 from .features import FeatureExtractor
 from ..utils.logger import get_logger
 
@@ -18,12 +19,22 @@ FEATURE_NAMES = [
     "active_mm_count",
     "time_to_close",
 ]
+LOBSTER_FEATURE_NAMES = [
+    "spread_bps",
+    "depth_log",
+    "imbalance",
+    "spread_ratio",
+    "depth_ratio",
+    "depth_change_ratio",
+]
 
 WARNING_LEVELS = {
     "safe": 80,
     "caution": 60,
     "warning": 40,
 }
+BASELINE_WINDOW = 60
+MIN_BASELINE_OBSERVATIONS = 10
 
 
 def _health_to_warning(health_score: float) -> str:
@@ -38,153 +49,152 @@ def _health_to_warning(health_score: float) -> str:
 
 
 class LiquidityShockPredictor:
-    """
-    Predicts liquidity shocks 60-90 seconds in advance using
-    a RandomForest classifier trained on simulation data.
-    """
+    """Forecast with a loaded model, otherwise report current liquidity stress."""
 
     def __init__(self, model_path: Optional[str] = None) -> None:
         self.feature_extractor = FeatureExtractor()
-        self.model: Optional[RandomForestClassifier] = None
+        self.model: Optional[Any] = None
+        self.model_metadata: Dict[str, Any] = {}
         self._model_path = model_path or os.path.join(
-            os.path.dirname(__file__), "..", "..", "models", "liquidity_model.pkl"
+            os.path.dirname(__file__), "..", "..", "models", "candidates",
+            "lobster_nasdaq_liquidity_model.pkl",
         )
 
         # Try to load existing model
         if os.path.exists(self._model_path):
             try:
                 with open(self._model_path, "rb") as f:
-                    self.model = pickle.load(f)
-                logger.info("Loaded pre-trained liquidity model")
+                    loaded = pickle.load(f)
+                if isinstance(loaded, dict) and "model" in loaded:
+                    self.model = loaded["model"]
+                    self.model_metadata = loaded
+                else:
+                    self.model = loaded
+                logger.info("Loaded pre-trained liquidity model from %s", self._model_path)
             except Exception as e:
                 logger.warning(f"Failed to load model: {e}")
+        self.reset()
+
+    def reset(self) -> None:
+        """Forget the previous run's adaptive liquidity baseline."""
+        self._baseline: deque[tuple[float, float, float]] = deque(
+            maxlen=BASELINE_WINDOW
+        )
 
     def predict(self, market_state: Dict) -> Dict:
         """
-        Predict liquidity shock probability.
+        Forecast with a trained model or diagnose current observed stress.
 
         Returns:
             Dict with probability, health_score, warning_level, features, timestamp
         """
-        features = self.feature_extractor.extract_liquidity_features(market_state)
         timestamp = market_state.get("current_time", 0.0)
 
         if self.model is not None:
-            X = np.array([[features[f] for f in FEATURE_NAMES]], dtype=np.float32)
+            if self.model_metadata.get("artifact_type") == "lobster_nasdaq_liquidity_shock":
+                features = self._lobster_features(market_state)
+                X = np.array([[features[f] for f in LOBSTER_FEATURE_NAMES]], dtype=np.float32)
+                method = "lobster_nasdaq_model"
+                market = "NASDAQ"
+            else:
+                features = self.feature_extractor.extract_liquidity_features(market_state)
+                X = np.array([[features[f] for f in FEATURE_NAMES]], dtype=np.float32)
+                method = "trained_model"
+                market = None
             proba = self.model.predict_proba(X)[0]
-            # proba[1] = probability of shock
-            shock_prob = float(proba[1]) if len(proba) > 1 else 0.0
+            stress_score = float(proba[1]) if len(proba) > 1 else 0.0
+            result = {
+                "probability": round(stress_score, 4),
+                "method": method,
+                "horizon_seconds": 60,
+            }
+            if market:
+                result["market"] = market
         else:
-            # Heuristic fallback when no trained model
-            shock_prob = self._heuristic_probability(features)
+            features, stress_score, method = self._adaptive_diagnostic(market_state)
+            result = {"method": method, "horizon_seconds": 0}
 
-        health_score = max(0.0, min(100.0, (1.0 - shock_prob) * 100))
+        health_score = max(0.0, min(100.0, (1.0 - stress_score) * 100))
         warning_level = _health_to_warning(health_score)
 
-        return {
-            "probability": round(shock_prob, 4),
+        result.update({
+            "stress_score": round(stress_score, 4),
             "health_score": round(health_score, 1),
             "warning_level": warning_level,
             "features": features,
             "timestamp": timestamp,
+        })
+        return result
+
+    def _lobster_features(self, market_state: Dict) -> Dict[str, float]:
+        mid = max(0.01, float(market_state.get("mid_price", 100.0) or 100.0))
+        spread = max(0.0, float(market_state.get("spread", 0.0) or 0.0))
+        depth = max(1.0, float(market_state.get("total_depth", 0.0) or 0.0))
+        bid_depth = max(0.0, float(market_state.get("bid_depth", 0.0) or 0.0))
+        ask_depth = max(0.0, float(market_state.get("ask_depth", 0.0) or 0.0))
+        imbalance = float(market_state.get("order_book_imbalance", 0.0) or 0.0)
+        current_spread_ratio = spread / mid
+        current = (current_spread_ratio, depth, 0.0)
+        samples = list(self._baseline) or [current]
+        baseline_spread_bps = median(sample[0] for sample in samples) * 10_000
+        baseline_depth = median(sample[1] for sample in samples)
+        previous_depth = samples[-1][1]
+        features = {
+            "spread_bps": spread / mid * 10_000,
+            "depth_log": float(np.log1p(depth)),
+            "imbalance": imbalance if bid_depth or ask_depth else 0.0,
+            "spread_ratio": (spread / mid * 10_000) / max(1e-9, baseline_spread_bps),
+            "depth_ratio": depth / max(1e-9, baseline_depth),
+            "depth_change_ratio": depth / max(1e-9, previous_depth),
         }
+        if features["spread_ratio"] <= 2.5 and features["depth_ratio"] >= 0.4:
+            self._baseline.append(current)
+        return features
 
-    def _heuristic_probability(self, features: Dict[str, float]) -> float:
-        """
-        Rule-based fallback when no ML model is trained.
-        Higher spread_ratio, lower depth_ratio, and higher vol = higher shock prob.
-        """
-        score = 0.0
-
-        # High spread is bad
-        if features["spread_ratio"] > 2.0:
-            score += 0.3
-        elif features["spread_ratio"] > 1.5:
-            score += 0.15
-
-        # Low depth is bad
-        if features["depth_ratio"] < 0.5:
-            score += 0.3
-        elif features["depth_ratio"] < 0.8:
-            score += 0.1
-
-        # High volatility is bad
-        if features["volatility_ratio"] > 2.0:
-            score += 0.2
-        elif features["volatility_ratio"] > 1.5:
-            score += 0.1
-
-        # MM stress is bad
-        score += features["mm_inventory_stress"] * 0.2
-
-        # Few active MMs is bad
-        if features["active_mm_count"] <= 1:
-            score += 0.15
-
-        return min(1.0, score)
-
-    def train(self, training_data: List[Dict]) -> None:
-        """Train the RandomForest model on simulation data."""
-        if not training_data:
-            logger.warning("No training data provided")
-            return
-
-        X = np.array([[d["features"][f] for f in FEATURE_NAMES] for d in training_data], dtype=np.float32)
-        y = np.array([d["label"] for d in training_data])
-
-        logger.info(f"Training on {len(X)} samples (shock rate: {y.mean():.2%})")
-
-        self.model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            class_weight="balanced",
-            random_state=42,
+    def _adaptive_diagnostic(
+        self, market_state: Dict
+    ) -> tuple[Dict[str, float], float, str]:
+        mid = max(0.01, float(market_state.get("mid_price", 100.0) or 100.0))
+        current = (
+            max(0.0, float(market_state.get("spread", 0.0) or 0.0) / mid),
+            max(1.0, float(market_state.get("total_depth", 0.0) or 0.0)),
+            max(0.000001, float(market_state.get("volatility", 0.0) or 0.0)),
         )
-        self.model.fit(X, y)
+        samples = list(self._baseline) or [current]
+        features = FeatureExtractor(
+            baseline_spread=median(sample[0] for sample in samples),
+            baseline_depth=median(sample[1] for sample in samples),
+            baseline_volatility=median(sample[2] for sample in samples),
+        ).extract_liquidity_features(market_state)
 
-        # Save model
-        os.makedirs(os.path.dirname(self._model_path), exist_ok=True)
-        with open(self._model_path, "wb") as f:
-            pickle.dump(self.model, f)
-        logger.info(f"Model saved to {self._model_path}")
+        clamp = lambda value: max(0.0, min(1.0, value))
+        depth_depletion = clamp(1.0 - features["depth_ratio"])
+        spread_expansion = clamp((features["spread_ratio"] - 1.0) / 2.0)
+        volatility_expansion = clamp((features["volatility_ratio"] - 1.0) / 3.0)
+        baseline_depth = median(sample[1] for sample in samples)
+        order_flow_pressure = clamp(
+            abs(float(market_state.get("recent_signed_volume", 0.0) or 0.0))
+            / max(current[1], baseline_depth * 0.1)
+        )
+        inventory_stress = clamp(features["mm_inventory_stress"])
+        features.update({
+            "depth_depletion": round(depth_depletion, 6),
+            "spread_expansion": round(spread_expansion, 6),
+            "volatility_expansion": round(volatility_expansion, 6),
+            "order_flow_pressure": round(order_flow_pressure, 6),
+        })
 
-    def generate_training_data(self, num_simulations: int = 100) -> List[Dict]:
-        """Generate labelled training data from simulations."""
-        from ..agents.market_maker import MarketMakerAgent
-        from ..agents.hft_agent import HFTAgent
-        from ..agents.retail import RetailAgent
-        from ..agents.noise import NoiseAgent
-        from ..market.simulator import MarketSimulator
+        if len(self._baseline) < MIN_BASELINE_OBSERVATIONS:
+            self._baseline.append(current)
+            return features, 0.0, "calibrating"
 
-        all_samples: List[Dict] = []
-
-        for sim_idx in range(num_simulations):
-            agents = (
-                [MarketMakerAgent(f"MM_{i}") for i in range(3)]
-                + [HFTAgent(f"HFT_{i}") for i in range(5)]
-                + [RetailAgent(f"R_{i}") for i in range(10)]
-                + [NoiseAgent(f"N_{i}") for i in range(10)]
-            )
-
-            sim = MarketSimulator(agents, initial_price=100.0)
-            sim.run(steps=3600)
-
-            states = sim._state_history
-            for i in range(len(states) - 60):
-                features = self.feature_extractor.extract_liquidity_features(states[i])
-
-                # Label: shock occurs in next 60 steps
-                label = 0
-                for j in range(i + 1, min(i + 61, len(states))):
-                    future_features = self.feature_extractor.extract_liquidity_features(states[j])
-                    if future_features["depth_ratio"] < 0.5 or future_features["spread_ratio"] > 3.0:
-                        label = 1
-                        break
-
-                all_samples.append({"features": features, "label": label})
-
-            if (sim_idx + 1) % 10 == 0:
-                logger.info(f"Generated {sim_idx + 1}/{num_simulations} simulations")
-
-        logger.info(f"Total training samples: {len(all_samples)}")
-        return all_samples
+        stress_score = (
+            0.30 * depth_depletion
+            + 0.25 * spread_expansion
+            + 0.20 * order_flow_pressure
+            + 0.15 * volatility_expansion
+            + 0.10 * inventory_stress
+        )
+        if stress_score < 0.2:
+            self._baseline.append(current)
+        return features, stress_score, "adaptive_stress"

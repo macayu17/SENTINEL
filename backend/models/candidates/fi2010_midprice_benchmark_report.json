@@ -1,0 +1,15 @@
+{
+  "artifact_type": "fi2010_midprice_direction_benchmark",
+  "market": "Nasdaq OMX Finland",
+  "horizon_events": 10,
+  "train_samples": 200000,
+  "test_samples": 31937,
+  "feature_count": 144,
+  "metrics": {
+    "accuracy": 0.7015374017597145,
+    "balanced_accuracy": 0.4683570046304051,
+    "macro_f1": 0.4860518183921901
+  },
+  "not_for_nse_runtime": true,
+  "source": "FI-2010 public limit-order-book benchmark"
+}

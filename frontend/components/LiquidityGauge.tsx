@@ -7,9 +7,25 @@ export default function LiquidityGauge() {
   const marketData = useMarketStore((s) => s.marketData);
   const pred = marketData?.liquidity_prediction;
 
-  const score = pred?.health_score ?? 100;
-  const probability = pred?.probability ?? 0;
-  const level = pred?.warning_level ?? 'safe';
+  if (!pred) {
+    return (
+      <div className="terminal-panel">
+        <div className="panel-header">
+          <span className="panel-tag">LIQUIDITY STRESS</span>
+          <span className="text-xs text-gray-600">NO DATA</span>
+        </div>
+        <div className="flex h-40 items-center justify-center font-mono text-xs text-gray-600">
+          WAITING FOR MARKET STATE
+        </div>
+      </div>
+    );
+  }
+
+  const score = pred.health_score;
+  const stressScore = pred.stress_score;
+  const level = pred.warning_level;
+  const scenarioPhase = marketData?.scenario.phase;
+  const isForecastModel = pred.method === 'trained_model' || pred.method === 'lobster_nasdaq_model';
 
   const colorMap: Record<string, string> = {
     safe: '#00ff41',
@@ -28,7 +44,7 @@ export default function LiquidityGauge() {
   return (
     <div className="terminal-panel">
       <div className="panel-header">
-        <span className="panel-tag">LIQUIDITY</span>
+        <span className="panel-tag">LIQUIDITY STRESS</span>
         <span className="text-xs" style={{ color }}>
           ● {level.toUpperCase()}
         </span>
@@ -85,9 +101,11 @@ export default function LiquidityGauge() {
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-4 w-full mt-3 px-2">
           <div className="stat-cell">
-            <span className="stat-label">SHOCK PROB</span>
+            <span className="stat-label">
+              {isForecastModel ? 'FORECAST RISK' : 'CURRENT STRESS'}
+            </span>
             <span className="stat-value" style={{ color }}>
-              {(probability * 100).toFixed(1)}%
+              {(stressScore * 100).toFixed(1)}%
             </span>
           </div>
           <div className="stat-cell">
@@ -99,7 +117,22 @@ export default function LiquidityGauge() {
         </div>
 
         {/* Feature breakdown */}
-        {pred?.features && (
+        <div className="mt-2 font-mono text-[10px] tracking-[0.12em] text-gray-600">
+          {isForecastModel
+            ? pred.method === 'lobster_nasdaq_model'
+              ? `${pred.market ?? 'NASDAQ'} MODEL`
+              : `${pred.horizon_seconds}S MODEL`
+            : pred.method === 'calibrating'
+              ? 'CALIBRATING SESSION BASELINE'
+              : 'ADAPTIVE ORDER-BOOK DIAGNOSTIC'}
+        </div>
+        {scenarioPhase && scenarioPhase !== 'ACTIVE' ? (
+          <div className="mt-1 font-mono text-[10px] tracking-[0.12em]" style={{ color }}>
+            {scenarioPhase}
+          </div>
+        ) : null}
+
+        {pred.features && (
           <div className="w-full mt-3 px-2">
             <div className="text-xs text-gray-600 mb-1 font-mono">FEATURES</div>
             {Object.entries(pred.features).map(([key, val]) => (

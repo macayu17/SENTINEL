@@ -10,6 +10,7 @@ from backend.src.agents.retail import RetailAgent
 from backend.src.agents.sentiment import SentimentAgent
 from backend.src.agents.spoofing import SpoofingAgent
 from backend.src.market.order import Order, OrderSide, OrderType
+from backend.src.market.trade import Trade
 
 
 def _state(**overrides):
@@ -62,6 +63,18 @@ def test_market_maker_widens_quotes_in_high_volatility():
     stress_width = max(order.price for order in stress_orders) - min(order.price for order in stress_orders)
 
     assert stress_width > calm_width
+
+
+def test_market_maker_joins_the_touch_in_a_calm_market():
+    agent = MarketMakerAgent("MM_TOUCH", base_spread=0.001, quote_size=200)
+
+    orders = agent.decide_action(_state(mid_price=100.0, spread=0.02))
+    prices = {order.side: order.price for order in orders}
+
+    assert prices == {
+        OrderSide.BUY: 99.99,
+        OrderSide.SELL: 100.01,
+    }
 
 
 def test_market_maker_near_inventory_cap_only_quotes_flattening_side():
@@ -210,6 +223,44 @@ def test_liquidity_trader_keeps_fresh_child_limit_until_reprice():
 
     assert agent.cancel_for_state(_state(spread=0.02)) == []
     assert agent.cancel_for_state(_state(mid_price=101.0, current_price=101.0, spread=0.02)) == [resting.order_id]
+
+
+def test_liquidity_trader_parent_quantity_tracks_fills_not_submissions():
+    agent = LiquidityTraderAgent(
+        "LIQ_FILL",
+        min_child_qty=50,
+        max_child_qty=50,
+    )
+    agent._active_side = OrderSide.BUY
+    agent._remaining_parent_qty = 100
+
+    order = agent.decide_action(_state())[0]
+
+    assert agent._remaining_parent_qty == 100
+
+    agent.update_position(
+        Trade(
+            buyer_order_id=order.order_id,
+            seller_order_id="maker-order",
+            buyer_agent_id=agent.agent_id,
+            seller_agent_id="maker",
+            price=100.01,
+            quantity=20,
+        )
+    )
+
+    assert agent._remaining_parent_qty == 80
+
+
+def test_liquidity_trader_waits_for_a_resting_child_before_slicing_again():
+    agent = LiquidityTraderAgent("LIQ_SERIAL", min_child_qty=50, max_child_qty=50)
+    agent._active_side = OrderSide.BUY
+    agent._remaining_parent_qty = 100
+    resting = Order("LIQ_SERIAL", OrderSide.BUY, OrderType.LIMIT, 99.99, 50)
+    agent.active_orders = {resting.order_id: resting}
+
+    assert agent.decide_action(_state()) == []
+    assert agent._remaining_parent_qty == 100
 
 
 def test_mean_reversion_keeps_fresh_entry_limit_until_reprice():

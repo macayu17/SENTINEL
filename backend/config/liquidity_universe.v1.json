@@ -1,0 +1,34 @@
+{
+  "version": "nse-liquidity-v1-2026-07-31",
+  "exchange": "NSE",
+  "segment": "EQ",
+  "selection": {
+    "metric": "median_daily_close_times_volume_inr",
+    "from_date": "2026-06-15",
+    "to_date": "2026-07-30",
+    "trading_days": 33,
+    "method": "Fixed diversified candidate basket ranked into traded-value tertiles"
+  },
+  "instruments": [
+    {"symbol": "HDFCBANK", "instrument_key": "NSE_EQ|INE040A01034", "liquidity_bucket": "high", "median_daily_traded_value_inr": 24919791610},
+    {"symbol": "ICICIBANK", "instrument_key": "NSE_EQ|INE090A01021", "liquidity_bucket": "high", "median_daily_traded_value_inr": 17802421949},
+    {"symbol": "RELIANCE", "instrument_key": "NSE_EQ|INE002A01018", "liquidity_bucket": "high", "median_daily_traded_value_inr": 16732438552},
+    {"symbol": "INFY", "instrument_key": "NSE_EQ|INE009A01021", "liquidity_bucket": "high", "median_daily_traded_value_inr": 13924660915},
+    {"symbol": "BHARTIARTL", "instrument_key": "NSE_EQ|INE397D01024", "liquidity_bucket": "high", "median_daily_traded_value_inr": 11055287590},
+    {"symbol": "SBIN", "instrument_key": "NSE_EQ|INE062A01020", "liquidity_bucket": "high", "median_daily_traded_value_inr": 10662950297},
+    {"symbol": "TCS", "instrument_key": "NSE_EQ|INE467B01029", "liquidity_bucket": "high", "median_daily_traded_value_inr": 9715749708},
+    {"symbol": "AXISBANK", "instrument_key": "NSE_EQ|INE238A01034", "liquidity_bucket": "medium", "median_daily_traded_value_inr": 8312842908},
+    {"symbol": "LT", "instrument_key": "NSE_EQ|INE018A01030", "liquidity_bucket": "medium", "median_daily_traded_value_inr": 6853452890},
+    {"symbol": "KOTAKBANK", "instrument_key": "NSE_EQ|INE237A01036", "liquidity_bucket": "medium", "median_daily_traded_value_inr": 5789922254},
+    {"symbol": "MARUTI", "instrument_key": "NSE_EQ|INE585B01010", "liquidity_bucket": "medium", "median_daily_traded_value_inr": 5519244808},
+    {"symbol": "BHEL", "instrument_key": "NSE_EQ|INE257A01026", "liquidity_bucket": "medium", "median_daily_traded_value_inr": 4698465602},
+    {"symbol": "SUNPHARMA", "instrument_key": "NSE_EQ|INE044A01036", "liquidity_bucket": "medium", "median_daily_traded_value_inr": 3749485902},
+    {"symbol": "TITAN", "instrument_key": "NSE_EQ|INE280A01028", "liquidity_bucket": "medium", "median_daily_traded_value_inr": 3094595977},
+    {"symbol": "CANBK", "instrument_key": "NSE_EQ|INE476A01022", "liquidity_bucket": "lower", "median_daily_traded_value_inr": 2681437586},
+    {"symbol": "BANDHANBNK", "instrument_key": "NSE_EQ|INE545U01014", "liquidity_bucket": "lower", "median_daily_traded_value_inr": 2178393543},
+    {"symbol": "FEDERALBNK", "instrument_key": "NSE_EQ|INE171A01029", "liquidity_bucket": "lower", "median_daily_traded_value_inr": 2051947857},
+    {"symbol": "IDFCFIRSTB", "instrument_key": "NSE_EQ|INE092T01019", "liquidity_bucket": "lower", "median_daily_traded_value_inr": 1582947494},
+    {"symbol": "PNB", "instrument_key": "NSE_EQ|INE160A01022", "liquidity_bucket": "lower", "median_daily_traded_value_inr": 1483756717},
+    {"symbol": "NMDC", "instrument_key": "NSE_EQ|INE584A01023", "liquidity_bucket": "lower", "median_daily_traded_value_inr": 1360058543}
+  ]
+}

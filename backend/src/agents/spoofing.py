@@ -1,7 +1,6 @@
 """Spoofing agent — manipulates order book with large phantom orders."""
 
 from typing import List, Dict, Optional
-import random
 from .base_agent import BaseAgent
 from .risk import AgentRiskProfile, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
@@ -89,7 +88,7 @@ class SpoofingAgent(BaseAgent):
         # ── State machine ───────────────────────────────────────────────
         if self._state == self.IDLE:
             # Pick a side and transition to spoofing
-            self._spoof_side = random.choice([OrderSide.BUY, OrderSide.SELL])
+            self._spoof_side = self.rng.choice([OrderSide.BUY, OrderSide.SELL])
             self._state = self.SPOOFING
             self._steps_in_state = 0
 
@@ -97,7 +96,7 @@ class SpoofingAgent(BaseAgent):
             if self._spoof_order_id is None:
                 # Place one large phantom order away from best price.
                 tick = 0.01
-                spoof_size = random.randint(self.spoof_size_min, self.spoof_size_max)
+                spoof_size = self.rng.randint(self.spoof_size_min, self.spoof_size_max)
 
                 if self._spoof_side == OrderSide.BUY:
                     spoof_price = round(price - self.spoof_ticks_offset * tick, 2)
@@ -144,7 +143,7 @@ class SpoofingAgent(BaseAgent):
             # Enter cooldown
             self._state = self.COOLDOWN
             self._steps_in_state = 0
-            self._cooldown_target = random.randint(self.cooldown_min, self.cooldown_max)
+            self._cooldown_target = self.rng.randint(self.cooldown_min, self.cooldown_max)
 
         elif self._state == self.COOLDOWN:
             if self._steps_in_state >= self._cooldown_target:

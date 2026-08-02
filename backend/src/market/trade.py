@@ -15,6 +15,7 @@ class Trade:
     seller_agent_id: str
     price: float
     quantity: int
+    taker_agent_id: str = ""  # aggressor; the other side rested and earns the maker rate
     trade_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     timestamp: float = field(default_factory=time.time)
 

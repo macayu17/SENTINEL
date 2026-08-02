@@ -4,7 +4,6 @@ from typing import List, Dict
 from .base_agent import BaseAgent
 from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
-import random
 
 
 class InstitutionalAgent(BaseAgent):
@@ -30,7 +29,7 @@ class InstitutionalAgent(BaseAgent):
         self.max_slice_size = max_slice_size
         self.start_after_seconds = start_after_seconds
         self.executed_quantity: int = 0
-        self.side: OrderSide = random.choice([OrderSide.BUY, OrderSide.SELL])
+        self.side: OrderSide = self.rng.choice([OrderSide.BUY, OrderSide.SELL])
         self._last_slice_time: float = 0.0
         self._start_time: float = 0.0
         self._started: bool = False
@@ -96,6 +95,10 @@ class InstitutionalAgent(BaseAgent):
                 quantity_cap=twap_size,
             )
             if order is not None:
+                # Work the slice as an iceberg so the parent order's true size
+                # is not advertised to the book.
+                if order.order_type != OrderType.MARKET and order.quantity > 1:
+                    order.display_quantity = max(1, order.quantity // 4)
                 orders.append(order)
                 self._last_slice_time = current_time
 
@@ -105,7 +108,7 @@ class InstitutionalAgent(BaseAgent):
         if self.start_after_seconds is not None:
             return max(0.0, float(self.start_after_seconds))
         latest = max(float(self.slice_interval), min(600.0, self.execution_window * 0.2))
-        return random.uniform(0.0, latest)
+        return self.rng.uniform(0.0, latest)
 
     def update_position(self, trade) -> None:
         super().update_position(trade)
@@ -114,7 +117,7 @@ class InstitutionalAgent(BaseAgent):
     def reset(self) -> None:
         super().reset()
         self.executed_quantity = 0
-        self.side = random.choice([OrderSide.BUY, OrderSide.SELL])
+        self.side = self.rng.choice([OrderSide.BUY, OrderSide.SELL])
         self._last_slice_time = 0.0
         self._start_time = 0.0
         self._started = False

@@ -12,7 +12,6 @@ import {
   ComposedChart,
 } from 'recharts';
 import { useMarketStore } from '@/store/market-store';
-import type { MarketDataSource } from '@/types/market';
 
 const IST_TIME_FORMATTER = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
@@ -27,47 +26,13 @@ function formatISTTime(timestampMs: number): string {
   return IST_TIME_FORMATTER.format(new Date(timestampMs));
 }
 
-function parseProviderTime(value?: string | null): number | null {
-  if (!value) return null;
-  const normalized = value.trim().replace(' ', 'T');
-  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(normalized);
-  const timestampValue = isDateOnly ? `${normalized}T00:00:00+05:30` : normalized;
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestampValue);
-  const timestamp = Date.parse(hasZone ? timestampValue : `${timestampValue}+05:30`);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function replayTimestampMs(
-  pointTime: number,
-  firstPointTime: number,
-  source?: MarketDataSource | null,
-): number | null {
-  if (source?.source !== 'historical_replay') return null;
-  const start = parseProviderTime(source.period_start);
-  const end = parseProviderTime(source.period_end);
-  if (start === null || end === null || end <= start) return null;
-
-  const replaySteps = Math.max(1, source.replay_steps ?? source.bars ?? 1);
-  const progress = Math.min(1, Math.max(0, (pointTime - firstPointTime) / replaySteps));
-  return start + (end - start) * progress;
-}
-
 function formatChartTime(timestampMs: number): string {
   return formatISTTime(timestampMs);
 }
 
-function providerTimestampMs(
-  point: { time: number; receivedAt: number; providerTimestamp?: string | null },
-  firstPointTime: number,
-  source?: MarketDataSource | null,
-): number {
-  if (source?.source === 'historical_replay') {
-    return replayTimestampMs(point.time, firstPointTime, source) ?? point.receivedAt;
-  }
-  if (source?.source === 'live_depth' || source?.source === 'live_ltp') {
-    return parseProviderTime(point.providerTimestamp) ?? point.receivedAt;
-  }
-  return point.receivedAt;
+function formatPrice(value: number, digits = 2, symbol = '$'): string {
+  if (!Number.isFinite(value)) return `${symbol}--`;
+  return `${symbol}${value.toFixed(digits)}`;
 }
 
 interface CustomTooltipProps {
@@ -93,14 +58,14 @@ function TerminalTooltip({ active, payload, label }: CustomTooltipProps) {
 export default function PriceChart() {
   const priceHistory = useMarketStore((s) => s.priceHistory);
   const marketData = useMarketStore((s) => s.marketData);
-  const dataSource = marketData?.data_source ?? null;
-  const firstPointTime = priceHistory[0]?.time ?? 0;
   const chartData = priceHistory.map((point) => ({
     ...point,
-    chartTimeMs: providerTimestampMs(point, firstPointTime, dataSource),
+    chartTimeMs: point.receivedAt,
   }));
+  const hasFundamental = chartData.some((point) => typeof point.fundamental === 'number');
 
   const currentPrice = marketData?.price ?? 0;
+  const currencySymbol = marketData?.market === 'NASDAQ' ? '$' : '₹';
   const priceChange = priceHistory.length > 1
     ? currentPrice - priceHistory[0].price
     : 0;
@@ -121,13 +86,18 @@ export default function PriceChart() {
           <span className="text-[10px] font-mono tracking-[0.14em] text-amber-500/80">
             AMBER = BID-ASK SPREAD
           </span>
+          {hasFundamental ? (
+            <span className="text-[10px] font-mono tracking-[0.14em] text-cyan-400">
+              CYAN = LATENT VALUE
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-lg font-mono font-bold text-white">
-            ${currentPrice.toFixed(2)}
+            {formatPrice(currentPrice, 2, currencySymbol)}
           </span>
           <span className="text-xs font-mono" style={{ color: changeColor }}>
-            {priceChange >= 0 ? '▲' : '▼'} {Math.abs(priceChange).toFixed(4)} ({pctChange.toFixed(2)}%)
+            {priceChange >= 0 ? '▲' : '▼'} {formatPrice(Math.abs(priceChange), 4, currencySymbol)} ({pctChange.toFixed(2)}%)
           </span>
         </div>
       </div>
@@ -154,7 +124,7 @@ export default function PriceChart() {
               domain={['auto', 'auto']}
               stroke="#333"
               tick={{ fill: '#555', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
-              tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+              tickFormatter={(v: number) => formatPrice(v, 2, currencySymbol)}
               width={65}
             />
             <YAxis
@@ -188,6 +158,19 @@ export default function PriceChart() {
               animationDuration={0}
               style={{ filter: 'drop-shadow(0 0 3px rgba(0, 255, 65, 0.4))' }}
             />
+            {hasFundamental ? (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="fundamental"
+                stroke="#22d3ee"
+                strokeWidth={1.25}
+                strokeDasharray="5 3"
+                dot={false}
+                connectNulls
+                animationDuration={0}
+              />
+            ) : null}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -196,7 +179,7 @@ export default function PriceChart() {
       <div className="flex justify-between px-3 py-1 border-t border-gray-800 text-xs font-mono">
         <span className="text-gray-500">SPREAD: <span className="text-amber-400">{marketData?.spread?.toFixed(4) ?? '—'}</span></span>
         <span className="text-gray-500">DEPTH: <span className="text-cyan-400">{marketData?.depth?.toLocaleString() ?? '—'}</span></span>
-        <span className="text-gray-500">VOL: <span className="text-purple-400">{marketData?.volatility?.toFixed(4) ?? '—'}</span></span>
+        <span className="text-gray-500">SIM VOL: <span className="text-purple-400">{marketData?.volatility?.toFixed(4) ?? '—'}</span></span>
         <span className="text-gray-500">STEP: <span className="text-gray-300">{marketData?.step?.toLocaleString() ?? '—'}</span></span>
       </div>
     </div>

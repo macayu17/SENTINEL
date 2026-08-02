@@ -15,6 +15,13 @@ class OrderSide(str, Enum):
 class OrderType(str, Enum):
     MARKET = "market"
     LIMIT = "limit"
+    POST_ONLY = "post_only"  # maker-only: rejected outright if it would cross
+    IOC = "ioc"              # immediate-or-cancel: fill what you can, never rest
+    STOP = "stop"            # parked at the venue; becomes a market order on trigger
+
+
+#: Order types that rest on the book rather than sweeping it.
+RESTING_ORDER_TYPES = frozenset({OrderType.LIMIT, OrderType.POST_ONLY})
 
 
 class OrderStatus(str, Enum):
@@ -37,10 +44,22 @@ class Order:
     timestamp: float = field(default_factory=time.time)
     filled_quantity: int = 0
     status: OrderStatus = OrderStatus.PENDING
-
+    #: Iceberg: shares shown to the book at a time. 0 means fully displayed.
+    display_quantity: int = 0
     @property
     def remaining_quantity(self) -> int:
         return self.quantity - self.filled_quantity
+
+    @property
+    def is_iceberg(self) -> bool:
+        return 0 < self.display_quantity < self.quantity
+
+    @property
+    def displayed_quantity(self) -> int:
+        """Shares visible in market data — the hidden remainder is not quoted."""
+        if not self.is_iceberg:
+            return self.remaining_quantity
+        return min(self.display_quantity, self.remaining_quantity)
 
     @property
     def is_filled(self) -> bool:

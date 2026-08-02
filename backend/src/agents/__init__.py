@@ -10,8 +10,6 @@ from .mean_reversion import MeanReversionAgent
 from .spoofing import SpoofingAgent
 from .sentiment import SentimentAgent
 from .liquidity_trader import LiquidityTraderAgent
-from .rl_agent import RLAgent
-from .factory import create_agent, create_population
 
 __all__ = [
     "BaseAgent",
@@ -23,7 +21,4 @@ __all__ = [
     "NoiseAgent",
     "MomentumAgent", "MeanReversionAgent", "SpoofingAgent", "SentimentAgent",
     "LiquidityTraderAgent",
-    "RLAgent",
-    "create_agent",
-    "create_population",
 ]

@@ -1,7 +1,6 @@
-"""Informed agent — trades on randomly generated directional signals."""
+"""Informed agent that trades on the simulator's optional fundamental oracle."""
 
 from typing import List, Dict
-import random
 from .base_agent import BaseAgent
 from .risk import AgentRiskProfile, near_touch_price, risk_limited_exit_order, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
@@ -44,11 +43,10 @@ class InformedAgent(BaseAgent):
     def decide_action(self, market_state: Dict) -> List[Order]:
         current_time = market_state.get("current_time", 0.0)
         price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
-        flow = market_state.get("recent_signed_volume", 0.0)
-        imbalance = market_state.get("order_book_imbalance", 0.0)
-        trend = market_state.get("recent_price_change", 0.0)
         spread = float(market_state.get("spread", 0.05) or 0.05)
         volatility = float(market_state.get("volatility", 0.0) or 0.0)
+        oracle = market_state.get("oracle") or {}
+        fundamental = oracle.get("fundamental_value")
         orders: List[Order] = []
 
         # Check if current signal has expired
@@ -69,17 +67,40 @@ class InformedAgent(BaseAgent):
             self._active_signal = None
             return orders
 
+        if self._active_signal and isinstance(fundamental, (int, float)):
+            gap = fundamental - price
+            live_direction = "buy" if gap > 0 else "sell"
+            if abs(gap) <= max(0.01, spread / 2) or live_direction != self._active_signal:
+                if self.position != 0:
+                    order = risk_limited_exit_order(
+                        self.risk_profile,
+                        agent_id=self.agent_id,
+                        position=self.position,
+                        price=price,
+                        market_state=market_state,
+                        volatility=volatility,
+                        aggression=1.5,
+                    )
+                    if order is not None:
+                        orders.append(order)
+                self._active_signal = None
+                return orders
+
         # Check for new signal
-        if not self._active_signal and random.random() < self.signal_probability:
-            # Microstructure-informed direction guess with some randomness.
-            score = 0.8 * trend + 0.15 * imbalance + 0.05 * (1 if flow > 0 else -1 if flow < 0 else 0)
-            if abs(score) < 1e-6:
-                direction = "buy" if random.random() < 0.5 else "sell"
-            else:
-                direction = "buy" if score > 0 else "sell"
-            # Accuracy: with signal_accuracy chance, the direction is correct
-            if random.random() > self.signal_accuracy:
-                direction = "sell" if direction == "buy" else "buy"
+        if not self._active_signal and self.rng.random() < self.signal_probability:
+            if not isinstance(fundamental, (int, float)):
+                return orders
+            observation_noise = max(
+                0.0,
+                float(oracle.get("observation_noise", 0.0) or 0.0),
+            )
+            observed_fundamental = fundamental + self.rng.gauss(
+                0.0,
+                observation_noise,
+            )
+            if abs(observed_fundamental - price) <= max(0.01, spread / 2):
+                return orders
+            direction = "buy" if observed_fundamental > price else "sell"
             self._active_signal = direction
             self._signal_start_time = current_time
 

@@ -17,7 +17,9 @@ function finiteNumber(value: unknown, fallback: number): number {
 
 function normalizeMarketUpdate(data: Partial<MarketUpdate>): MarketUpdate {
   return {
-    type: data.type === 'abides_update' ? 'abides_update' : 'market_update',
+    type: 'market_update',
+    market: data.market ?? 'NASDAQ',
+    venue: data.venue ?? data.market ?? 'NASDAQ',
     timestamp: finiteNumber(data.timestamp, 0),
     price: finiteNumber(data.price, 0),
     spread: finiteNumber(data.spread, 0),
@@ -28,8 +30,15 @@ function normalizeMarketUpdate(data: Partial<MarketUpdate>): MarketUpdate {
     agent_metrics: data.agent_metrics ?? {},
     step: finiteNumber(data.step, 0),
     volatility: finiteNumber(data.volatility, 0),
-    mode: data.mode ?? 'SANDBOX',
-    engine: data.engine,
+    session_phase: data.session_phase ?? 'CONTINUOUS',
+    activity_multiplier: finiteNumber(data.activity_multiplier, 1),
+    scenario: data.scenario ?? {
+      name: 'normal',
+      label: 'Normal Session',
+      description: '',
+      phase: 'ACTIVE',
+    },
+    latency_mode: data.latency_mode ?? 'DETERMINISTIC',
     data_source: data.data_source ?? null,
     events: data.events ?? [],
     order_flow: data.order_flow,
@@ -112,7 +121,7 @@ export function useMarketWebSocket() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as Partial<MarketUpdate>;
-          if (data.type === 'market_update' || data.type === 'abides_update') {
+          if (data.type === 'market_update') {
             latestUpdateRef.current = normalizeMarketUpdate(data);
             scheduleFlush();
           }

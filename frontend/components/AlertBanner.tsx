@@ -10,7 +10,7 @@ export default function AlertBanner() {
   const activeAlerts = alerts.filter((a) => !a.dismissed);
   const latestAlert = activeAlerts[activeAlerts.length - 1];
 
-  // Auto-dismiss caution alerts after 10s
+  // Retain compatibility with caution alerts from older stored sessions.
   useEffect(() => {
     const cautions = activeAlerts.filter((a) => a.level === 'caution');
     const timers = cautions.map((a) =>

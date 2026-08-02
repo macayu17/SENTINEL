@@ -2,7 +2,6 @@
 
 from typing import List, Dict
 from collections import deque
-import random
 from .base_agent import BaseAgent
 from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
 from ..market.order import Order, OrderSide, OrderType
@@ -37,7 +36,7 @@ class SentimentAgent(BaseAgent):
         self._price_history: deque = deque(maxlen=lookback + 5)
 
         # Start in herding or contrarian mode randomly
-        self._is_herding: bool = random.random() < herding_probability
+        self._is_herding: bool = self.rng.random() < herding_probability
         self.risk_profile = AgentRiskProfile(
             max_inventory=position_limit,
             base_order_size=order_size,
@@ -58,11 +57,11 @@ class SentimentAgent(BaseAgent):
             return orders
 
         # ── Regime switching ────────────────────────────────────────────
-        if random.random() < self.regime_switch_prob:
+        if self.rng.random() < self.regime_switch_prob:
             self._is_herding = not self._is_herding
 
         # ── Only act with some probability (not every step) ─────────────
-        if random.random() > self.action_probability:
+        if self.rng.random() > self.action_probability:
             return orders
 
         # ── Determine recent trend ──────────────────────────────────────
@@ -123,4 +122,4 @@ class SentimentAgent(BaseAgent):
     def reset(self) -> None:
         super().reset()
         self._price_history.clear()
-        self._is_herding = random.random() < self.herding_probability
+        self._is_herding = self.rng.random() < self.herding_probability

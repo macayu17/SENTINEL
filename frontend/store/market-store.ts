@@ -1,12 +1,12 @@
 import { create } from 'zustand';
-import type { Alert, MarketUpdate, SimulationMode } from '@/types/market';
+import type { Alert, MarketUpdate } from '@/types/market';
 
 type PriceHistoryPoint = {
   time: number;
   receivedAt: number;
-  providerTimestamp?: string | null;
   price: number;
   spread: number;
+  fundamental?: number;
 };
 
 interface MarketStore {
@@ -15,16 +15,12 @@ interface MarketStore {
   connected: boolean;
   alerts: Alert[];
   simulationRunning: boolean;
-  simulationMode: SimulationMode;
 
   setMarketData: (data: MarketUpdate) => void;
   setConnected: (connected: boolean) => void;
-  addAlert: (alert: Alert) => void;
   dismissAlert: (id: string) => void;
-  clearAlerts: () => void;
   resetSimulationData: () => void;
   setSimulationRunning: (running: boolean) => void;
-  setSimulationMode: (mode: SimulationMode) => void;
 }
 
 const MAX_PRICE_HISTORY = 240;
@@ -68,7 +64,7 @@ function buildNextAlerts(
 
   nextAlerts.push({
     id: `alert-${receivedAt}-${level}`,
-    message: `Liquidity ${level.toUpperCase()}: Health ${prediction.health_score.toFixed(1)}% | Shock probability ${(prediction.probability * 100).toFixed(1)}%`,
+    message: `Liquidity ${level.toUpperCase()}: Health ${prediction.health_score.toFixed(1)}% | Current stress ${(prediction.stress_score * 100).toFixed(1)}%`,
     level,
     timestamp: data.timestamp,
     dismissed: false,
@@ -82,7 +78,6 @@ export const useMarketStore = create<MarketStore>((set) => ({
   connected: false,
   alerts: [],
   simulationRunning: false,
-  simulationMode: 'SANDBOX',
 
   setMarketData: (data: MarketUpdate) =>
     set((state) => {
@@ -90,9 +85,9 @@ export const useMarketStore = create<MarketStore>((set) => ({
       const newPoint = {
         time: data.timestamp,
         receivedAt,
-        providerTimestamp: data.data_source?.timestamp ?? null,
         price: data.price,
         spread: data.spread,
+        fundamental: data.oracle?.fundamental_value,
       };
       const history = appendBoundedPricePoint(state.priceHistory, newPoint);
       const alerts = buildNextAlerts(state, data, receivedAt);
@@ -101,19 +96,10 @@ export const useMarketStore = create<MarketStore>((set) => ({
         marketData: data,
         priceHistory: history,
         alerts,
-        simulationMode: data.mode,
       };
     }),
 
   setConnected: (connected: boolean) => set({ connected }),
-
-  addAlert: (alert: Alert) =>
-    set((state) => ({
-      alerts:
-        state.alerts.length >= MAX_ALERTS
-          ? [...state.alerts.slice(state.alerts.length - MAX_ALERTS + 1), alert]
-          : [...state.alerts, alert],
-    })),
 
   dismissAlert: (id: string) =>
     set((state) => ({
@@ -122,18 +108,13 @@ export const useMarketStore = create<MarketStore>((set) => ({
       ),
     })),
 
-  clearAlerts: () => set({ alerts: [] }),
-
   resetSimulationData: () =>
     set({
       marketData: null,
       priceHistory: [],
       alerts: [],
       simulationRunning: false,
-      simulationMode: 'SANDBOX',
     }),
 
   setSimulationRunning: (running: boolean) => set({ simulationRunning: running }),
-
-  setSimulationMode: (mode: SimulationMode) => set({ simulationMode: mode }),
 }));

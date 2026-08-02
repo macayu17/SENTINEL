@@ -13,7 +13,7 @@ from backend.src.market.market_data import StockInfo, build_oracle_path
 def test_build_oracle_path_extends_with_bar_return_volatility():
     info = StockInfo(
         ticker="NSE-WIPRO",
-        name="NSE-WIPRO Groww CASH",
+        name="NSE-WIPRO Upstox minutes/30",
         currency="INR",
         last_close=100.0,
         period_start="2025-09-24T09:15:00",

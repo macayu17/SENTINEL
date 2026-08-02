@@ -63,7 +63,7 @@ flowchart LR
 
 ### 5.2 REST Read Model
 - Snapshot and prediction endpoints query the in-memory simulator state.
-- Health endpoint reports backend connectivity, mode, and RL readiness.
+- Health endpoint reports backend connectivity, mode, and simulator activity.
 
 ## 6. State and Deployment Notes
 - Simulator state is in-memory; running multiple backend replicas requires externalized state or sharding.
@@ -74,8 +74,6 @@ flowchart LR
 Key environment variables (backend):
 - SIMULATION_DURATION
 - INITIAL_PRICE
-- RL_POLICY_ENABLED
-- RL_MODEL_PATH
 - FRONTEND_URL
 - ALLOWED_ORIGINS
 

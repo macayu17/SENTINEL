@@ -1,0 +1,28 @@
+{
+  "artifact_type": "lobster_nasdaq_liquidity_shock",
+  "venue": "NASDAQ",
+  "symbol": "AAPL",
+  "source": "LOBSTER free sample mirror of the official sample",
+  "snapshot_count": 400391,
+  "labelled_samples": 40028,
+  "train_samples": 28019,
+  "test_samples": 6005,
+  "feature_names": [
+    "spread_bps",
+    "depth_log",
+    "imbalance",
+    "spread_ratio",
+    "depth_ratio",
+    "depth_change_ratio"
+  ],
+  "label_definition": "future spread >= 2.5x past 100-event median OR future depth <= 40% of past median within 20 events",
+  "metrics": {
+    "roc_auc": 0.9341244316291448,
+    "average_precision": 0.6044060665732478,
+    "balanced_accuracy": 0.8053217721806684,
+    "f1": 0.47058823529411764,
+    "threshold": 0.8999999999999999,
+    "test_positive_rate": 0.04229808492922565
+  },
+  "not_for_nse_runtime": true
+}
