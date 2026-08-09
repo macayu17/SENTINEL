@@ -1,42 +1,37 @@
 import { getApiBaseUrl } from '@/lib/runtime-config';
-import type { SimulationMode } from '@/types/market';
 import type {
-  AbidesSandboxCreateRequest,
-  GrowwLiveRequest,
-  GrowwQuoteResponse,
-  GrowwReplayRequest,
   SandboxCreateRequest,
   SandboxPreset,
   SandboxScenario,
-  UpstoxInstrumentResult,
-  UpstoxLiveRequest,
-  UpstoxReplayRequest,
 } from '@/types/api';
 
-export type { SimulationMode } from '@/types/market';
 export type {
-  AbidesSandboxCreateRequest,
-  GrowwLiveRequest,
-  GrowwReplayRequest,
   LatencyMode,
   SandboxCreateRequest,
   SandboxPreset,
   SandboxScenario,
-  UpstoxInstrumentResult,
-  UpstoxLiveRequest,
-  UpstoxReplayRequest,
 } from '@/types/api';
 
 class SentinelAPI {
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    const url = `${getApiBaseUrl()}${path}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    });
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}${path}`;
+    let response: Response;
+
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+      });
+    } catch {
+      throw new Error(
+        `Backend unavailable at ${baseUrl}. Start it with: py -3.11 -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000`,
+      );
+    }
+
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`;
       try {
@@ -55,31 +50,15 @@ class SentinelAPI {
       status: string;
       simulation_active: boolean;
       connected_clients: number;
-      mode: SimulationMode;
     }>('/api/health');
-  }
-
-  async startSimulation() {
-    return this.request<{ status: string; agents: number; initial_price: number }>('/api/simulation/start', { method: 'POST' });
   }
 
   async stopSimulation() {
     return this.request<{ status: string }>('/api/simulation/stop', { method: 'POST' });
   }
 
-  async setSimulationMode(mode: 'SANDBOX') {
-    return this.request<{ status: string; mode: string }>('/api/simulation/mode', {
-      method: 'POST',
-      body: JSON.stringify({ mode }),
-    });
-  }
-
   async getSandboxPresets() {
     return this.request<Record<string, SandboxPreset>>('/api/sandbox/presets');
-  }
-
-  async getSandboxCapabilities() {
-    return this.request<{ abides: boolean }>('/api/sandbox/capabilities');
   }
 
   async getSandboxScenarios() {
@@ -100,215 +79,11 @@ class SentinelAPI {
     });
   }
 
-  async createAbidesSandbox(config: AbidesSandboxCreateRequest) {
-    return this.request<{
-      status: string;
-      engine: 'ABIDES';
-      oracle_enabled: boolean;
-      oracle_auto_enabled: boolean;
-      speed: number;
-      agents: number;
-    }>('/api/sandbox/abides/create', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async fetchGrowwHistorical(config: GrowwReplayRequest) {
-    return this.request<{
-      provider: 'groww';
-      source: 'historical';
-      status: string;
-      mode: SimulationMode;
-      groww_symbol: string;
-      name: string;
-      currency: string;
-      last_close: number;
-      bars: number;
-      price_preview: number[];
-    }>('/api/live-shadow/groww/fetch', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async startGrowwReplay(config: GrowwReplayRequest) {
-    return this.request<{
-      status: string;
-      mode: 'LIVE_SHADOW';
-      provider: 'groww';
-      source: 'historical_replay';
-      groww_symbol: string;
-      initial_price: number;
-      bars: number;
-      replay_steps: number;
-      realized_vol: number;
-      agents: number;
-      speed: number;
-      scenario?: string;
-      depth_source: string;
-      order_book_history: string;
-    }>('/api/live-shadow/groww/replay', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async fetchGrowwQuote(config: Pick<GrowwLiveRequest, 'groww_symbol' | 'exchange' | 'segment'>) {
-    return this.request<GrowwQuoteResponse>('/api/live-shadow/groww/quote', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async startGrowwLive(config: GrowwLiveRequest) {
-    return this.request<{
-      status: string;
-      mode: 'LIVE_SHADOW';
-      provider: 'groww';
-      source: 'live_depth';
-      groww_symbol: string;
-      initial_price: number;
-      last_price: number;
-      depth_source: string;
-      poll_interval_seconds: number;
-      agents: number;
-      speed: number;
-      scenario?: string;
-    }>('/api/live-shadow/groww/live', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async fetchUpstoxHistorical(config: UpstoxReplayRequest) {
-    return this.request<{
-      provider: 'upstox';
-      source: 'historical';
-      status: string;
-      mode: SimulationMode;
-      instrument_key: string;
-      name: string;
-      currency: string;
-      last_close: number;
-      bars: number;
-      price_preview: number[];
-    }>('/api/live-shadow/upstox/fetch', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async searchUpstoxInstruments(config: {
-    query: string;
-    exchanges?: string;
-    segments?: string;
-    page_number?: number;
-    records?: number;
-  }) {
-    const params = new URLSearchParams({
-      query: config.query,
-      exchanges: config.exchanges ?? 'NSE',
-      segments: config.segments ?? 'EQ',
-      page_number: String(config.page_number ?? 1),
-      records: String(config.records ?? 10),
-    });
-    return this.request<{
-      provider: 'upstox';
-      source: 'instrument_search';
-      status: string;
-      query: string;
-      results: UpstoxInstrumentResult[];
-    }>(`/api/live-shadow/upstox/instruments?${params.toString()}`);
-  }
-
-  async fetchUpstoxLtp(config: { instrument_key: string }) {
-    return this.request<{
-      provider: 'upstox';
-      source: 'live_ltp';
-      status: string;
-      mode: 'LIVE_SHADOW';
-      instrument_key: string;
-      last_price: number;
-      ltq?: number | null;
-      volume?: number | null;
-      previous_close?: number | null;
-    }>('/api/live-shadow/upstox/ltp', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async startUpstoxLive(config: UpstoxLiveRequest) {
-    return this.request<{
-      status: string;
-      mode: 'LIVE_SHADOW';
-      provider: 'upstox';
-      source: 'live_depth';
-      instrument_key: string;
-      initial_price: number;
-      last_price: number;
-      depth_source: string;
-      poll_interval_seconds: number;
-      agents: number;
-      speed: number;
-      scenario?: string;
-    }>('/api/live-shadow/upstox/live', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  async startUpstoxReplay(config: UpstoxReplayRequest) {
-    return this.request<{
-      status: string;
-      mode: 'LIVE_SHADOW';
-      provider: 'upstox';
-      source: 'historical_replay';
-      instrument_key: string;
-      initial_price: number;
-      bars: number;
-      replay_steps: number;
-      realized_vol: number;
-      agents: number;
-      speed: number;
-      scenario?: string;
-      depth_source: string;
-      order_book_history: string;
-    }>('/api/live-shadow/upstox/replay', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
   async setSandboxSpeed(speed: number) {
     return this.request<{ speed: number } | { error: string }>('/api/sandbox/speed', {
       method: 'PUT',
       body: JSON.stringify({ speed }),
     });
-  }
-
-  async setAbidesSpeed(speed: number) {
-    return this.request<{ speed: number } | { error: string }>('/api/sandbox/abides/speed', {
-      method: 'PUT',
-      body: JSON.stringify({ speed }),
-    });
-  }
-
-  async getLiquidityPrediction() {
-    return this.request('/api/prediction/liquidity');
-  }
-
-  async getLargeOrderDetection() {
-    return this.request('/api/prediction/large-order');
-  }
-
-  async getAgentMetrics() {
-    return this.request('/api/agents/metrics');
-  }
-
-  async getMarketSnapshot() {
-    return this.request('/api/market/snapshot');
   }
 
   async exportSimulation() {
