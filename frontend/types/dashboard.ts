@@ -1,22 +1,3 @@
-export type ProjectStage = 'Research Prototype' | 'System Integration' | 'Training and Evaluation';
-
-export type MilestoneStatus = 'completed' | 'in-progress' | 'pending';
-
-export interface Milestone {
-  phase: string;
-  title: string;
-  status: MilestoneStatus;
-  detail: string;
-}
-
-export interface ProjectOverview {
-  name: string;
-  summary: string;
-  currentStage: ProjectStage;
-  completed: string[];
-  inProgress: string[];
-}
-
 export interface TradeFlowPoint {
   id: string;
   time: string;
@@ -41,9 +22,6 @@ export interface ExecutionSummary {
 }
 
 export interface AgentActivity {
-  marketMakerAction: string;
-  noiseAgentAction: string;
-  rlAgentStatus: string;
   recentOrders: RecentOrder[];
   executionSummary: ExecutionSummary;
 }
@@ -63,8 +41,6 @@ export interface KernelEvent {
 }
 
 export interface SimulationDashboardData {
-  projectOverview: ProjectOverview;
-  milestones: Milestone[];
   tradeFlow: TradeFlowPoint[];
   agentActivity: AgentActivity;
   events: KernelEvent[];

@@ -27,7 +27,6 @@ class RetailAgent(BaseAgent):
         self.take_profit = take_profit
         self.order_size = order_size
         self._price_history: deque = deque(maxlen=60)
-        self._entry_price: float = 0.0
         self._stop_armed: bool = False
         self.risk_profile = AgentRiskProfile(
             max_inventory=max(500, order_size * 10),
@@ -55,10 +54,10 @@ class RetailAgent(BaseAgent):
 
         # Arm a resting stop once, so the venue triggers it the instant price
         # breaches — not on the next wakeup, several stale ticks later.
-        if self.position != 0 and self._entry_price > 0 and not self._stop_armed:
+        if self.position != 0 and self.avg_entry_price > 0 and not self._stop_armed:
             self._stop_armed = True
             long_position = self.position > 0
-            trigger = self._entry_price * (
+            trigger = self.avg_entry_price * (
                 1 - self.stop_loss if long_position else 1 + self.stop_loss
             )
             orders.append(
@@ -74,8 +73,8 @@ class RetailAgent(BaseAgent):
             self._stop_armed = False
 
         # Take-profit is discretionary, so it stays a wakeup-time decision.
-        if self.position != 0 and self._entry_price > 0:
-            pnl_pct = (price - self._entry_price) / self._entry_price
+        if self.position != 0 and self.avg_entry_price > 0:
+            pnl_pct = (price - self.avg_entry_price) / self.avg_entry_price
             if self.position < 0:
                 pnl_pct = -pnl_pct
 
@@ -92,7 +91,6 @@ class RetailAgent(BaseAgent):
                 )
                 if order is not None:
                     orders.append(order)
-                self._entry_price = 0.0
                 return orders
 
         # MA crossover signals (only if no position)
@@ -117,7 +115,6 @@ class RetailAgent(BaseAgent):
                 if order is None:
                     return orders
                 orders.append(order)
-                self._entry_price = price
 
             # Bearish crossover
             elif prev_ma20 >= prev_ma50 and ma20 < ma50:
@@ -136,12 +133,10 @@ class RetailAgent(BaseAgent):
                 if order is None:
                     return orders
                 orders.append(order)
-                self._entry_price = price
 
         return orders
 
     def reset(self) -> None:
         super().reset()
         self._price_history.clear()
-        self._entry_price = 0.0
         self._stop_armed = False

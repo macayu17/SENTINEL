@@ -105,7 +105,7 @@ class HFTAgent(BaseAgent):
             if order is not None:
                 orders.append(order)
 
-        # Momentum override
+        # Strong short-term momentum takes precedence over the slower z-score.
         if abs(momentum) > self.momentum_threshold:
             side = OrderSide.BUY if momentum > 0 else OrderSide.SELL
             order_type = OrderType.MARKET if spread <= 0.03 and volatility < 0.04 else OrderType.LIMIT
@@ -122,10 +122,10 @@ class HFTAgent(BaseAgent):
                 aggression=min(1.5, abs(momentum) / self.momentum_threshold),
             )
             if order is not None:
-                orders.append(order)
+                orders = [order]
 
-        # Imbalance scalp: small passive quote on pressured side when spread supports it.
-        if imbalance_order is not None:
+        # Use imbalance only when neither directional signal fired.
+        if not orders and imbalance_order is not None:
             orders.append(imbalance_order)
         return orders
 

@@ -123,3 +123,16 @@ class SentimentAgent(BaseAgent):
         super().reset()
         self._price_history.clear()
         self._is_herding = self.rng.random() < self.herding_probability
+
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        if not self.active_orders:
+            return []
+        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        spread = float(market_state.get("spread", 0.05) or 0.05)
+        if self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=near_touch_price(price, OrderSide.BUY, spread),
+            target_ask=near_touch_price(price, OrderSide.SELL, spread),
+        ):
+            return self.cancel_all_active_orders()
+        return []

@@ -67,8 +67,8 @@ class NoiseAgent(BaseAgent):
                 )
             )
         else:
-            # Limit order within 0.5% of mid price
-            offset = price * self.rng.uniform(0.001, 0.005)
+            # Passive background liquidity belongs near the touch, not deep in the book.
+            offset = self.rng.randint(1, 3) * 0.01
             limit_price = round(
                 price - offset if side == OrderSide.BUY else price + offset, 2
             )

@@ -1,7 +1,5 @@
 // ── SENTINEL Market Types ──────────────────────────────────────────────────
 
-export type SimulationMode = 'SANDBOX' | 'LIVE_SHADOW';
-
 export interface OrderLevel {
   price: number;
   size: number;
@@ -43,38 +41,6 @@ export interface AgentMetric {
   agent_type: string;
   position: number;
   num_trades: number;
-}
-
-export interface MarketDataSource {
-  provider: string;
-  source: string;
-  status: "connected" | "loading" | "error" | "disconnected" | string;
-  instrument_key?: string;
-  exchange?: string;
-  segment?: string;
-  scenario?: string;
-  unit?: string;
-  interval?: string;
-  bars?: number;
-  replay_steps?: number;
-  period_start?: string;
-  period_end?: string;
-  last_price?: number;
-  ltq?: number | null;
-  volume?: number | null;
-  previous_close?: number | null;
-  timestamp?: string | null;
-  total_buy_quantity?: number | null;
-  total_sell_quantity?: number | null;
-  depth_source?: string | null;
-  depth_note?: string | null;
-  order_book_source?: string | null;
-  order_book_history?: string | null;
-  depth_model?: Record<string, number | string | boolean | null> | null;
-  order_book?: OrderBook | null;
-  poll_interval_seconds?: number;
-  last_update_step?: number;
-  error?: string;
 }
 
 export interface MarketEvent {
@@ -130,7 +96,6 @@ export interface MarketScenario {
 
 export interface MarketUpdate {
   type: "market_update";
-  mode?: SimulationMode;
   market?: string;
   venue?: string;
   timestamp: number;
@@ -147,7 +112,6 @@ export interface MarketUpdate {
   activity_multiplier: number;
   scenario: MarketScenario;
   latency_mode: string;
-  data_source?: MarketDataSource | null;
   events?: MarketEvent[];
   order_flow?: MarketOrderFlow;
   recent_orders?: MarketRecentOrder[];

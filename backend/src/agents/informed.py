@@ -18,14 +18,12 @@ class InformedAgent(BaseAgent):
         agent_id: str,
         initial_capital: float = 5_000_000.0,
         signal_probability: float = 0.01,
-        signal_accuracy: float = 0.70,
         signal_duration: int = 120,
         max_position: int = 5000,
     ) -> None:
         super().__init__(agent_id, "Informed", initial_capital, latency_seconds=0.005)
         self.wakeup_interval = 0.6
         self.signal_probability = signal_probability
-        self.signal_accuracy = signal_accuracy
         self.signal_duration = signal_duration
         self.max_position = max_position
 
@@ -133,3 +131,24 @@ class InformedAgent(BaseAgent):
         super().reset()
         self._active_signal = None
         self._signal_start_time = 0.0
+
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        if not self.active_orders:
+            return []
+        current_time = float(market_state.get("current_time", 0.0) or 0.0)
+        if (
+            not self._active_signal
+            or current_time - self._signal_start_time > self.signal_duration
+        ):
+            return self.cancel_all_active_orders()
+        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        spread = float(market_state.get("spread", 0.05) or 0.05)
+        side = OrderSide.BUY if self._active_signal == "buy" else OrderSide.SELL
+        target = near_touch_price(price, side, spread)
+        if self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=target if side == OrderSide.BUY else price,
+            target_ask=target if side == OrderSide.SELL else price,
+        ):
+            return self.cancel_all_active_orders()
+        return []

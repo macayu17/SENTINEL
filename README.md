@@ -49,15 +49,6 @@ pip install -r requirements.txt
 uvicorn src.api.main:app --reload --port 8000
 ```
 
-The backend can optionally load a trained market-making policy for the live simulator.
-It supports:
-
-- PPO models saved at `backend/models/ppo_market_maker.zip`
-- Genetic-programming policies saved at `backend/models/gp_market_maker.json`
-
-Use `RL_POLICY_KIND=ppo` or `RL_POLICY_KIND=gp` to choose which model format to run live.
-PPO is disabled by default for deployment speed. To enable PPO locally, install the root `requirements.txt` or `backend/requirements-rl.txt`, then set `RL_POLICY_ENABLED=true`.
-
 ### Frontend
 
 ```bash
@@ -88,26 +79,11 @@ Copy `backend/.env.example` to `backend/.env` and adjust values if needed.
 ```text
 SIMULATION_DURATION=23400
 INITIAL_PRICE=100.0
-RL_POLICY_ENABLED=false
-RL_POLICY_KIND=ppo
-RL_MODEL_PATH=models/ppo_market_maker.zip
 HOST=0.0.0.0
 PORT=8000
 FRONTEND_URL=http://localhost:3000
 ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
-GROWW_API_AUTH_TOKEN=
-GROWW_API_KEY=
-GROWW_API_SECRET=
-GROWW_API_TOTP=
-UPSTOX_ACCESS_TOKEN=
-UPSTOX_ANALYTICS_TOKEN=
-UPSTOX_BASE_URL=https://api.upstox.com/v3
-UPSTOX_V2_BASE_URL=https://api.upstox.com/v2
 ```
-
-For LIVE_SHADOW replay, keep Groww and Upstox credentials only in `backend/.env`.
-Upstox historical candles, instrument search, and live LTP polling can use either a standard OAuth access token or a read-only Analytics Token:
-set `UPSTOX_ACCESS_TOKEN` or `UPSTOX_ANALYTICS_TOKEN`, then use the Upstox tab to search/select an instrument key such as `NSE_EQ|INE002A01018`.
 
 ### Frontend
 
@@ -118,38 +94,49 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000
 ```
 
+## Liquidity Depth Collection
+
+Set `UPSTOX_ANALYTICS_TOKEN` in `backend/.env`, then record read-only five-level
+depth snapshots:
+
+```bash
+python backend/scripts/record_upstox_depth.py
+```
+
+By default the recorder loads the fixed 20-stock universe in
+`backend/config/liquidity_universe.v1.json`. It contains 7 high, 7 medium, and
+6 lower-liquidity NSE equities, ranked by median daily traded value over the
+documented 33-session measurement window. Manual `--instrument-key` arguments
+override the universe. Use `--samples 60` for a bounded check. Data is appended
+to ignored JSONL files under `backend/data/liquidity_depth/`.
+
+The recorder only calls Upstox's full-market-quote GET endpoint. It does not
+place, modify, or cancel orders. Recorded data does not enable the trained
+liquidity predictor until a future-shock label definition and out-of-time model
+evaluation pass are completed.
+
+After collecting at least ten full market sessions, build and evaluate a
+candidate:
+
+```bash
+python backend/scripts/train_liquidity_model.py
+```
+
+Features use only the previous five minutes. A positive label requires at least
+two spread-expansion or depth-collapse observations in the following 60 seconds.
+Sessions are split chronologically, probabilities are calibrated, and candidates
+must beat ROC-AUC, average-precision, and Brier-score gates. Failed runs write a
+report but never create or replace the active runtime model.
+
 ## Backend API Overview
 
 - `GET /api/health`
-- `POST /api/simulation/start`
 - `POST /api/simulation/stop`
-- `POST /api/simulation/mode`
-- `GET /api/prediction/liquidity`
-- `GET /api/prediction/large-order`
-- `GET /api/agents/metrics`
-- `GET /api/market/snapshot`
-- `POST /api/live-shadow/groww/fetch`
-- `POST /api/live-shadow/groww/replay`
-- `POST /api/live-shadow/upstox/fetch`
-- `POST /api/live-shadow/upstox/replay`
-- `GET /api/live-shadow/upstox/instruments`
-- `POST /api/live-shadow/upstox/ltp`
-- `POST /api/live-shadow/upstox/live`
+- `GET /api/simulation/export`
+- `POST /api/sandbox/create`
+- `GET /api/sandbox/presets`
+- `GET /api/sandbox/scenarios`
 - `WS /ws`
-
-## Policy Training
-
-Train PPO:
-
-```bash
-python train_rl.py --timesteps 60000 --save-path backend/models/ppo_market_maker
-```
-
-Train the genetic-programming baseline:
-
-```bash
-python train_gp.py --generations 8 --population-size 24 --save-path backend/models/gp_market_maker.json
-```
 
 ## Notes About The Current Architecture
 

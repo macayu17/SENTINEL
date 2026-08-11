@@ -7,15 +7,10 @@ import random
 from ..market.order import Order
 from ..market.trade import Trade
 
-# Indian intraday equity cost stack (NSE cash, discount-broker rates) as fractions of
-# turnover. No maker rebate exists on this venue — both sides always pay. Tune per venue.
-BROKERAGE_PCT = 0.001           # 0.1% of turnover...
-BROKERAGE_CAP = 20.0            # ...capped per executed order, not per fill
-STT_SELL_PCT = 0.00025          # securities transaction tax, sell leg only (intraday)
-STAMP_DUTY_BUY_PCT = 0.00003    # buy leg only
-EXCHANGE_TXN_PCT = 0.0000307    # NSE cash transaction charge from March 2026
-SEBI_TURNOVER_PCT = 0.000001    # both legs
-GST_PCT = 0.18                  # levied on brokerage + exchange + SEBI charges
+# Generic NASDAQ maker-taker research assumptions, in USD per share.
+TAKER_FEE_PER_SHARE = 0.003
+MAKER_REBATE_PER_SHARE = 0.002
+MAX_TAKER_FEE_NOTIONAL_PCT = 0.01
 
 
 class BaseAgent(ABC):
@@ -48,7 +43,6 @@ class BaseAgent(ABC):
         self.fees_paid: float = 0.0
         self.num_trades: int = 0
         self.active_orders: Dict[str, Order] = {}
-        self._brokerage_charged: Dict[str, float] = {}
         self.risk_halted: bool = False  # latched by the sim rule gate on max drawdown
         self._random_seed: int | None = None
         self.rng = random.Random()
@@ -90,20 +84,14 @@ class BaseAgent(ABC):
         self.num_trades += 1
 
     def _charge_fee(self, trade: Trade) -> None:
-        """Charge this agent's side of the trade under the venue cost stack."""
-        is_buy = trade.buyer_agent_id == self.agent_id
-        order_id = trade.buyer_order_id if is_buy else trade.seller_order_id
-        notional = trade.value
-
-        # Brokerage is per executed order, so a sweep across levels is charged once.
-        charged = self._brokerage_charged.get(order_id, 0.0)
-        updated = min(charged + notional * BROKERAGE_PCT, BROKERAGE_CAP)
-        brokerage = updated - charged
-        self._brokerage_charged[order_id] = updated
-
-        taxable = brokerage + notional * (EXCHANGE_TXN_PCT + SEBI_TURNOVER_PCT)
-        levy = STT_SELL_PCT if not is_buy else STAMP_DUTY_BUY_PCT
-        fee = taxable * (1 + GST_PCT) + notional * levy
+        """Apply a simple maker rebate or taker fee for this fill."""
+        if trade.taker_agent_id == self.agent_id:
+            fee = min(
+                trade.quantity * TAKER_FEE_PER_SHARE,
+                trade.value * MAX_TAKER_FEE_NOTIONAL_PCT,
+            )
+        else:
+            fee = -trade.quantity * MAKER_REBATE_PER_SHARE
 
         if not math.isfinite(fee):
             return
@@ -157,7 +145,6 @@ class BaseAgent(ABC):
         self.fees_paid = 0.0
         self.num_trades = 0
         self.active_orders.clear()
-        self._brokerage_charged.clear()
         self.risk_halted = False
 
     def get_unrealized_pnl(self, current_price: float) -> float:

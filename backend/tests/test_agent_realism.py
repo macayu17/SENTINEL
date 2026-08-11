@@ -154,6 +154,16 @@ def test_hft_keeps_fresh_scalp_order_until_reprice():
     assert cancellations == [first_orders[0].order_id]
 
 
+def test_hft_never_submits_conflicting_sides_in_one_wakeup():
+    agent = HFTAgent("HFT_CONFLICT")
+    for _ in range(19):
+        agent.decide_action(_state(mid_price=100.0, current_price=100.0))
+
+    orders = agent.decide_action(_state(mid_price=101.0, current_price=101.0))
+
+    assert len({order.side for order in orders}) <= 1
+
+
 def test_institutional_child_order_respects_participation_of_displayed_depth():
     agent = InstitutionalAgent(
         "INST",
@@ -215,6 +225,28 @@ def test_institutional_agent_can_start_on_scheduled_delay_without_random_gate():
     assert orders[0].quantity > 0
 
 
+def test_institutional_progress_tracks_parent_side_fills_not_open_position():
+    agent = InstitutionalAgent("INST_PROGRESS")
+    agent.side = OrderSide.BUY
+    buy = Trade("buy", "maker", agent.agent_id, "maker", 100.0, 20)
+    close = Trade("other", "sell", "other", agent.agent_id, 101.0, 10)
+
+    agent.update_position(buy)
+    agent.update_position(close)
+
+    assert agent.position == 10
+    assert agent.executed_quantity == 20
+
+
+def test_informed_agent_cancels_quote_after_reference_moves():
+    agent = InformedAgent("INF_REPRICE")
+    agent._active_signal = "buy"
+    resting = Order("INF_REPRICE", OrderSide.BUY, OrderType.LIMIT, 99.99, 100)
+    agent.active_orders = {resting.order_id: resting}
+
+    assert agent.cancel_for_state(_state(mid_price=101.0, current_price=101.0)) == [resting.order_id]
+
+
 def test_liquidity_trader_keeps_fresh_child_limit_until_reprice():
     agent = LiquidityTraderAgent("LIQ_KEEP")
     agent._active_side = OrderSide.BUY
@@ -269,4 +301,40 @@ def test_mean_reversion_keeps_fresh_entry_limit_until_reprice():
     agent.active_orders = {resting.order_id: resting}
 
     assert agent.cancel_for_state(_state()) == []
+    assert agent.cancel_for_state(_state(mid_price=101.0, current_price=101.0)) == [resting.order_id]
+
+
+def test_retail_stop_uses_actual_average_fill_price():
+    agent = RetailAgent("RET_FILL")
+    for _ in range(49):
+        agent.decide_action(_state(mid_price=90.0, current_price=90.0))
+    agent.position = 100
+    agent.avg_entry_price = 90.0
+
+    orders = agent.decide_action(_state(mid_price=90.0, current_price=90.0))
+
+    stop = next(order for order in orders if order.order_type == OrderType.STOP)
+    assert stop.price == 88.2
+
+
+def test_noise_passive_orders_stay_near_the_touch():
+    agent = NoiseAgent("NOISE_TOUCH", order_rate=1.0)
+    agent.set_random_seed(5)
+
+    passive = None
+    for _ in range(100):
+        order = agent.decide_action(_state())[0]
+        if order.order_type == OrderType.LIMIT:
+            passive = order
+            break
+
+    assert passive is not None
+    assert round(abs(passive.price - 100.0), 2) <= 0.03
+
+
+def test_sentiment_agent_cancels_stale_limit_order():
+    agent = SentimentAgent("SENT_REPRICE")
+    resting = Order("SENT_REPRICE", OrderSide.BUY, OrderType.LIMIT, 99.99, 100)
+    agent.active_orders = {resting.order_id: resting}
+
     assert agent.cancel_for_state(_state(mid_price=101.0, current_price=101.0)) == [resting.order_id]

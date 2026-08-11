@@ -27,11 +27,8 @@ export interface SandboxCreateRequest {
   preset: string;
   initial_price: number;
   oracle_enabled: boolean;
-  oracle_kappa?: number;
-  oracle_sigma?: number;
   latency_mode: LatencyMode;
   speed: number;
-  custom_agents?: Record<string, number> | null;
   scenario?: string;
   seed?: number;
 }

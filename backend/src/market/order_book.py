@@ -31,18 +31,21 @@ class OrderBook:
         self.asks: List[Order] = []
         self.trades: List[Trade] = []
         self._trade_count: int = 0
+        self._depth_cache: Dict[int, Dict[str, list]] = {}
 
     def add_order(self, order: Order) -> List[Trade]:
         """Add an order to the book. Returns list of trades if matched."""
-        if order.order_type == OrderType.MARKET:
-            return self._match_market_order(order)
         if order.order_type == OrderType.POST_ONLY and self._would_cross(order):
             order.status = OrderStatus.CANCELLED  # maker-only: never pay the spread
             return []
+        self._depth_cache.clear()
+        if order.order_type == OrderType.MARKET:
+            return self._match_market_order(order)
         return self._match_limit_order(order)
 
     def accept_without_matching(self, order: Order) -> None:
         """Pre-open: orders accumulate and may cross. Nothing executes until uncrossing."""
+        self._depth_cache.clear()
         if order.side == OrderSide.BUY:
             self._insert_bid(order)
         else:
@@ -232,6 +235,7 @@ class OrderBook:
         if not best_volume or best_price is None:
             return None, []
 
+        self._depth_cache.clear()
         # Everyone who qualifies trades at the single clearing price, in book order.
         eligible_bids = [o for o in self.bids if o.price >= best_price]
         eligible_asks = [o for o in self.asks if o.price <= best_price]
@@ -264,6 +268,7 @@ class OrderBook:
                 if order.order_id == order_id:
                     order.status = OrderStatus.CANCELLED
                     book.pop(i)
+                    self._depth_cache.clear()
                     return True
         return False
 
@@ -289,9 +294,14 @@ class OrderBook:
 
     def get_depth(self, levels: int = 5) -> Dict[str, list]:
         """Get order book depth for the top N price levels."""
+        cached = self._depth_cache.get(levels)
+        if cached is not None:
+            return cached
         bid_levels = self._aggregate_levels(self.bids, levels)
         ask_levels = self._aggregate_levels(self.asks, levels)
-        return {"bids": bid_levels, "asks": ask_levels}
+        depth = {"bids": bid_levels, "asks": ask_levels}
+        self._depth_cache[levels] = depth
+        return depth
 
     def get_total_depth(self, levels: int = 5) -> int:
         """Total quantity across top N levels on both sides."""
@@ -304,6 +314,7 @@ class OrderBook:
         agent_id: str = "EXTERNAL_DEPTH",
     ) -> None:
         """Replace the book with already-aggregated market-depth levels."""
+        self._depth_cache.clear()
         self.bids = [
             self._depth_level_to_order(level, OrderSide.BUY, agent_id)
             for level in bids

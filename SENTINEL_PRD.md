@@ -1,6 +1,8 @@
 # SENTINEL — Product Requirements Document
 **Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events**
 
+> Historical planning document. The current public runtime supports native SENTINEL SIM; use `README.md` and the FastAPI schema for implemented behavior.
+
 **Version:** 4.0 | **Stack:** Next.js 14 · TypeScript · Tailwind CSS · Python FastAPI · Google Stitch MCP UI Components · Groww/Upstox Market Data APIs
 **Target:** Production-ready handoff for Claude Code / GitHub Copilot
 
@@ -670,12 +672,11 @@ Global singletons: `simulator`, `liquidity_predictor`, `large_order_detector`, `
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/health` | Returns `{"status": "healthy"}` |
-| POST | `/api/simulation/start` | Initialises simulator with full agent set, returns agent count |
-| POST | `/api/simulation/stop` | Stops simulator loop |
-| GET | `/api/prediction/liquidity` | Returns current liquidity shock prediction |
-| GET | `/api/prediction/large-order` | Returns current large-order detection + impact |
-| GET | `/api/agents/metrics` | Returns PnL/Sharpe metrics per agent |
-| GET | `/api/market/snapshot` | Returns current order book depth snapshot |
+| GET | `/api/sandbox/presets` | Returns the supported SIM population presets |
+| GET | `/api/sandbox/scenarios` | Returns the supported market scenarios |
+| POST | `/api/sandbox/create` | Creates and starts a preset-driven SIM run |
+| POST | `/api/simulation/stop` | Stops the active SIM run |
+| GET | `/api/simulation/export` | Downloads the active or completed run state |
 
 ### WebSocket `/ws`
 
@@ -978,16 +979,14 @@ cd frontend && npm run test
 
 ---
 
-## 18. Simulation State Machine
+## 18. Simulation Lifecycle
 
-The simulator has 5 explicit states. Claude Code must implement this as an enum and enforce valid transitions.
+The current SIM runtime deliberately keeps one short lifecycle:
 
 ```
-IDLE → INITIALISING → RUNNING → PAUSED → STOPPED
-                                    ↑         |
-                                    └─────────┘ (resume)
-         RUNNING → ERROR (on unhandled exception)
-         ERROR   → IDLE  (on reset)
+IDLE -> RUNNING -> STOPPED
+  ^         |
+  +---------+ (start a new preset run)
 ```
 
 ### States
@@ -995,51 +994,25 @@ IDLE → INITIALISING → RUNNING → PAUSED → STOPPED
 | State | Description |
 |---|---|
 | `IDLE` | No simulator instance exists. Default on startup. |
-| `INITIALISING` | `POST /api/simulation/start` called. Agents being created, Provider seeding in progress. |
 | `RUNNING` | Simulator step loop active. WebSocket streaming live data. |
-| `PAUSED` | Step loop suspended. WebSocket still connected, last state frozen on dashboard. |
 | `STOPPED` | Step loop ended. Results available. Simulator instance still in memory for export. |
-| `ERROR` | Unhandled exception in step loop. Error message stored, broadcast to clients. |
 
 ### Valid Transitions
 
 | From | To | Trigger |
 |---|---|---|
-| `IDLE` | `INITIALISING` | `POST /api/simulation/start` |
-| `INITIALISING` | `RUNNING` | Seeding complete |
-| `INITIALISING` | `ERROR` | Provider auth failure or agent init error |
-| `RUNNING` | `PAUSED` | `POST /api/simulation/pause` |
+| `IDLE` | `RUNNING` | `POST /api/sandbox/create` |
 | `RUNNING` | `STOPPED` | `POST /api/simulation/stop` or duration elapsed |
-| `RUNNING` | `ERROR` | Unhandled exception in step loop |
-| `PAUSED` | `RUNNING` | `POST /api/simulation/resume` |
-| `PAUSED` | `STOPPED` | `POST /api/simulation/stop` |
-| `STOPPED` | `IDLE` | `POST /api/simulation/reset` |
-| `ERROR` | `IDLE` | `POST /api/simulation/reset` |
+| `RUNNING` | `RUNNING` | `POST /api/sandbox/create` replaces the active run |
+| `STOPPED` | `RUNNING` | `POST /api/sandbox/create` |
 
-### New REST Endpoints
+### Runtime Endpoints
 
 | Method | Path | Valid from states | Description |
 |---|---|---|---|
-| `POST` | `/api/simulation/start` | `IDLE` | Initialise and start |
-| `POST` | `/api/simulation/pause` | `RUNNING` | Pause step loop |
-| `POST` | `/api/simulation/resume` | `PAUSED` | Resume step loop |
-| `POST` | `/api/simulation/stop` | `RUNNING`, `PAUSED` | Stop and finalise |
-| `POST` | `/api/simulation/reset` | `STOPPED`, `ERROR` | Reset to IDLE |
-| `GET` | `/api/simulation/status` | Any | Returns current state + metadata |
-
-`GET /api/simulation/status` response:
-```json
-{
-  "state": "RUNNING",
-  "current_step": 1234,
-  "current_time": 1234.5,
-  "current_price": 2451.50,
-  "num_agents": 61,
-  "symbol": "NSE:RELIANCE",
-  "started_at": "2024-01-15T09:15:00Z",
-  "elapsed_seconds": 1234
-}
-```
+| `POST` | `/api/sandbox/create` | `IDLE`, `RUNNING`, `STOPPED` | Create and start one preset SIM run |
+| `POST` | `/api/simulation/stop` | `RUNNING` | Stop and finalise |
+| `GET` | `/api/simulation/export` | `RUNNING`, `STOPPED` | Export current state |
 
 ### Frontend State Handling
 
@@ -1047,12 +1020,9 @@ The dashboard must reflect simulation state visually:
 
 | State | Dashboard behaviour |
 |---|---|
-| `IDLE` | "Start Simulation" button active, all charts empty |
-| `INITIALISING` | Loading spinner, "Connecting to provider..." message |
-| `RUNNING` | Live data streaming, "Pause" and "Stop" buttons visible |
-| `PAUSED` | Charts frozen, "Resume" and "Stop" buttons visible, "PAUSED" badge on header |
-| `STOPPED` | Charts frozen at last state, "Export" and "Reset" buttons visible |
-| `ERROR` | Red error banner with message, "Reset" button only |
+| `IDLE` | Launch active, data panels awaiting a market state |
+| `RUNNING` | Live WebSocket data, speed, export, and stop controls active |
+| `STOPPED` | Last state remains visible and can be exported or replaced by a new run |
 
 ---
 
@@ -1083,7 +1053,7 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
 
 Apply to all routes:
 ```python
-@app.post("/api/simulation/start", dependencies=[Depends(verify_api_key)])
+@app.post("/api/sandbox/create", dependencies=[Depends(verify_api_key)])
 ```
 
 **WebSocket auth** — pass key as query param (headers not supported in browser WebSocket):

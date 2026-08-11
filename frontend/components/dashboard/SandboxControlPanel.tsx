@@ -7,11 +7,6 @@ import { useMarketStore } from '@/store/market-store';
 
 type CommandState = 'idle' | 'loading' | 'success' | 'error';
 
-const AGENT_ORDER = [
-  'MarketMaker', 'HFT', 'Institutional', 'Retail', 'Informed', 'Noise',
-  'LiquidityTrader', 'Momentum', 'MeanReversion', 'Spoofing', 'Sentiment',
-];
-
 const FALLBACK_PRESETS: Record<string, SandboxPreset> = {
   balanced: {
     name: 'Balanced',
@@ -85,17 +80,14 @@ export default function SandboxControlPanel() {
   const [speed, setSpeed] = useState(1);
   const [latencyMode, setLatencyMode] = useState<LatencyMode>('deterministic');
   const [oracleEnabled, setOracleEnabled] = useState(false);
-  const [customAgents, setCustomAgents] = useState(false);
-  const [agentCounts, setAgentCounts] = useState(FALLBACK_PRESETS.balanced.agents);
   const [apiAvailable, setApiAvailable] = useState(true);
   const [commandState, setCommandState] = useState<CommandState>('idle');
   const [message, setMessage] = useState('Loading simulator controls...');
 
   const selectedPreset = presets[preset] ?? FALLBACK_PRESETS.balanced;
-  const selectedAgents = customAgents ? agentCounts : selectedPreset.agents;
   const totalAgents = useMemo(
-    () => Object.values(selectedAgents).reduce((sum, count) => sum + Math.max(0, count), 0),
-    [selectedAgents],
+    () => Object.values(selectedPreset.agents).reduce((sum, count) => sum + Math.max(0, count), 0),
+    [selectedPreset.agents],
   );
 
   useEffect(() => {
@@ -106,7 +98,6 @@ export default function SandboxControlPanel() {
         const nextPreset = nextPresets.balanced ? 'balanced' : Object.keys(nextPresets)[0];
         setPresets(nextPresets);
         setPreset(nextPreset);
-        setAgentCounts(nextPresets[nextPreset].agents);
         setLatencyMode(nextPresets[nextPreset].latency);
         setOracleEnabled(nextPresets[nextPreset].oracle);
         setScenarios(nextScenarios.scenarios);
@@ -125,7 +116,6 @@ export default function SandboxControlPanel() {
     const next = presets[value];
     setPreset(value);
     if (!next) return;
-    setAgentCounts(next.agents);
     setLatencyMode(next.latency);
     setOracleEnabled(next.oracle);
   };
@@ -141,7 +131,6 @@ export default function SandboxControlPanel() {
         oracle_enabled: oracleEnabled,
         latency_mode: latencyMode,
         speed: safeNumber(speed, 1, 0.1, 20),
-        custom_agents: customAgents ? selectedAgents : null,
         scenario,
       });
       resetSimulationData();
@@ -239,14 +228,10 @@ export default function SandboxControlPanel() {
                 INFORMED ACCESS {oracleEnabled ? 'ON' : 'OFF'}
               </button>
             </section>
-            <section>
-              <div className="mb-2 flex items-center justify-between"><span className="text-[10px] tracking-[0.14em] text-gray-500">AGENT MIX</span>
-                <button type="button" onClick={() => setCustomAgents((value) => !value)} className="border border-gray-800 px-3 py-2 text-[11px] font-bold text-gray-400">{customAgents ? 'CUSTOM' : 'PRESET'} / {totalAgents}</button>
-              </div>
-              {customAgents ? <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
-                {AGENT_ORDER.map((agent) => <NumberField key={agent} label={agent.toUpperCase()} value={agentCounts[agent] ?? 0} min={0} max={300}
-                  onChange={(value) => setAgentCounts((current) => ({ ...current, [agent]: safeNumber(value, 0, 0, 300) }))} />)}
-              </div> : <div className="text-xs text-gray-500">Preset agent mix: {totalAgents} agents.</div>}
+            <section className="border border-gray-900 bg-black/20 p-3">
+              <div className="text-[10px] tracking-[0.14em] text-gray-500">PRESET POPULATION</div>
+              <div className="mt-2 text-sm font-semibold text-gray-200">{totalAgents} agents</div>
+              <div className="mt-1 text-xs text-gray-500">{selectedPreset.description}</div>
             </section>
           </div>
         </details>

@@ -19,29 +19,6 @@ import { useMarketStore } from '@/store/market-store';
 const MAX_POINTS = 60;
 const MAX_EVENTS = 14;
 
-const DEFAULT_PROJECT_OVERVIEW = {
-  name: 'Sentinel',
-  summary: 'Market microstructure simulation and liquidity-risk research.',
-  currentStage: 'System Integration' as const,
-  completed: ['Event-driven simulator', 'Order-book metrics'],
-  inProgress: ['Scenario realism', 'Liquidity shock evaluation'],
-};
-
-const DEFAULT_MILESTONES = [
-  {
-    phase: 'Phase 1',
-    title: 'Simulator and LOB',
-    status: 'completed' as const,
-    detail: 'Event-driven kernel, matching logic, and microstructure metrics are operational.',
-  },
-  {
-    phase: 'Phase 2',
-    title: 'Market Realism',
-    status: 'in-progress' as const,
-    detail: 'Scenario drivers and liquidity diagnostics are under active development.',
-  },
-];
-
 function timestampLabel(date: Date): string {
   return date.toLocaleTimeString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -104,11 +81,6 @@ function mapBackendRecentOrders(orders: MarketRecentOrder[]): RecentOrder[] {
 function buildBackendAgentActivity(marketData: MarketUpdate): AgentActivity {
   const flow = marketData.order_flow;
   return {
-    marketMakerAction: 'Quote engine active in the simulator.',
-    noiseAgentAction: flow
-      ? `Aggressor flow B ${flow.buy_volume} / S ${flow.sell_volume}.`
-      : 'Awaiting order-flow counters from the simulator.',
-    rlAgentStatus: 'No policy agent attached to this SIM run.',
     recentOrders: mapBackendRecentOrders(marketData.recent_orders ?? []),
     executionSummary: {
       submitted: flow?.submitted ?? 0,
@@ -164,17 +136,12 @@ export function useSimulationDashboardData(): SimulationDashboardData {
     if (feedActive && marketData) return buildBackendAgentActivity(marketData);
 
     return {
-      marketMakerAction: 'Quote engine idle while simulation is stopped.',
-      noiseAgentAction: 'Order flow idle until simulation resumes.',
-      rlAgentStatus: 'No policy agent attached to this SIM run.',
       recentOrders: [],
       executionSummary: { submitted: 0, fills: 0, cancelled: 0, matchRate: 0 },
     };
   }, [feedActive, marketData]);
 
   return {
-    projectOverview: DEFAULT_PROJECT_OVERVIEW,
-    milestones: DEFAULT_MILESTONES,
     tradeFlow,
     agentActivity,
     events,

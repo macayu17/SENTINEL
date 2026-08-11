@@ -7,15 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from backend.src.agents.base_agent import (
-    BROKERAGE_CAP,
-    BROKERAGE_PCT,
-    EXCHANGE_TXN_PCT,
-    SEBI_TURNOVER_PCT,
-    STAMP_DUTY_BUY_PCT,
-    STT_SELL_PCT,
-    BaseAgent,
-)
+from backend.src.agents.base_agent import BaseAgent
 from backend.src.agents.noise import NoiseAgent
 from backend.src.market.latency_model import LatencyConfig, LatencyMode
 from backend.src.market.order import Order, OrderSide, OrderStatus, OrderType
@@ -302,7 +294,7 @@ def test_squareoff_phase_blocks_new_risk_but_allows_exits():
     assert rejected == [(opening, "squareoff")]
 
 
-def test_both_sides_pay_and_the_sell_leg_carries_stt():
+def test_nasdaq_taker_pays_and_maker_receives_rebate():
     book = OrderBook()
     buyer = NoiseAgent("buyer", initial_capital=100_000.0)
     seller = NoiseAgent("seller", initial_capital=100_000.0)
@@ -314,16 +306,11 @@ def test_both_sides_pay_and_the_sell_leg_carries_stt():
     buyer.update_position(trade)
     seller.update_position(trade)
 
-    notional = 100 * 100.0  # 10,000
-    brokerage = min(notional * BROKERAGE_PCT, BROKERAGE_CAP)
-    taxable = brokerage + notional * (EXCHANGE_TXN_PCT + SEBI_TURNOVER_PCT)
-    assert buyer.fees_paid == pytest.approx(taxable * 1.18 + notional * STAMP_DUTY_BUY_PCT)
-    assert seller.fees_paid == pytest.approx(taxable * 1.18 + notional * STT_SELL_PCT)
-    # No rebate on this venue: providing liquidity still costs, and STT makes selling dearer.
-    assert seller.fees_paid > buyer.fees_paid > 0
+    assert buyer.fees_paid == pytest.approx(100 * 0.003)
+    assert seller.fees_paid == pytest.approx(-100 * 0.002)
 
 
-def test_brokerage_accumulates_across_fills_but_is_capped_per_order():
+def test_taker_fee_accumulates_across_partial_fills():
     book = OrderBook()
     taker = NoiseAgent("taker", initial_capital=100_000.0)
     for price in (100.0, 100.5, 101.0):
@@ -336,7 +323,33 @@ def test_brokerage_accumulates_across_fills_but_is_capped_per_order():
     for trade in trades:
         taker.update_position(trade)
 
-    notional = sum(t.value for t in trades)
-    brokerage = min(notional * BROKERAGE_PCT, BROKERAGE_CAP)
-    taxable = brokerage + notional * (EXCHANGE_TXN_PCT + SEBI_TURNOVER_PCT)
-    assert taker.fees_paid == pytest.approx(taxable * 1.18 + notional * STAMP_DUTY_BUY_PCT)
+    assert taker.fees_paid == pytest.approx(30 * 0.003)
+
+
+def test_agent_snapshot_skips_population_metrics_used_only_by_diagnostics():
+    agents = [NoiseAgent(f"noise-{index}") for index in range(20)]
+    sim = MarketSimulator(agents, seed=7)
+
+    assert "agents" in sim.get_market_state()
+    assert "agents" not in sim.get_market_state(include_agents=False)
+
+
+def test_repeated_depth_reads_reuse_aggregation_until_book_changes(monkeypatch):
+    book = OrderBook()
+    book.add_order(_order("bid", OrderSide.BUY, price=99.99))
+    calls = 0
+    aggregate = book._aggregate_levels
+
+    def counted(orders, levels):
+        nonlocal calls
+        calls += 1
+        return aggregate(orders, levels)
+
+    monkeypatch.setattr(book, "_aggregate_levels", counted)
+    book.get_depth(levels=10)
+    book.get_depth(levels=10)
+    assert calls == 2
+
+    book.add_order(_order("ask", OrderSide.SELL, price=100.01))
+    book.get_depth(levels=10)
+    assert calls == 4

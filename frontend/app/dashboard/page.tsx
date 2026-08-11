@@ -88,16 +88,10 @@ function sourceBadgeLabel(connected: boolean): string {
   return 'SIM: NASDAQ';
 }
 
-function sourceBadgeToneClass(
-  status?: string,
-): string {
-  if (status === 'error' || status === 'disconnected') {
-    return 'border-[#ff0040] text-[#ff0040]';
-  }
-  if (status === 'loading') {
-    return 'border-[#ffb800] text-[#ffb800]';
-  }
-  return 'border-gray-800 text-cyan-400';
+function sourceBadgeToneClass(connected: boolean): string {
+  return connected
+    ? 'border-gray-800 text-cyan-400'
+    : 'border-[#ff0040] text-[#ff0040]';
 }
 
 function simulationStatusBadgeClass(running: boolean): string {
@@ -482,9 +476,8 @@ export default function DashboardPage() {
   }, [resetSimulationData, setSimulationRunning]);
 
   const marketSnapshot = useMemo(() => buildMarketSnapshot(marketData), [marketData]);
-  const dataSource = marketData?.data_source ?? null;
   const sourceLabel = sourceBadgeLabel(connected);
-  const sourceTone = sourceBadgeToneClass(dataSource?.status);
+  const sourceTone = sourceBadgeToneClass(connected);
   const metricCells = useMemo(() => buildMetricCells(marketSnapshot), [marketSnapshot]);
   const causalCells = useMemo<DashboardMetricCell[]>(() => {
     const flow = marketData?.order_flow;

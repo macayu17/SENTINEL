@@ -111,8 +111,17 @@ class InstitutionalAgent(BaseAgent):
         return self.rng.uniform(0.0, latest)
 
     def update_position(self, trade) -> None:
+        filled_parent_side = (
+            self.side == OrderSide.BUY and trade.buyer_agent_id == self.agent_id
+        ) or (
+            self.side == OrderSide.SELL and trade.seller_agent_id == self.agent_id
+        )
         super().update_position(trade)
-        self.executed_quantity = abs(self.position)
+        if filled_parent_side:
+            self.executed_quantity = min(
+                self.target_quantity,
+                self.executed_quantity + trade.quantity,
+            )
 
     def reset(self) -> None:
         super().reset()

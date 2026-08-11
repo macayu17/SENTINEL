@@ -7,10 +7,6 @@ import { getWsBaseUrl } from '@/lib/runtime-config';
 
 const MAX_RETRIES = 5;
 
-type FlushHandle =
-  | { kind: 'frame'; id: number }
-  | { kind: 'timer'; id: ReturnType<typeof setTimeout> };
-
 function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
@@ -39,7 +35,6 @@ function normalizeMarketUpdate(data: Partial<MarketUpdate>): MarketUpdate {
       phase: 'ACTIVE',
     },
     latency_mode: data.latency_mode ?? 'DETERMINISTIC',
-    data_source: data.data_source ?? null,
     events: data.events ?? [],
     order_flow: data.order_flow,
     recent_orders: data.recent_orders ?? [],
@@ -51,7 +46,7 @@ export function useMarketWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flushHandleRef = useRef<FlushHandle | null>(null);
+  const flushHandleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestUpdateRef = useRef<MarketUpdate | null>(null);
   const manuallyClosedRef = useRef(false);
 
@@ -72,18 +67,7 @@ export function useMarketWebSocket() {
       return;
     }
 
-    if (typeof window !== 'undefined' && 'requestAnimationFrame' in window) {
-      flushHandleRef.current = {
-        kind: 'frame',
-        id: window.requestAnimationFrame(flushLatestUpdate),
-      };
-      return;
-    }
-
-    flushHandleRef.current = {
-      kind: 'timer',
-      id: setTimeout(flushLatestUpdate, 16),
-    };
+    flushHandleRef.current = setTimeout(flushLatestUpdate, 16);
   }, [flushLatestUpdate]);
 
   const cancelScheduledFlush = useCallback(() => {
@@ -92,11 +76,7 @@ export function useMarketWebSocket() {
       return;
     }
 
-    if (handle.kind === 'frame') {
-      window.cancelAnimationFrame(handle.id);
-    } else {
-      clearTimeout(handle.id);
-    }
+    clearTimeout(handle);
     flushHandleRef.current = null;
   }, []);
 

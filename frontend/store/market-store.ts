@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Alert, MarketUpdate, SimulationMode } from '@/types/market';
+import type { Alert, MarketUpdate } from '@/types/market';
 
 type PriceHistoryPoint = {
   time: number;
@@ -15,14 +15,12 @@ interface MarketStore {
   connected: boolean;
   alerts: Alert[];
   simulationRunning: boolean;
-  simulationMode: SimulationMode;
 
   setMarketData: (data: MarketUpdate) => void;
   setConnected: (connected: boolean) => void;
   dismissAlert: (id: string) => void;
   resetSimulationData: () => void;
   setSimulationRunning: (running: boolean) => void;
-  setSimulationMode: (mode: SimulationMode) => void;
 }
 
 const MAX_PRICE_HISTORY = 240;
@@ -80,7 +78,6 @@ export const useMarketStore = create<MarketStore>((set) => ({
   connected: false,
   alerts: [],
   simulationRunning: false,
-  simulationMode: 'SANDBOX',
 
   setMarketData: (data: MarketUpdate) =>
     set((state) => {
@@ -99,7 +96,6 @@ export const useMarketStore = create<MarketStore>((set) => ({
         marketData: data,
         priceHistory: history,
         alerts,
-        simulationMode: data.mode ?? 'SANDBOX',
       };
     }),
 
@@ -118,9 +114,7 @@ export const useMarketStore = create<MarketStore>((set) => ({
       priceHistory: [],
       alerts: [],
       simulationRunning: false,
-      simulationMode: 'SANDBOX',
     }),
 
   setSimulationRunning: (running: boolean) => set({ simulationRunning: running }),
-  setSimulationMode: (mode: SimulationMode) => set({ simulationMode: mode }),
 }));

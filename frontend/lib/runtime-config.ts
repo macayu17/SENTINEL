@@ -45,7 +45,7 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  return 'http://localhost:8000';
+  return 'http://127.0.0.1:8000';
 }
 
 export function getWsBaseUrl(): string {
@@ -67,5 +67,5 @@ export function getWsBaseUrl(): string {
     }
   }
 
-  return 'ws://localhost:8000';
+  return 'ws://127.0.0.1:8000';
 }

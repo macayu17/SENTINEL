@@ -43,13 +43,11 @@ class MarketSimulator:
         agents: List[BaseAgent],
         initial_price: float = 100.0,
         duration_seconds: int = 23_400,
-        mode: str = "SANDBOX",
         order_ttl_seconds: Optional[float] = None,
         oracle_config: Optional[OracleConfig] = None,
         latency_config: Optional[LatencyConfig] = None,
         speed_multiplier: float = 1.0,
         scenario: str | ScenarioConfig = "normal",
-        depth_profile: Optional[Dict[str, Any]] = None,
         informed_oracle_access: Optional[bool] = None,
         seed: Optional[int] = None,
         venue: str = "NASDAQ",
@@ -61,15 +59,12 @@ class MarketSimulator:
         self.kernel = EventKernel()
         self.initial_price = initial_price
         self.duration_seconds = duration_seconds
-        self.mode = mode
         self.speed_multiplier = speed_multiplier
         self.venue = venue
         self.scenario = scenario if isinstance(scenario, ScenarioConfig) else get_scenario_config(scenario)
         self.order_ttl_seconds = float(
             self.scenario.order_ttl_seconds if order_ttl_seconds is None else order_ttl_seconds
         )
-        self.depth_profile: Dict[str, Any] = depth_profile or {}
-
         # Oracle & latency
         self.oracle = MeanRevertingOracle(oracle_config)
         self.informed_oracle_access = (
@@ -167,9 +162,6 @@ class MarketSimulator:
         for agent in self.agents:
             agent.reset()
 
-            if getattr(agent, "external_action_controlled", False):
-                continue
-
             first_wake = self.rng.uniform(0.01, 1.0)
             self.kernel.schedule(first_wake, EventType.WAKEUP, self._agent_wakeup, agent)
 
@@ -178,16 +170,10 @@ class MarketSimulator:
     def _seed_order_book(self, anchor: Optional[float] = None) -> None:
         """Place initial resting orders to bootstrap the book."""
         reference_price = self.initial_price if anchor is None else anchor
-        levels = int(self.depth_profile.get("levels", 10) or 10)
-        tick_spacing = float(self.depth_profile.get("tick_spacing", 0.01) or 0.01)
-        level_size = int(
-            self.depth_profile.get(
-                "level_size",
-                max(1, round(500 * self.scenario.seed_depth_multiplier)),
-            )
-        )
-        spread_multiplier = float(self.depth_profile.get("spread_multiplier", self.scenario.spread_multiplier) or 1.0)
-        for i in range(max(1, min(20, levels))):
+        tick_spacing = 0.01
+        level_size = max(1, round(500 * self.scenario.seed_depth_multiplier))
+        spread_multiplier = self.scenario.spread_multiplier
+        for i in range(10):
             offset = (i + 1) * tick_spacing * spread_multiplier
             bid = Order(
                 agent_id="SEED",
@@ -242,7 +228,7 @@ class MarketSimulator:
             self.current_price or self.order_book.mid_price or self.initial_price,
             2,
         )
-        tick_spacing = float(self.depth_profile.get("tick_spacing", 0.01) or 0.01)
+        tick_spacing = 0.01
         for i in range(refill_levels):
             offset = (i + 1) * tick_spacing * spread_multiplier
             quantity = max(25, int(150 * floor_multiplier))
@@ -828,7 +814,8 @@ class MarketSimulator:
                 include_oracle=(
                     self.informed_oracle_access
                     and agent.agent_type == "Informed"
-                )
+                ),
+                include_agents=False,
             )
             if observed_state is None
             else observed_state
@@ -889,7 +876,8 @@ class MarketSimulator:
                     include_oracle=(
                         self.informed_oracle_access
                         and agent.agent_type == "Informed"
-                    )
+                    ),
+                    include_agents=False,
                 ),
             ),
         )
@@ -1040,13 +1028,6 @@ class MarketSimulator:
         if not self.running:
             self.running = True
 
-        for agent in self.agents:
-            if getattr(agent, "external_action_controlled", False):
-                try:
-                    self._request_agent_orders(agent)
-                except Exception as exc:
-                    logger.error(f"Externally controlled agent {agent.agent_id} error: {exc}")
-
         self.step_count += 1
         target_time = self.current_time + 1.0
         if self._session_profile()[0] == "SQUAREOFF":
@@ -1086,7 +1067,12 @@ class MarketSimulator:
         """Return the simulator agent with the requested ID, if present."""
         return self._agents_by_id.get(agent_id)
 
-    def get_market_state(self, include_oracle: Optional[bool] = None) -> Dict:
+    def get_market_state(
+        self,
+        include_oracle: Optional[bool] = None,
+        *,
+        include_agents: bool = True,
+    ) -> Dict:
         """Return the current market state snapshot."""
         depth_data = self.order_book.get_depth(levels=10)
         volatility = self._compute_volatility()
@@ -1099,9 +1085,12 @@ class MarketSimulator:
             ) / self._price_history[-5]
 
         volume_window = 10.0
-        recent_signed_volume = sum(
-            qty for ts, qty in self._recent_volume_history if (self.current_time - ts) <= volume_window
-        )
+        current_time = self.current_time
+        recent_signed_volume = 0
+        for timestamp, quantity in reversed(self._recent_volume_history):
+            if current_time - timestamp > volume_window:
+                break
+            recent_signed_volume += quantity
 
         bid_sum = sum(level["size"] for level in depth_data["bids"])
         ask_sum = sum(level["size"] for level in depth_data["asks"])
@@ -1154,16 +1143,17 @@ class MarketSimulator:
             "activity_multiplier": activity_multiplier,
             "volatility": volatility,
             "scenario": scenario_state,
-            "agents": {
+            "step": self.step_count,
+        }
+        if include_agents:
+            state["agents"] = {
                 agent.agent_id: {
                     "type": agent.agent_type,
                     "position": agent.position,
                     "inventory_ratio": self._inventory_ratio(agent),
                 }
                 for agent in self.agents
-            },
-            "step": self.step_count,
-        }
+            }
         expose_oracle = (
             self.informed_oracle_access
             if include_oracle is None
@@ -1252,7 +1242,6 @@ class MarketSimulator:
                 "initial_price": self.initial_price,
                 "duration_seconds": self.duration_seconds,
                 "speed": self.speed_multiplier,
-                "depth_profile": self.depth_profile,
             },
             "price_path": price_path,
             "order_flow": {
