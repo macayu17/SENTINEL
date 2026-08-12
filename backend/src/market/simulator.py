@@ -35,7 +35,7 @@ class MarketSimulator:
     Agents wake up asynchronously, generate orders based on the latest market
     snapshot, and those orders arrive at the exchange after each agent's
     structural latency. The simulator tracks both order-book state and the
-    richer metrics consumed by the API, predictors, and RL environment.
+    richer metrics consumed by the API and predictors.
     """
 
     def __init__(

@@ -102,11 +102,4 @@ class Config:
     baseline_depth: float = 1000.0
     baseline_volatility: float = 0.02
 
-    # Legacy API compatibility. Disabled by default and not used by SENTINEL SIM.
-    rl_policy_enabled: bool = _get_bool("RL_POLICY_ENABLED", False)
-    rl_policy_kind: str = os.getenv("RL_POLICY_KIND", "ppo").strip().lower()
-    rl_model_path: str = _resolve_repo_path(
-        os.getenv("RL_MODEL_PATH", os.path.join("models", "ppo_market_maker.zip"))
-    )
-
 config = Config()

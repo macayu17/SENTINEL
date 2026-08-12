@@ -404,11 +404,6 @@ transitions are governed by a stochastic switching probability,
 producing the intermittent bursts of directional flow observed in
 retail-heavy markets~\cite{ref14}.
 
-An optional reinforcement learning module, implemented with
-Stable-Baselines3 and compatible with the ABIDES-MARL
-interface~\cite{ref4}, can replace any agent's fixed policy with a
-learned one without modifying the simulation core.
-
 \subsection{Matching Engine}
 
 The order book implements strict price-time priority across limit,
@@ -842,9 +837,7 @@ documented flash crashes---a substantially more demanding test than
 synthetic injection. Horizontal scaling through Redis-backed shared
 state is the primary architectural priority, enabling concurrent
 simulation instances and larger agent populations without degrading
-prediction cycle times. Full RL agent integration would permit
-trading policies to be trained directly inside SENTINEL and evaluated
-against its live signal stream. LLM-driven agents remain a
+prediction cycle times. LLM-driven agents remain a
 longer-horizon goal: the ability to inject market participants that
 reason about simulated news events would meaningfully improve
 behavioral realism. Time-series persistence via an asynchronous buffer

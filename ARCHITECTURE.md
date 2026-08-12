@@ -44,7 +44,6 @@ flowchart LR
 - Large-order detector flags iceberg or TWAP patterns based on order flow statistics.
 
 ### 3.5 RL Integration
-- Optional RL policy controller loads a trained PPO agent if available.
 - RL policy can adjust market maker actions during simulation steps.
 
 ## 4. Frontend Architecture

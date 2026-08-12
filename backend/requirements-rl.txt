@@ -1,3 +1,0 @@
-pandas
-stable-baselines3[extra]==2.7.1
-tensorboard
