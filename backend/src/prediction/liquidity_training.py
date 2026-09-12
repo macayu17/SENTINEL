@@ -5,6 +5,7 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from datetime import datetime, timezone
+import gzip
 import json
 import math
 from pathlib import Path
@@ -28,7 +29,8 @@ TRAINING_FEATURES = (
 def load_depth_records(paths: Iterable[Path]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for path in paths:
-        with Path(path).open("r", encoding="utf-8") as source:
+        opener = gzip.open if Path(path).suffix == ".gz" else Path.open
+        with opener(Path(path), "rt", encoding="utf-8") as source:
             for line_number, line in enumerate(source, start=1):
                 if not line.strip():
                     continue

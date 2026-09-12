@@ -51,6 +51,7 @@ class MarketSimulator:
         informed_oracle_access: Optional[bool] = None,
         seed: Optional[int] = None,
         venue: str = "NASDAQ",
+        preset: str = "custom",
     ) -> None:
         self.agents = sorted(agents, key=lambda agent: agent.latency_seconds)
         self._agents_by_id: Dict[str, BaseAgent] = {}
@@ -61,6 +62,7 @@ class MarketSimulator:
         self.duration_seconds = duration_seconds
         self.speed_multiplier = speed_multiplier
         self.venue = venue
+        self.preset = preset
         self.scenario = scenario if isinstance(scenario, ScenarioConfig) else get_scenario_config(scenario)
         self.order_ttl_seconds = float(
             self.scenario.order_ttl_seconds if order_ttl_seconds is None else order_ttl_seconds
@@ -144,7 +146,7 @@ class MarketSimulator:
         self._resting_stops.clear()
         self._scenario_events_triggered.clear()
         self._liquidity_shock_side = (
-            self.rng.choice((OrderSide.BUY, OrderSide.SELL))
+            random.Random(f"{effective_seed}:liquidity-shock").choice((OrderSide.BUY, OrderSide.SELL))
             if self.scenario.name == "liquidity_shock"
             else None
         )
@@ -205,13 +207,13 @@ class MarketSimulator:
             )
         total_depth = self.order_book.get_total_depth(levels=10)
         depth_floor = max(100, int(600 * floor_multiplier))
-        if self.scenario.name == "liquidity_shock":
+        if self.scenario.name == "liquidity_shock" and shock_phase != "WARMUP":
             depth_floor = max(
                 depth_floor,
                 int(self._liquidity_shock_baseline_depth * floor_multiplier),
             )
         max_healthy_spread = 0.04 * spread_multiplier
-        if self.scenario.name == "liquidity_shock":
+        if self.scenario.name == "liquidity_shock" and shock_phase != "WARMUP":
             max_healthy_spread = max(
                 0.01,
                 self._liquidity_shock_baseline_spread * spread_multiplier,
@@ -1230,6 +1232,10 @@ class MarketSimulator:
                 "imbalance": state.get("order_book_imbalance", 0.0),
                 "signed_volume": state.get("recent_signed_volume", 0.0),
                 "volatility": state.get("volatility", 0.0),
+                "scenario_phase": state.get("scenario", {}).get("phase"),
+                "baseline_depth": state.get("scenario", {}).get("liquidity", {}).get("baseline_depth"),
+                "depth_depletion": state.get("scenario", {}).get("liquidity", {}).get("depth_depletion"),
+                "spread_ratio": state.get("scenario", {}).get("liquidity", {}).get("spread_ratio"),
             }
             for state in self._state_history
         ]
@@ -1237,11 +1243,18 @@ class MarketSimulator:
 
         return {
             "run_config": {
+                "preset": self.preset,
                 "scenario": self.scenario.name,
                 "seed": self.seed,
                 "initial_price": self.initial_price,
                 "duration_seconds": self.duration_seconds,
+                "elapsed_seconds": round(self.current_time, 6),
                 "speed": self.speed_multiplier,
+                "venue": self.venue,
+                "agent_count": len(self.agents),
+                "latency_mode": self.latency_model.describe()["mode"],
+                "informed_access": self.informed_oracle_access,
+                "steps": self.step_count,
             },
             "price_path": price_path,
             "order_flow": {

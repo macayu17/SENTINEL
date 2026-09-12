@@ -37,7 +37,8 @@ def _input_files(inputs: list[Path] | None) -> list[Path]:
     files: list[Path] = []
     for root in roots:
         if root.is_dir():
-            files.extend(path for path in sorted(root.glob("*.jsonl")) if "smoke" not in path.stem.lower())
+            files.extend(path for path in sorted(root.rglob("*.jsonl")) if "smoke" not in path.stem.lower())
+            files.extend(path for path in sorted(root.rglob("*.jsonl.gz")) if "smoke" not in path.stem.lower())
         else:
             files.append(root)
     return list(dict.fromkeys(path.resolve() for path in files if path.exists()))
@@ -47,7 +48,7 @@ def main() -> int:
     args = parse_args()
     files = _input_files(args.input)
     if not files:
-        print("[error] No depth JSONL files found.", file=sys.stderr)
+        print("[error] No depth JSONL or JSONL.GZ files found.", file=sys.stderr)
         return 1
 
     records = load_depth_records(files)
