@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import './theme-overrides.css';
+import './public-theme.css';
 
 export const metadata: Metadata = {
   title: 'SENTINEL — Market Microstructure Early Warning System',
