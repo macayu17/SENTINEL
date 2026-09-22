@@ -1,7 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { Download, Play, SlidersHorizontal, Square } from 'lucide-react';
+import { Download, FileText, Play, SlidersHorizontal, Square } from 'lucide-react';
+import InfoTip from '@/components/InfoTip';
 import { api, type LatencyMode, type SandboxPreset, type SandboxScenario } from '@/lib/api-client';
 import { useMarketStore } from '@/store/market-store';
 
@@ -36,7 +38,7 @@ const FALLBACK_SCENARIOS: SandboxScenario[] = [{
   institutional_multiplier: 1,
 }];
 
-const FIELD_CLASS = 'mt-1 h-10 w-full border border-gray-800 bg-black px-2 font-mono text-xs text-gray-100 outline-none focus:border-[#00bfff]';
+const FIELD_CLASS = 'mt-2 h-10 w-full border-0 border-b border-gray-700/80 bg-transparent px-0 font-mono text-xs text-gray-100 outline-none transition-colors focus:border-[#00bfff] focus:ring-0';
 
 function safeNumber(value: number, fallback: number, min: number, max: number) {
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
@@ -60,14 +62,14 @@ function NumberField({ label, value, min, max, step = 1, onChange }: {
 }) {
   return (
     <label className="block min-w-0">
-      <span className="block truncate text-[10px] tracking-[0.14em] text-gray-500">{label}</span>
+      <span className="flex items-center gap-1 text-[10px] tracking-[0.14em] text-gray-500">{label}<InfoTip term={label} /></span>
       <input type="number" min={min} max={max} step={step} value={value}
         onChange={(event) => onChange(Number(event.currentTarget.value))} className={FIELD_CLASS} />
     </label>
   );
 }
 
-export default function SandboxControlPanel() {
+export default function SandboxControlPanel({ onLaunched }: { onLaunched?: () => void }) {
   const connected = useMarketStore((state) => state.connected);
   const simulationRunning = useMarketStore((state) => state.simulationRunning);
   const resetSimulationData = useMarketStore((state) => state.resetSimulationData);
@@ -83,6 +85,7 @@ export default function SandboxControlPanel() {
   const [apiAvailable, setApiAvailable] = useState(true);
   const [commandState, setCommandState] = useState<CommandState>('idle');
   const [message, setMessage] = useState('Loading simulator controls...');
+  const [reportAvailable, setReportAvailable] = useState(false);
 
   const selectedPreset = presets[preset] ?? FALLBACK_PRESETS.balanced;
   const totalAgents = useMemo(
@@ -112,6 +115,10 @@ export default function SandboxControlPanel() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    api.getSimulationReport().then(() => setReportAvailable(true)).catch(() => setReportAvailable(false));
+  }, []);
+
   const updatePreset = (value: string) => {
     const next = presets[value];
     setPreset(value);
@@ -125,6 +132,7 @@ export default function SandboxControlPanel() {
     setMessage('Starting configured sandbox...');
     const wasRunning = simulationRunning;
     try {
+      setReportAvailable(false);
       const response = await api.createSandbox({
         preset,
         initial_price: safeNumber(initialPrice, 100, 0.01, 1_000_000),
@@ -137,6 +145,7 @@ export default function SandboxControlPanel() {
       setSimulationRunning(true);
       setCommandState('success');
       setMessage(`${response.preset.toUpperCase()} online / ${response.agents} agents / ${response.scenario}`);
+      onLaunched?.();
     } catch (error) {
       setSimulationRunning(wasRunning);
       setCommandState('error');
@@ -147,11 +156,12 @@ export default function SandboxControlPanel() {
   const stop = async () => {
     setCommandState('loading');
     try {
-      await api.stopSimulation();
+      const response = await api.stopSimulation();
       resetSimulationData();
       setSimulationRunning(false);
       setCommandState('success');
-      setMessage('Simulation stopped.');
+      setReportAvailable(response.report_available);
+      setMessage(response.report_available ? 'Simulation stopped. Session report ready.' : 'Simulation stopped.');
     } catch (error) {
       setCommandState('error');
       setMessage(error instanceof Error ? error.message : 'Stop failed.');
@@ -197,9 +207,9 @@ export default function SandboxControlPanel() {
         </span>
       </div>
 
-      <div className="grid gap-3 p-3 xl:grid-cols-[1fr_2.2fr]">
-        <section className="space-y-3 border border-gray-900 bg-black/30 p-3">
-          <label className="block"><span className="text-[10px] tracking-[0.14em] text-gray-500">PRESET</span>
+      <div className="grid gap-8 border-y border-gray-800/70 py-7 xl:grid-cols-[1fr_2.2fr]">
+        <section className="space-y-5">
+          <label className="block"><span className="flex items-center gap-1 text-[10px] tracking-[0.14em] text-gray-500">PRESET <InfoTip term="Preset" /></span>
             <select value={preset} onChange={(event) => updatePreset(event.currentTarget.value)} className={FIELD_CLASS}>
               {Object.entries(presets).map(([key, value]) => <option key={key} value={key}>{value.name} / {value.description}</option>)}
             </select>
@@ -208,30 +218,33 @@ export default function SandboxControlPanel() {
             <NumberField label="START PRICE" value={initialPrice} min={0.01} max={1_000_000} step={0.01} onChange={setInitialPrice} />
             <NumberField label="SPEED" value={speed} min={0.1} max={20} step={0.1} onChange={setSpeed} />
           </div>
-          <label className="block"><span className="text-[10px] tracking-[0.14em] text-gray-500">SCENARIO</span>
+          <label className="block"><span className="flex items-center gap-1 text-[10px] tracking-[0.14em] text-gray-500">SCENARIO <InfoTip term="Scenario" /></span>
             <select value={scenario} onChange={(event) => setScenario(event.currentTarget.value)} className={FIELD_CLASS}>
               {scenarios.map((item) => <option key={item.name} value={item.name}>{item.label} / {item.name}</option>)}
             </select>
           </label>
         </section>
 
-        <details open className="self-start border border-gray-900 bg-black/30 p-3">
+        <details open className="self-start border-gray-800/70 xl:border-l xl:pl-8">
           <summary className="cursor-pointer list-none text-[10px] font-bold tracking-[0.16em] text-gray-500">ADVANCED SIM CONTROLS</summary>
           <div className="mt-3 grid gap-4 xl:grid-cols-[0.7fr_1.3fr]">
             <section className="space-y-3">
-              <label className="block"><span className="text-[10px] tracking-[0.14em] text-gray-500">LATENCY MODEL</span>
+              <label className="block"><span className="flex items-center gap-1 text-[10px] tracking-[0.14em] text-gray-500">LATENCY MODEL <InfoTip term="Latency model" /></span>
                 <select value={latencyMode} onChange={(event) => setLatencyMode(event.currentTarget.value as LatencyMode)} className={FIELD_CLASS}>
                   <option value="zero">ZERO</option><option value="deterministic">DETERMINISTIC</option><option value="cubic">CUBIC</option>
                 </select>
               </label>
-              <button type="button" onClick={() => setOracleEnabled((value) => !value)} className={`w-full border px-3 py-2 text-left text-[11px] font-bold tracking-[0.12em] ${oracleEnabled ? 'border-[#00ff41] text-[#00ff41]' : 'border-gray-800 text-gray-500'}`}>
-                INFORMED ACCESS {oracleEnabled ? 'ON' : 'OFF'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setOracleEnabled((value) => !value)} className={`sim-toggle w-full px-0 py-2 text-left text-[11px] font-bold tracking-[0.12em] ${oracleEnabled ? 'is-active' : ''}`}>
+                  INFORMED ACCESS {oracleEnabled ? 'ON' : 'OFF'}
+                </button>
+                <InfoTip term="Informed access" />
+              </div>
             </section>
-            <section className="border border-gray-900 bg-black/20 p-3">
+            <section className="border-t border-gray-800/70 pt-4 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
               <div className="text-[10px] tracking-[0.14em] text-gray-500">PRESET POPULATION</div>
-              <div className="mt-2 text-sm font-semibold text-gray-200">{totalAgents} agents</div>
-              <div className="mt-1 text-xs text-gray-500">{selectedPreset.description}</div>
+              <div className="mt-3 text-sm font-semibold text-gray-200">{totalAgents} agents</div>
+              <div className="mt-1 max-w-xs text-xs leading-relaxed text-gray-500">{selectedPreset.description}</div>
             </section>
           </div>
         </details>
@@ -240,10 +253,11 @@ export default function SandboxControlPanel() {
       <div className="flex flex-col gap-3 border-t border-gray-900 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
         <span className={`text-xs ${commandState === 'error' ? 'text-[#ff0040]' : 'text-gray-400'}`}>{message}</span>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={launch} disabled={busy || !apiAvailable} className="inline-flex items-center gap-2 border border-[#00ff41] px-3 py-1.5 text-xs font-bold text-[#00ff41] disabled:border-gray-800 disabled:text-gray-600"><Play size={13} />LAUNCH</button>
-          <button type="button" onClick={applySpeed} disabled={busy || !simulationRunning} className="inline-flex items-center gap-2 border border-[#00bfff] px-3 py-1.5 text-xs font-bold text-[#00bfff] disabled:border-gray-800 disabled:text-gray-600"><SlidersHorizontal size={13} />APPLY SPEED</button>
-          <button type="button" onClick={exportRun} disabled={busy || !simulationRunning} className="inline-flex items-center gap-2 border border-[#ffb800] px-3 py-1.5 text-xs font-bold text-[#ffb800] disabled:border-gray-800 disabled:text-gray-600"><Download size={13} />EXPORT</button>
-          <button type="button" onClick={stop} disabled={busy || !simulationRunning} className="inline-flex items-center gap-2 border border-[#ff0040] px-3 py-1.5 text-xs font-bold text-[#ff0040] disabled:border-gray-800 disabled:text-gray-600"><Square size={12} />STOP</button>
+          <button type="button" onClick={launch} disabled={busy || !apiAvailable} className="command-button command-button--launch"><Play size={13} />LAUNCH</button>
+          <button type="button" onClick={applySpeed} disabled={busy || !simulationRunning} className="command-button command-button--speed"><SlidersHorizontal size={13} />APPLY SPEED</button>
+          <button type="button" onClick={exportRun} disabled={busy || !simulationRunning} className="command-button command-button--export"><Download size={13} />EXPORT</button>
+          {reportAvailable ? <Link href="/dashboard/session-report" className="report-link"><FileText size={13} />VIEW REPORT</Link> : null}
+          <button type="button" onClick={stop} disabled={busy || !simulationRunning} className="command-button command-button--stop"><Square size={12} />STOP</button>
         </div>
       </div>
     </div>

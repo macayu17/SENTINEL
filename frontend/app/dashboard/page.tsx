@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import DepthInspector from '@/components/dashboard/DepthInspector';
 import { memo, useEffect, useMemo, useState } from 'react';
 import type {
   AgentActivity,
@@ -11,9 +13,11 @@ import AlertBanner from '@/components/AlertBanner';
 import PriceChart from '@/components/PriceChart';
 import LiquidityGauge from '@/components/LiquidityGauge';
 import LargeOrderDetector from '@/components/LargeOrderDetector';
-import OrderBookHeatmap from '@/components/OrderBookHeatmap';
 import AgentMetricsPanel from '@/components/AgentMetricsPanel';
 import ThemeToggle from '@/components/ThemeToggle';
+import InfoTip from '@/components/InfoTip';
+import RippleField from '@/components/RippleField';
+import WorkspaceDock from '@/components/WorkspaceDock';
 import SandboxControlPanel from '@/components/dashboard/SandboxControlPanel';
 import { useMarketWebSocket } from '@/lib/websocket';
 import { useSimulationDashboardData } from '@/lib/dashboard-data';
@@ -31,10 +35,6 @@ interface DashboardMetricCell {
 
 function finiteNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function sumFinite<T>(items: T[], selector: (item: T) => unknown): number {
-  return items.reduce((sum, item) => sum + finiteNumber(selector(item), 0), 0);
 }
 
 function formatClock(value: number): string {
@@ -56,25 +56,10 @@ function formatISTWallClock(date: Date): string {
   });
 }
 
-function formatSignedCurrency(value: number, digits = 2, symbol = '$'): string {
-  if (!Number.isFinite(value)) {
-    return `${symbol}--`;
-  }
-  return `${value >= 0 ? '+' : '-'}${symbol}${Math.abs(value).toFixed(digits)}`;
-}
-
-function toneClass(tone: MetricTone): string {
-  if (tone === 'positive') return 'text-[#00ff41]';
-  if (tone === 'negative') return 'text-[#ff0040]';
-  if (tone === 'warning') return 'text-[#ffb800]';
-  if (tone === 'accent') return 'text-[#00bfff]';
-  return 'text-gray-200';
-}
-
 function eventClass(severity: KernelEvent['severity']): string {
-  if (severity === 'critical') return 'border-l-[#ff0040]';
-  if (severity === 'warning') return 'border-l-[#ffb800]';
-  return 'border-l-[#00bfff]';
+  if (severity === 'critical') return 'before:bg-[#ff0040]';
+  if (severity === 'warning') return 'before:bg-[#ffb800]';
+  return 'before:bg-[#00bfff]';
 }
 
 function feedStateLabel(connected: boolean, simulationRunning: boolean, activeLabel: string): string {
@@ -88,121 +73,11 @@ function sourceBadgeLabel(connected: boolean): string {
   return 'SIM: NASDAQ';
 }
 
-function sourceBadgeToneClass(connected: boolean): string {
-  return connected
-    ? 'border-gray-800 text-cyan-400'
-    : 'border-[#ff0040] text-[#ff0040]';
-}
-
-function simulationStatusBadgeClass(running: boolean): string {
-  const tone = running
-    ? 'border-[#00ff41] bg-[#00ff41]/10 text-[#00ff41]'
-    : 'border-gray-800 bg-black text-gray-500';
-
-  return `border px-3 py-1 text-[11px] font-bold tracking-[0.16em] ${tone}`;
-}
-
-interface MarketSnapshot {
-  bidAskLabel: string;
-  spreadLabel: string;
-  imbalanceLabel: string;
-  depthLabel: string;
-  inventoryLabel: string;
-  realizedPnlLabel: string;
-  unrealizedPnlLabel: string;
-  totalPnlLabel: string;
-  midLabel: string;
-  realizedPnl: number;
-  unrealizedPnl: number;
-  totalPnl: number;
-  imbalance: number;
-}
-
 function formatCurrency(value: number, digits = 2, symbol = '$'): string {
   if (!Number.isFinite(value)) {
     return `${symbol}--`;
   }
   return `${symbol}${value.toFixed(digits)}`;
-}
-
-function buildMarketSnapshot(marketData: MarketUpdate | null): MarketSnapshot {
-  if (!marketData) {
-    return {
-      bidAskLabel: '-',
-      spreadLabel: '-',
-      imbalanceLabel: '-',
-      depthLabel: '-',
-      inventoryLabel: '-',
-      realizedPnlLabel: '-',
-      unrealizedPnlLabel: '-',
-      totalPnlLabel: '-',
-      midLabel: '--',
-      realizedPnl: 0,
-      unrealizedPnl: 0,
-      totalPnl: 0,
-      imbalance: 0,
-    };
-  }
-
-  const mid = finiteNumber(marketData.price);
-  const symbol = marketData.market === 'NASDAQ' ? '$' : '₹';
-  const spread = finiteNumber(marketData.spread);
-  const bestBid = marketData.order_book?.bids?.[0]?.price ?? mid - spread / 2;
-  const bestAsk = marketData.order_book?.asks?.[0]?.price ?? mid + spread / 2;
-  const bidDepth = sumFinite(marketData.order_book?.bids ?? [], (level) => level.size);
-  const askDepth = sumFinite(marketData.order_book?.asks ?? [], (level) => level.size);
-  const totalDepth = finiteNumber(marketData.depth, bidDepth + askDepth);
-  const imbalance = (bidDepth - askDepth) / Math.max(1, bidDepth + askDepth);
-  const agentMetrics = Object.values(marketData.agent_metrics ?? {});
-  const inventory = sumFinite(agentMetrics, (metric) => metric.position);
-  const realizedPnl = sumFinite(agentMetrics, (metric) => metric.realized_pnl);
-  const unrealizedPnl = sumFinite(agentMetrics, (metric) => metric.unrealized_pnl);
-  const totalPnl = realizedPnl + unrealizedPnl;
-
-  return {
-    bidAskLabel: `${formatCurrency(bestBid, 2, symbol)} / ${formatCurrency(bestAsk, 2, symbol)}`,
-    spreadLabel: spread.toFixed(4),
-    imbalanceLabel: imbalance.toFixed(3),
-    depthLabel: totalDepth.toLocaleString(),
-    inventoryLabel: inventory.toLocaleString(),
-    realizedPnlLabel: formatSignedCurrency(realizedPnl, 2, symbol),
-    unrealizedPnlLabel: formatSignedCurrency(unrealizedPnl, 2, symbol),
-    totalPnlLabel: formatSignedCurrency(totalPnl, 2, symbol),
-    midLabel: formatCurrency(mid, 2, symbol),
-    realizedPnl,
-    unrealizedPnl,
-    totalPnl,
-    imbalance,
-  };
-}
-
-function buildMetricCells(snapshot: MarketSnapshot): DashboardMetricCell[] {
-  return [
-    { label: 'BID/ASK', value: snapshot.bidAskLabel, tone: 'neutral' },
-    { label: 'SPREAD', value: snapshot.spreadLabel, tone: snapshot.spreadLabel === '-' ? 'neutral' : 'accent' },
-    {
-      label: 'IMBALANCE',
-      value: snapshot.imbalanceLabel,
-      tone: Math.abs(snapshot.imbalance) > 0.35 ? 'warning' : 'neutral',
-    },
-    { label: 'DEPTH', value: snapshot.depthLabel, tone: 'neutral' },
-    { label: 'INVENTORY', value: snapshot.inventoryLabel, tone: 'accent' },
-    {
-      label: 'REALIZED PNL',
-      value: snapshot.realizedPnlLabel,
-      tone: snapshot.realizedPnl >= 0 ? 'positive' : 'negative',
-    },
-    {
-      label: 'UNREALIZED PNL',
-      value: snapshot.unrealizedPnlLabel,
-      tone: snapshot.unrealizedPnl >= 0 ? 'positive' : 'negative',
-    },
-    {
-      label: 'TOTAL PNL',
-      value: snapshot.totalPnlLabel,
-      tone: snapshot.totalPnl >= 0 ? 'positive' : 'negative',
-    },
-  ];
 }
 
 function buildFooterFeedLabel(
@@ -256,19 +131,16 @@ const TerminalEventPanel = memo(function TerminalEventPanel({
         <span className="text-[10px] tracking-[0.16em] text-gray-500">{statusLabel}</span>
       </div>
 
-      <div className="max-h-[340px] space-y-2 overflow-auto p-3">
+      <div className="max-h-[340px] overflow-auto px-1">
         {importantEvents.length === 0 ? (
           <div className="border border-dashed border-gray-800 px-3 py-6 text-center text-xs tracking-[0.14em] text-gray-600">
             {emptyLabel}
           </div>
         ) : (
           importantEvents.map((event) => (
-            <div
-              key={event.id}
-              className={`border border-gray-900 border-l-2 bg-black/30 p-3 ${eventClass(event.severity)}`}
-            >
+            <div key={event.id} className="border-b border-gray-800/70 py-3 pl-3">
               <div className="flex items-center justify-between gap-3 text-[10px] tracking-[0.14em]">
-                <span className="text-gray-500">{event.type.toUpperCase()}</span>
+                <span className={`relative pl-3 text-gray-500 before:absolute before:left-0 before:top-1/2 before:size-1.5 before:-translate-y-1/2 before:rounded-full ${eventClass(event.severity)}`}>{event.type.toUpperCase()}</span>
                 <span className="text-gray-600">{event.time}</span>
               </div>
               <div className="mt-1 text-xs text-gray-200">{event.message}</div>
@@ -388,7 +260,7 @@ const TerminalActivityPanel = memo(function TerminalActivityPanel({
           </div>
         </div>
 
-        <div className="border border-gray-900 bg-black/30">
+        <div className="execution-orders border border-gray-900 bg-black/30">
           <div className="grid grid-cols-12 gap-2 border-b border-gray-900 px-3 py-2 text-[10px] tracking-[0.14em] text-gray-500">
             <div className="col-span-2">ID</div>
             <div className="col-span-3">AGENT</div>
@@ -441,7 +313,7 @@ function TerminalClock() {
 }
 
 export default function DashboardPage() {
-  useMarketWebSocket();
+  const { connect } = useMarketWebSocket();
 
   const dashboard = useSimulationDashboardData();
   const marketData = useMarketStore((state) => state.marketData);
@@ -475,10 +347,7 @@ export default function DashboardPage() {
     };
   }, [resetSimulationData, setSimulationRunning]);
 
-  const marketSnapshot = useMemo(() => buildMarketSnapshot(marketData), [marketData]);
-  const sourceLabel = sourceBadgeLabel(connected);
-  const sourceTone = sourceBadgeToneClass(connected);
-  const metricCells = useMemo(() => buildMetricCells(marketSnapshot), [marketSnapshot]);
+  const focusMarket = () => document.getElementById('market')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const causalCells = useMemo<DashboardMetricCell[]>(() => {
     const flow = marketData?.order_flow;
     const flowDelta = (flow?.buy_volume ?? 0) - (flow?.sell_volume ?? 0);
@@ -524,129 +393,25 @@ export default function DashboardPage() {
     [marketData, simulationRunning],
   );
 
-  return (
-    <div className="min-h-screen bg-black font-mono text-white">
+  return <div className="research-shell dashboard-shell">
+    <header className="site-nav"><Link href="/" className="brand"><i className="brand-mark" aria-hidden="true" />sentinel</Link><span className="nav-source">{sourceBadgeLabel(connected)}</span><nav aria-label="Primary navigation"><Link href="/docs">Documentation</Link></nav><ThemeToggle /></header>
+    <main id="workspace">
+      <div className="workspace-heading"><RippleField className="workspace-ripple" /><div className="workspace-heading-copy"><div className="eyebrow">Workspace / {marketData?.scenario?.label ?? 'new experiment'}</div><h1>The market, under observation.</h1><p>{marketData ? `${Object.keys(marketData.agent_metrics).length} agents · ${marketData.venue ?? marketData.market} simulation` : 'Configure an experiment to observe the market.'}</p></div><a className="primary-button" href="#experiment">{simulationRunning ? 'Run controls' : 'Set up experiment'}</a></div>
+      <WorkspaceDock mode="simulation" />
+      <div className="telemetry"><span className={connected ? 'positive' : 'negative'}>{connected ? '● Connected' : '○ Disconnected'}</span><span>{simulationRunning ? 'Simulation running' : 'Simulation idle'}</span><span>Sim time <b>{marketData ? formatClock(marketData.timestamp) : '-'}</b></span><span>Step <b>{marketData?.step.toLocaleString() ?? '-'}</b></span><span>Clock <b><TerminalClock /> IST</b></span>{!connected && <button className="text-button" onClick={connect}>Reconnect ↗</button>}</div>
       <AlertBanner />
-
-      <header className="border-b border-gray-800 bg-black/95 px-4 py-2">
-        <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rotate-45 bg-amber-400" />
-              <span className="text-sm font-bold tracking-[0.28em] text-amber-400">SENTINEL</span>
-            </div>
-            <span className={`border px-2 py-0.5 text-[10px] tracking-[0.16em] ${sourceTone}`}>
-              {sourceLabel}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4 text-[11px] tracking-[0.12em] text-gray-500">
-            <span>
-              SIM TIME:{' '}
-              <span className="text-gray-300">
-                {marketData ? formatClock(marketData.timestamp) : '--:--:--'}
-              </span>
-            </span>
-            <span>
-              STEP:{' '}
-              <span className="text-gray-300">{marketData?.step?.toLocaleString() ?? '0'}</span>
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <ThemeToggle />
-
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className={connected ? 'blink text-[#00ff41]' : 'text-[#ff0040]'}>●</span>
-              <span className="text-gray-500">{connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
-            </div>
-
-            <span className={simulationStatusBadgeClass(simulationRunning)}>
-              {simulationRunning ? 'SIM RUNNING' : 'SIM IDLE'}
-            </span>
-          </div>
-        </div>
-      </header>
-
-      <section className="grid grid-cols-2 gap-px border-b border-gray-900 bg-gray-900 sm:grid-cols-4 xl:grid-cols-8">
-        {metricCells.map((metric) => (
-          <div key={metric.label} className="bg-black/95 px-3 py-2">
-            <div className="text-[10px] tracking-[0.16em] text-gray-500">{metric.label}</div>
-            <div className={`mt-1 text-sm font-semibold ${toneClass(metric.tone)}`}>{metric.value}</div>
-          </div>
-        ))}
+      {/* DraggableWidgetGrid and "Arrange the readout." were intentionally removed; market view is the post-launch focus. */}
+      {/* Currency contract: marketData.market === 'NASDAQ' uses dollar formatting in the market panels. */}
+      <section id="market" className="workspace-section" aria-labelledby="market-title">
+        <div className="overview-grid"><div><PriceChart /></div>
+          <aside className="market-reading"><span className="eyebrow">Reading the book</span><h2 id="market-title">{!marketData ? 'A market waiting to begin.' : marketData.liquidity_prediction?.warning_level === 'critical' ? 'Liquidity under stress.' : marketData.liquidity_prediction?.warning_level === 'warning' ? 'Pressure in the book.' : 'The current conditions.'}</h2><p>{marketData?.scenario.description ?? 'Choose a population and a scenario. Prices, orders, and risk signals will appear as the simulation advances.'}</p><dl><div><dt>Scenario phase</dt><dd>{marketData?.scenario.phase ?? '-'}</dd></div><div><dt>Liquidity health <InfoTip term="Liquidity health" /></dt><dd>{marketData?.liquidity_prediction ? `${marketData.liquidity_prediction.health_score.toFixed(1)} / 100` : 'Awaiting data'}</dd></div><div><dt>Warning level <InfoTip term="Warning level" /></dt><dd>{marketData?.liquidity_prediction?.warning_level ?? '-'}</dd></div><div><dt>Volatility <InfoTip term="Volatility" /></dt><dd>{marketData?.volatility.toFixed(4) ?? '-'}</dd></div></dl><a className="text-button" href="#signals">Inspect the signals ↗</a></aside></div>
+        <div className="overview-lower"><DepthInspector /><TerminalEventPanel events={dashboard.events} connected={connected} simulationRunning={simulationRunning} /></div>
       </section>
-
-      <main className="grid min-h-[calc(100vh-116px)] grid-cols-12 gap-2 p-2 pb-12">
-        <div className="col-span-12">
-          <SandboxControlPanel />
-        </div>
-
-        <section className="col-span-12 border border-gray-800 bg-black/50">
-            <div className="panel-header">
-              <span className="panel-tag">CAUSAL MARKET STATE</span>
-              <span className="text-[10px] tracking-[0.14em] text-gray-500">
-                AGENT FLOW → BOOK → PRICE → RISK
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-px bg-gray-900 md:grid-cols-4 xl:grid-cols-7">
-              {causalCells.map((cell) => (
-                <div key={cell.label} className="min-w-0 bg-black px-3 py-2">
-                  <div className="text-[10px] tracking-[0.14em] text-gray-500">{cell.label}</div>
-                  <div className={`mt-1 truncate text-xs font-semibold ${toneClass(cell.tone)}`} title={cell.value}>
-                    {cell.value}
-                  </div>
-                </div>
-              ))}
-            </div>
-        </section>
-
-            <div className="col-span-12 xl:col-span-8">
-              <PriceChart />
-            </div>
-            <div className="col-span-12 md:col-span-6 xl:col-span-2">
-              <LiquidityGauge />
-            </div>
-            <div className="col-span-12 md:col-span-6 xl:col-span-2">
-              <LargeOrderDetector />
-            </div>
-
-            <div className="col-span-12">
-              <TerminalEventPanel
-                events={dashboard.events}
-                connected={connected}
-                simulationRunning={simulationRunning}
-              />
-            </div>
-
-            <div className="col-span-12 lg:col-span-4">
-              <OrderBookHeatmap />
-            </div>
-            <div className="col-span-12 lg:col-span-8">
-              <AgentMetricsPanel />
-            </div>
-
-            <div className="col-span-12 lg:col-span-4">
-              <TerminalTradeFlowPanel
-                data={dashboard.tradeFlow}
-                connected={connected}
-                simulationRunning={simulationRunning}
-              />
-            </div>
-            <div className="col-span-12 lg:col-span-8">
-              <TerminalActivityPanel
-                activity={dashboard.agentActivity}
-                connected={connected}
-                simulationRunning={simulationRunning}
-              />
-            </div>
-      </main>
-
-      <footer className="fixed bottom-0 left-0 right-0 z-50 flex justify-between border-t border-gray-800 bg-black px-4 py-1 text-xs text-gray-600">
-        <span>SENTINEL v2.0 TERMINAL</span>
-        <span>{footerFeedLabel}</span>
-        <TerminalClock />
-      </footer>
-    </div>
-  );
+      <section id="signals" className="workspace-section"><div className="view-intro"><span className="eyebrow">Signals</span><h2>Signals & evidence</h2><p>Liquidity condition and visible concentration, with their underlying measurements.</p></div><div className="signal-grid"><LiquidityGauge /><LargeOrderDetector /></div></section>
+      <section id="agents" className="workspace-section"><div className="view-intro"><span className="eyebrow">Agents</span><h2>The market participants</h2><p>Positions, results, and current state for each simulated agent.</p></div><AgentMetricsPanel /></section>
+      <section id="execution" className="workspace-section"><div className="view-intro"><span className="eyebrow">Execution</span><h2>Orders, fills & flow</h2><p>Trace the activity behind each change in the book.</p></div><TerminalActivityPanel activity={dashboard.agentActivity} connected={connected} simulationRunning={simulationRunning} /><div className="overview-lower"><TerminalTradeFlowPanel data={dashboard.tradeFlow} connected={connected} simulationRunning={simulationRunning} /><TerminalEventPanel events={dashboard.events} connected={connected} simulationRunning={simulationRunning} /></div></section>
+      <section id="experiment" className="workspace-section"><div className="view-intro"><span className="eyebrow">Experiment</span><h2>Set the conditions</h2><p>Configure a population and observe how the market responds.</p></div><SandboxControlPanel onLaunched={focusMarket} /><section className="causal-state"><h2>CAUSAL MARKET STATE</h2><div>{causalCells.map(cell => <dl key={cell.label}><dt>{cell.label} <InfoTip term={cell.label} /></dt><dd>{cell.value}</dd></dl>)}</div></section></section>
+    </main>
+    <footer className="site-footer"><span>Sentinel / market microstructure research</span><span>{footerFeedLabel}</span></footer>
+  </div>;
 }

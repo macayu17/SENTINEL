@@ -1,5 +1,6 @@
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import type {
+  SimulationReport,
   SandboxCreateRequest,
   SandboxPreset,
   SandboxScenario,
@@ -10,6 +11,7 @@ export type {
   SandboxCreateRequest,
   SandboxPreset,
   SandboxScenario,
+  SimulationReport,
 } from '@/types/api';
 
 class SentinelAPI {
@@ -54,7 +56,7 @@ class SentinelAPI {
   }
 
   async stopSimulation() {
-    return this.request<{ status: string }>('/api/simulation/stop', { method: 'POST' });
+    return this.request<{ status: string; report_available: boolean }>('/api/simulation/stop', { method: 'POST' });
   }
 
   async getSandboxPresets() {
@@ -88,6 +90,16 @@ class SentinelAPI {
 
   async exportSimulation() {
     return this.request<Record<string, unknown>>('/api/simulation/export');
+  }
+
+  async getSimulationReport() {
+    return this.request<SimulationReport>('/api/simulation/report');
+  }
+
+  async downloadSimulationReportPdf() {
+    const response = await fetch(`${getApiBaseUrl()}/api/simulation/report.pdf`);
+    if (!response.ok) throw new Error(`API error: ${response.status} ${response.statusText}`);
+    return response.blob();
   }
 }
 
