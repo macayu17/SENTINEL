@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from backend.src.api import main as api_main
 from backend.src.market.order import Order, OrderSide, OrderType
+from backend.src import report_pdf
 
 
 def test_live_shadow_routes_are_removed():
@@ -255,3 +256,60 @@ def test_simulation_export_returns_run_config_metrics_and_warning_timeline():
         active_sim.stop()
         api_main.simulator = None
         api_main._warning_timeline = []
+
+
+def test_stopping_simulation_preserves_json_and_pdf_session_report():
+    active_sim = api_main.MarketSimulator([], initial_price=101.25, scenario="market_open")
+    active_sim.running = True
+    for _ in range(3):
+        active_sim.step()
+    api_main.simulator = active_sim
+    api_main._warning_timeline = [
+        {"timestamp": 1.0, "detector": "liquidity", "warning_level": "caution"}
+    ]
+    client = TestClient(api_main.app)
+
+    try:
+        stopped = client.post("/api/simulation/stop")
+        report = client.get("/api/simulation/report")
+        pdf = client.get("/api/simulation/report.pdf")
+
+        assert stopped.status_code == 200
+        assert stopped.json()["report_available"] is True
+        assert report.status_code == 200
+        assert report.json()["status"] == "completed"
+        assert report.json()["run_config"]["scenario"] == "market_open"
+        assert report.json()["warning_timeline"][0]["warning_level"] == "caution"
+        assert pdf.status_code == 200
+        assert pdf.headers["content-type"] == "application/pdf"
+        assert pdf.content.startswith(b"%PDF")
+    finally:
+        active_sim.stop()
+        api_main.simulator = None
+        api_main._warning_timeline = []
+        if hasattr(api_main, "_last_simulation_report"):
+            api_main._last_simulation_report = None
+
+
+def test_pdf_table_wraps_long_explanations():
+    short = "Spread"
+    long = "A long explanation that must wrap inside the printable report table column."
+
+    assert report_pdf._wrap_table_cell(short) == short
+    assert report_pdf._wrap_table_cell(long).__class__.__name__ == "Paragraph"
+
+
+def test_pdf_price_chart_draws_green_and_red_candle_bodies_with_wicks():
+    drawing = report_pdf._price_chart([
+        {"timestamp": 0, "price": 100.0},
+        {"timestamp": 1, "price": 102.0},
+        {"timestamp": 5, "price": 101.0},
+        {"timestamp": 6, "price": 99.0},
+    ])
+    shapes = list(drawing.contents)
+
+    assert sum(shape.__class__.__name__ == "Rect" for shape in shapes) >= 2
+    assert sum(shape.__class__.__name__ == "Line" for shape in shapes) >= 4
+    fill_colors = {getattr(shape, "fillColor", None) for shape in shapes}
+    assert report_pdf.CANDLE_UP in fill_colors
+    assert report_pdf.CANDLE_DOWN in fill_colors

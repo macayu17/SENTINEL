@@ -1,187 +1,90 @@
 'use client';
 
-import React from 'react';
-import {
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Area,
-  ComposedChart,
-} from 'recharts';
+import { useMemo, useState } from 'react';
 import { useMarketStore } from '@/store/market-store';
+import { aggregateCandles } from '@/lib/candles';
 
-const IST_TIME_FORMATTER = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'Asia/Kolkata',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false,
-});
+const clock = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const intervals = [1000, 5000, 15000];
 
-function formatISTTime(timestampMs: number): string {
-  if (!Number.isFinite(timestampMs)) return '--:--:--';
-  return IST_TIME_FORMATTER.format(new Date(timestampMs));
-}
-
-function formatChartTime(timestampMs: number): string {
-  return formatISTTime(timestampMs);
-}
-
-function formatPrice(value: number, digits = 2, symbol = '$'): string {
-  if (!Number.isFinite(value)) return `${symbol}--`;
-  return `${symbol}${value.toFixed(digits)}`;
-}
-
-interface CustomTooltipProps {
-  active?: boolean;
-  payload?: Array<{ value: number; dataKey: string; color: string }>;
-  label?: number;
-}
-
-function TerminalTooltip({ active, payload, label }: CustomTooltipProps) {
-  if (!active || !payload) return null;
-  return (
-    <div className="bg-black border border-gray-700 px-2 py-1 font-mono text-xs">
-      <div className="text-gray-500">{formatChartTime(label || 0)} IST</div>
-      {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color }}>
-          {p.dataKey.toUpperCase()}: {typeof p.value === 'number' ? p.value.toFixed(4) : p.value}
-        </div>
-      ))}
-    </div>
-  );
+function formatChartTime(time: number) {
+  return clock.format(time);
 }
 
 export default function PriceChart() {
-  const priceHistory = useMarketStore((s) => s.priceHistory);
-  const marketData = useMarketStore((s) => s.marketData);
-  const chartData = priceHistory.map((point) => ({
-    ...point,
-    chartTimeMs: point.receivedAt,
-  }));
-  const hasFundamental = chartData.some((point) => typeof point.fundamental === 'number');
+  const priceHistory = useMarketStore((state) => state.priceHistory);
+  const marketData = useMarketStore((state) => state.marketData);
+  const [interval, setInterval] = useState(5000);
+  const [selected, setSelected] = useState<number | null>(null);
+  const chartData = useMemo(
+    () => priceHistory.map((point) => ({ ...point, chartTimeMs: point.receivedAt })),
+    [priceHistory],
+  );
+  const candles = useMemo(
+    () => aggregateCandles(chartData, interval),
+    [chartData, interval],
+  );
+  const symbol = marketData?.market === 'NASDAQ' ? '$' : '₹';
+  const current = marketData?.price;
+  const change = current !== undefined && priceHistory[0]?.price > 0
+    ? (current / priceHistory[0].price - 1) * 100
+    : null;
+  const values = candles.flatMap((candle) => [candle.high, candle.low]);
+  const lowValue = Math.min(...values);
+  const highValue = Math.max(...values);
+  const padding = Math.max((highValue - lowValue) * 0.16, 0.005);
+  const low = lowValue - padding;
+  const high = highValue + padding;
+  const y = (price: number) => 265 - ((price - low) / (high - low)) * 240;
+  const width = 755 / Math.max(candles.length, 16);
+  const inspected = selected === null ? null : candles[Math.min(selected, candles.length - 1)];
 
-  const currentPrice = marketData?.price ?? 0;
-  const currencySymbol = marketData?.market === 'NASDAQ' ? '$' : '₹';
-  const priceChange = priceHistory.length > 1
-    ? currentPrice - priceHistory[0].price
-    : 0;
-  const pctChange = priceHistory.length > 1 && priceHistory[0].price > 0
-    ? (priceChange / priceHistory[0].price) * 100
-    : 0;
+  const inspectAt = (clientX: number, element: SVGSVGElement) => {
+    const rect = element.getBoundingClientRect();
+    const chartX = (clientX - rect.left) / rect.width * 840;
+    setSelected(Math.max(0, Math.min(candles.length - 1, Math.round((chartX - 10) / width))));
+  };
 
-  const changeColor = priceChange >= 0 ? '#00ff41' : '#ff0040';
-
-  return (
-    <div className="terminal-panel">
-      <div className="panel-header">
-        <div className="flex items-center gap-3">
-          <span className="panel-tag">PRICE</span>
-          <span className="text-[10px] font-mono tracking-[0.14em] text-gray-500">
-            GREEN = MID PRICE
-          </span>
-          <span className="text-[10px] font-mono tracking-[0.14em] text-amber-500/80">
-            AMBER = BID-ASK SPREAD
-          </span>
-          {hasFundamental ? (
-            <span className="text-[10px] font-mono tracking-[0.14em] text-cyan-400">
-              CYAN = LATENT VALUE
-            </span>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-lg font-mono font-bold text-white">
-            {formatPrice(currentPrice, 2, currencySymbol)}
-          </span>
-          <span className="text-xs font-mono" style={{ color: changeColor }}>
-            {priceChange >= 0 ? '▲' : '▼'} {formatPrice(Math.abs(priceChange), 4, currencySymbol)} ({pctChange.toFixed(2)}%)
-          </span>
-        </div>
+  return <section className="market-chart" aria-label="Market price chart">
+    <div className="market-top">
+      <div className="price-quote">
+        <strong>{current === undefined ? '—' : `${symbol}${current.toFixed(3)}`}</strong>
+        <span className={change !== null && change < 0 ? 'negative' : 'positive'}>
+          {change === null ? 'Awaiting prices' : `${change >= 0 ? '+' : ''}${change.toFixed(3)}%`}
+        </span>
       </div>
-
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-            <CartesianGrid
-              strokeDasharray="1 4"
-              stroke="#1a1a1a"
-              vertical={false}
-            />
-            <XAxis
-              dataKey="chartTimeMs"
-              type="number"
-              domain={['dataMin', 'dataMax']}
-              tickFormatter={formatChartTime}
-              stroke="#333"
-              tick={{ fill: '#555', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              yAxisId="price"
-              domain={['auto', 'auto']}
-              stroke="#333"
-              tick={{ fill: '#555', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
-              tickFormatter={(v: number) => formatPrice(v, 2, currencySymbol)}
-              width={65}
-            />
-            <YAxis
-              yAxisId="spread"
-              orientation="right"
-              domain={['auto', 'auto']}
-              stroke="#333"
-              tick={{ fill: '#444', fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}
-              tickFormatter={(v: number) => v.toFixed(3)}
-              width={50}
-            />
-            <Tooltip content={<TerminalTooltip />} />
-
-            <Area
-              yAxisId="spread"
-              type="monotone"
-              dataKey="spread"
-              fill="rgba(255, 184, 0, 0.05)"
-              stroke="rgba(255, 184, 0, 0.3)"
-              strokeWidth={1}
-            />
-
-            {/* Price line */}
-            <Line
-              yAxisId="price"
-              type="monotone"
-              dataKey="price"
-              stroke="#00ff41"
-              strokeWidth={1.5}
-              dot={false}
-              animationDuration={0}
-              style={{ filter: 'drop-shadow(0 0 3px rgba(0, 255, 65, 0.4))' }}
-            />
-            {hasFundamental ? (
-              <Line
-                yAxisId="price"
-                type="monotone"
-                dataKey="fundamental"
-                stroke="#22d3ee"
-                strokeWidth={1.25}
-                strokeDasharray="5 3"
-                dot={false}
-                connectNulls
-                animationDuration={0}
-              />
-            ) : null}
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Bottom stats bar */}
-      <div className="flex justify-between px-3 py-1 border-t border-gray-800 text-xs font-mono">
-        <span className="text-gray-500">SPREAD: <span className="text-amber-400">{marketData?.spread?.toFixed(4) ?? '—'}</span></span>
-        <span className="text-gray-500">DEPTH: <span className="text-cyan-400">{marketData?.depth?.toLocaleString() ?? '—'}</span></span>
-        <span className="text-gray-500">SIM VOL: <span className="text-purple-400">{marketData?.volatility?.toFixed(4) ?? '—'}</span></span>
-        <span className="text-gray-500">STEP: <span className="text-gray-300">{marketData?.step?.toLocaleString() ?? '—'}</span></span>
+      <div className="chart-periods" aria-label="Candle interval">
+        {intervals.map((value) => <button key={value} aria-pressed={interval === value} onClick={() => { setInterval(value); setSelected(null); }}>{value / 1000}s</button>)}
       </div>
     </div>
-  );
+    <div className="chart-caption">
+      <span>OHLC candles from received mid-price samples</span>
+      <span>{inspected ? `O ${inspected.open.toFixed(3)} · H ${inspected.high.toFixed(3)} · L ${inspected.low.toFixed(3)} · C ${inspected.close.toFixed(3)}` : 'Hover or use arrow keys to inspect'}</span>
+    </div>
+    {!candles.length ? <div className="empty-state">Start an experiment to observe prices and liquidity.</div> : <svg viewBox="0 0 840 315" tabIndex={0} role="img" aria-label="Received market prices aggregated into OHLC candles. Left and right arrows inspect values." onKeyDown={(event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      setSelected(Math.max(0, Math.min(candles.length - 1, (selected ?? 0) + (event.key === 'ArrowRight' ? 1 : -1))));
+    }} onPointerMove={(event) => inspectAt(event.clientX, event.currentTarget)} onPointerLeave={() => setSelected(null)} onBlur={() => setSelected(null)}>
+      {[0, 1, 2, 3, 4].map((index) => {
+        const price = low + (high - low) * index / 4;
+        return <g key={index}><line x1="0" x2="775" y1={y(price)} y2={y(price)} className="chart-grid" /><text x="784" y={y(price) + 3} className="chart-label">{price.toFixed(3)}</text></g>;
+      })}
+      {candles.map((candle, index) => {
+        const x = 10 + index * width;
+        const rising = candle.close >= candle.open;
+        const bodyTop = y(Math.max(candle.open, candle.close));
+        const bodyBottom = y(Math.min(candle.open, candle.close));
+        return <g key={candle.time} className={`ohlc-candle ${rising ? 'up' : 'down'} ${index === candles.length - 1 ? 'live' : ''}`}>
+          <line className="candle-wick upper" x1={x} x2={x} y1={y(candle.high)} y2={bodyTop} />
+          <rect x={x - width * 0.32} y={bodyTop} width={Math.max(5, width * 0.64)} height={Math.max(2, bodyBottom - bodyTop)} rx="1" />
+          <line className="candle-wick lower" x1={x} x2={x} y1={bodyBottom} y2={y(candle.low)} />
+        </g>;
+      })}
+      {current !== undefined && <line x1="0" x2="775" y1={y(current)} y2={y(current)} className="current-price-line" />}
+      {[0, Math.floor((candles.length - 1) / 2), candles.length - 1].filter((value, index, all) => all.indexOf(value) === index && (index === 0 || (value - all[index - 1]) * width > 110)).map((index) => <text key={index} x={10 + index * width} y="300" textAnchor={index === 0 ? 'start' : 'middle'} className="chart-label">{formatChartTime(candles[index].time)}</text>)}
+      {selected !== null && inspected && <line x1={10 + Math.min(selected, candles.length - 1) * width} x2={10 + Math.min(selected, candles.length - 1) * width} y1="12" y2="278" className="chart-crosshair" />}
+    </svg>}
+    <div className="chart-footnote" role="status">{inspected ? `${formatChartTime(inspected.time)} IST · ${symbol}${inspected.close.toFixed(3)} close` : 'New candle bodies enter smoothly; the current candle updates from the latest received price.'}</div>
+  </section>;
 }

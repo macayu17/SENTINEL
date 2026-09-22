@@ -1,8 +1,7 @@
 'use client';
+import { useEffect, useRef, useState } from 'react';
 
-import { useEffect, useState } from 'react';
-
-interface Wave {
+interface ThemeWave {
   id: number;
   x: number;
   y: number;
@@ -10,48 +9,32 @@ interface Wave {
 }
 
 export default function ThemeToggle({ className = '' }: { className?: string }) {
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    if (typeof window === 'undefined') return 'dark';
-    const saved = window.localStorage.getItem('sentinel-theme');
-    return saved === 'dark' || saved === 'light' ? saved : 'dark';
-  });
-  const [wave, setWave] = useState<Wave | null>(null);
-
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [wave, setWave] = useState<ThemeWave | null>(null);
+  const waveTimer = useRef<number | null>(null);
   useEffect(() => {
-    document.documentElement.classList.toggle('theme-light', theme === 'light');
-    document.documentElement.classList.toggle('theme-dark', theme === 'dark');
-    window.localStorage.setItem('sentinel-theme', theme);
-  }, [theme]);
-
-  const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
-    const nextTheme = theme === 'light' ? 'dark' : 'light';
-    setWave({
-      id: Date.now(),
-      x: event.clientX,
-      y: event.clientY,
-      light: nextTheme === 'light',
-    });
-    setTheme(nextTheme);
-    window.setTimeout(() => setWave(null), 850);
+    let saved = 'light';
+    try { saved = localStorage.getItem('sentinel-theme') || 'light'; } catch { /* Storage can be disabled. */ }
+    const next = saved === 'dark' ? 'dark' : 'light';
+    setTheme(next);
+    document.documentElement.classList.toggle('theme-dark', next === 'dark');
+    document.documentElement.classList.toggle('theme-light', next === 'light');
+  }, []);
+  useEffect(() => () => {
+    if (waveTimer.current !== null) window.clearTimeout(waveTimer.current);
+  }, []);
+  const toggle = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const next = theme === 'light' ? 'dark' : 'light';
+    setWave({ id: Date.now(), x: event.clientX, y: event.clientY, light: next === 'light' });
+    setTheme(next);
+    document.documentElement.classList.toggle('theme-dark', next === 'dark');
+    document.documentElement.classList.toggle('theme-light', next === 'light');
+    try { localStorage.setItem('sentinel-theme', next); } catch { /* Theme still works without persistence. */ }
+    if (waveTimer.current !== null) window.clearTimeout(waveTimer.current);
+    waveTimer.current = window.setTimeout(() => setWave(null), 850);
   };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className={`theme-toggle ${className}`}
-        aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-      >
-        <span aria-hidden="true">{theme === 'light' ? '☾' : '☀'}</span>
-      </button>
-      {wave ? (
-        <span
-          key={wave.id}
-          className={`theme-wave ${wave.light ? 'theme-wave--light' : 'theme-wave--dark'}`}
-          style={{ left: wave.x, top: wave.y }}
-        />
-      ) : null}
-    </>
-  );
+  return <>
+    <button type="button" className={`text-button ${className}`} onClick={toggle} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}>{theme === 'light' ? 'Dark mode' : 'Light mode'}</button>
+    {wave ? <span key={wave.id} className={`theme-wave ${wave.light ? 'theme-wave--light' : 'theme-wave--dark'}`} style={{ left: wave.x, top: wave.y }} aria-hidden="true" /> : null}
+  </>;
 }

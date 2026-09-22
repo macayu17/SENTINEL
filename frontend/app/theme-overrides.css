@@ -1,0 +1,14 @@
+html.theme-dark {
+  --paper: #17191e;
+  --ink: #ece9e1;
+  --muted: #a6a7ad;
+  --rule: #3b3d45;
+  --accent: #e2a27f;
+  --green: #8fc7aa;
+  --soft: #24272f;
+  color-scheme: dark;
+}
+
+.theme-wave--dark {
+  background: rgb(23 25 30 / 94%);
+}
