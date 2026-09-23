@@ -14,7 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: `try { const theme = localStorage.getItem('sentinel-theme') === 'dark' ? 'dark' : 'light'; document.documentElement.classList.toggle('theme-dark', theme === 'dark'); document.documentElement.classList.toggle('theme-light', theme === 'light'); } catch {}` }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
