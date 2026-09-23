@@ -106,3 +106,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 .widget-grid{gap:var(--widget-gap,14px)}
 .widget-grid>article{border-radius:var(--widget-radius,22px)}
 @media(max-width:700px){.widget-grid{grid-auto-rows:auto}}
+
+html.theme-light body,html.theme-dark body{background:var(--paper)!important}
+html.theme-light .research-shell.dashboard-shell,html.theme-dark .research-shell.dashboard-shell{background:var(--paper)!important;color:var(--ink)}
+html.theme-light .dashboard-shell section,html.theme-dark .dashboard-shell section{background:transparent!important}
+html.theme-light .dashboard-shell nav,html.theme-dark .dashboard-shell nav{background:var(--paper)!important}
