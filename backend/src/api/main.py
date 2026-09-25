@@ -1,13 +1,14 @@
 """FastAPI application — REST endpoints and WebSocket for SENTINEL."""
 
 from contextlib import asynccontextmanager
+from datetime import datetime
 from math import sqrt
 from typing import Iterable, Optional
 import asyncio
 import secrets
 
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .websocket import ConnectionManager
@@ -19,6 +20,7 @@ from ..prediction.liquidity_shock import LiquidityShockPredictor
 from ..prediction.large_order import LargeOrderDetector
 from ..utils.logger import get_logger
 from ..utils.config import config
+from ..report_pdf import build_simulation_pdf
 
 logger = get_logger("api")
 
@@ -32,6 +34,7 @@ manager = ConnectionManager()
 _sim_task: Optional[asyncio.Task] = None
 _warning_timeline: list[dict] = []
 _warning_states: dict[str, tuple] = {}
+_last_simulation_report: Optional[dict] = None
 
 LATENCY_MODES = {
     "zero": LatencyMode.ZERO,
@@ -173,15 +176,22 @@ def _record_step_warnings(
 
 @app.post("/api/simulation/stop")
 async def stop_simulation():
-    global simulator, _sim_task, _warning_timeline, _warning_states
+    global simulator, _sim_task, _warning_timeline, _warning_states, _last_simulation_report
 
     _stop_native_simulation()
+
+    if simulator is not None:
+        _last_simulation_report = {
+            **simulator.get_export_snapshot(_warning_timeline),
+            "status": "completed",
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
 
     liquidity_predictor.reset()
     large_order_detector.reset()
     _warning_timeline = []
     _warning_states = {}
-    return {"status": "stopped"}
+    return {"status": "stopped", "report_available": _last_simulation_report is not None}
 
 
 @app.get("/api/simulation/export")
@@ -189,6 +199,24 @@ async def export_simulation_run():
     if simulator is not None:
         return simulator.get_export_snapshot(_warning_timeline)
     raise HTTPException(status_code=409, detail="No active simulation")
+
+
+@app.get("/api/simulation/report")
+async def get_simulation_report():
+    if _last_simulation_report is None:
+        raise HTTPException(status_code=409, detail="No completed simulation report")
+    return _last_simulation_report
+
+
+@app.get("/api/simulation/report.pdf")
+async def download_simulation_report_pdf():
+    if _last_simulation_report is None:
+        raise HTTPException(status_code=409, detail="No completed simulation report")
+    return Response(
+        content=build_simulation_pdf(_last_simulation_report),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=sentinel-simulation-report.pdf"},
+    )
 
 
 # ── Sandbox Endpoints ──────────────────────────────────────────────────────
@@ -216,7 +244,7 @@ class SandboxCreateRequest(BaseModel):
 
 @app.post("/api/sandbox/create")
 async def create_sandbox(request: SandboxCreateRequest):
-    global simulator, _sim_task
+    global simulator, _sim_task, _last_simulation_report
 
     _prepare_simulator_replacement()
 
@@ -250,6 +278,7 @@ async def create_sandbox(request: SandboxCreateRequest):
         informed_oracle_access=request.oracle_enabled,
         seed=run_seed,
     )
+    _last_simulation_report = None
     _sim_task = asyncio.create_task(_run_simulation_loop())
     return {"status": "started", "preset": request.preset, "agents": len(agents),
             "oracle_enabled": request.oracle_enabled, "speed": run_speed,
