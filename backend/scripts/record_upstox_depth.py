@@ -133,7 +133,10 @@ async def _collect(
         from google.protobuf import json_format
         from upstox_client.feeder.proto import MarketDataFeedV3_pb2
     except ImportError as exc:
-        raise UpstoxDepthError("Install backend/requirements.txt before recording.") from exc
+        raise UpstoxDepthError(
+            "Install backend/requirements.txt, backend/requirements-upstox.txt, then "
+            "`python -m pip install --no-deps upstox-python-sdk==2.28.0`."
+        ) from exc
 
     request = json.dumps({
         "guid": str(uuid.uuid4()),

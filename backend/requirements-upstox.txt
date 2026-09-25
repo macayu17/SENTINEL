@@ -1,0 +1,7 @@
+# Runtime dependencies of upstox-python-sdk, excluding its obsolete Python 2 `uuid` package.
+urllib3>=1.15
+six>=1.10
+certifi
+python-dateutil
+websocket-client
+protobuf

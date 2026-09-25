@@ -100,6 +100,8 @@ Set `UPSTOX_ANALYTICS_TOKEN` in `backend/.env`, then record read-only five-level
 depth snapshots:
 
 ```bash
+python -m pip install -r backend/requirements-upstox.txt
+python -m pip install --no-deps upstox-python-sdk==2.28.0
 python backend/scripts/record_upstox_depth.py
 ```
 
