@@ -1,28 +1,21 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
+import { Funnel_Display, Funnel_Sans } from 'next/font/google';
 import './globals.css';
-import './public-theme.css';
+
+const display = Funnel_Display({ subsets: ['latin'], weight: ['500', '600', '700', '800'], variable: '--font-display' });
+const sans = Funnel_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-sans' });
 
 export const metadata: Metadata = {
-  title: 'SENTINEL — Market Microstructure Early Warning System',
-  description:
-    'Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events. Real-time order book simulation with ML-powered liquidity shock prediction.',
+  title: 'SENTINEL — market microstructure simulator',
+  description: 'A multi-agent order-book simulator that warns before liquidity runs out.',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export const viewport: Viewport = { themeColor: '#111114' };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: `try { const theme = localStorage.getItem('sentinel-theme') === 'dark' ? 'dark' : 'light'; document.documentElement.classList.toggle('theme-dark', theme === 'dark'); document.documentElement.classList.toggle('theme-light', theme === 'light'); } catch {}` }} />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-      </head>
-      <body className="antialiased">
-        {children}
-      </body>
+    <html lang="en" className={`${display.variable} ${sans.variable}`} data-scroll-behavior="smooth">
+      <body>{children}</body>
     </html>
   );
 }

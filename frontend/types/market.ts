@@ -47,7 +47,7 @@ export interface MarketEvent {
   id: string;
   timestamp: number;
   step: number;
-  type: "kernel" | "order_submission" | "order_match" | "fill" | "cancellation" | "latency" | string;
+  type: string; // e.g. "order_submission", "stop_triggered", "liquidity_withdrawal"
   severity: "info" | "warning" | "critical";
   message: string;
   agent_id?: string;
@@ -96,7 +96,6 @@ export interface MarketScenario {
 
 export interface MarketUpdate {
   type: "market_update";
-  market?: string;
   venue?: string;
   timestamp: number;
   price: number;

@@ -6,15 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --ignore-pattern .next --ignore-pattern node_modules --ignore-pattern next-env.d.ts"
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --ignore-pattern .next --ignore-pattern node_modules --ignore-pattern next-env.d.ts",
+    "test": "node tests/candles.cjs"
   },
   "dependencies": {
-    "lucide-react": "^0.294.0",
-    "motion": "^13.4.0",
     "next": "^15.5.15",
     "react": "^18",
     "react-dom": "^18",
-    "recharts": "^2.10.3",
     "zustand": "^4.4.7"
   },
   "devDependencies": {

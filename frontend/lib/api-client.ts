@@ -82,7 +82,7 @@ class SentinelAPI {
   }
 
   async setSandboxSpeed(speed: number) {
-    return this.request<{ speed: number } | { error: string }>('/api/sandbox/speed', {
+    return this.request<{ speed: number }>('/api/sandbox/speed', {
       method: 'PUT',
       body: JSON.stringify({ speed }),
     });

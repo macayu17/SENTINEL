@@ -1,42 +1,29 @@
 import type { Config } from 'tailwindcss';
 
+// Colors resolve to the CSS variables in app/globals.css, the single source of the palette.
+const v = (name: string) => `var(--${name})`;
+
 const config: Config = {
-  content: [
-    './pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
-    './app/**/*.{js,ts,jsx,tsx,mdx}',
-  ],
+  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
   theme: {
     extend: {
-      fontFamily: {
-        mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'monospace'],
-      },
       colors: {
-        terminal: {
-          green: '#00ff41',
-          red: '#ff0040',
-          amber: '#ffb800',
-          cyan: '#00bfff',
-          purple: '#bf00ff',
-          bg: '#000000',
-          panel: '#0a0a0a',
-          border: '#1a1a1a',
+        ink: { DEFAULT: v('ink'), 2: v('ink-2'), 3: v('ink-3'), 4: v('ink-4') },
+        line: { DEFAULT: v('line'), soft: v('line-soft'), strong: v('line-strong'), dim: v('line-dim') },
+        fg: { DEFAULT: v('fg'), 2: v('fg-2'), muted: v('fg-muted'), faint: v('fg-faint') },
+        paper: {
+          DEFAULT: v('paper'), 2: v('paper-2'), 3: v('paper-3'),
+          rule: v('paper-rule'), fg2: v('paper-fg-2'), muted: v('paper-muted'),
         },
+        accent: { DEFAULT: v('accent'), deep: v('accent-deep'), wash: v('accent-wash'), chip: v('accent-chip') },
+        caution: { DEFAULT: v('caution'), paper: v('caution-paper') },
+        alert: { bg: v('alert-bg'), line: v('alert-line'), fg: v('alert-fg') },
       },
-      animation: {
-        blink: 'blink 1s infinite',
-        slideDown: 'slideDown 0.3s ease-out',
+      fontFamily: {
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'var(--font-sans)', 'sans-serif'],
       },
-      keyframes: {
-        blink: {
-          '0%, 50%': { opacity: '1' },
-          '51%, 100%': { opacity: '0.3' },
-        },
-        slideDown: {
-          from: { transform: 'translateY(-100%)', opacity: '0' },
-          to: { transform: 'translateY(0)', opacity: '1' },
-        },
-      },
+      borderRadius: { panel: '14px', card: '32px' },
     },
   },
   plugins: [],

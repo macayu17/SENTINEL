@@ -1,149 +1,122 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import type {
-  AgentActivity,
-  KernelEvent,
-  RecentOrder,
-  SimulationDashboardData,
-  TradeFlowPoint,
-} from '@/types/dashboard';
-import type {
-  MarketEvent,
-  MarketOrderFlow,
-  MarketRecentOrder,
-  MarketUpdate,
-} from '@/types/market';
+import { useEffect, useState } from 'react';
+import { aggregateCandles, type Candle } from '@/lib/candles';
+import { bookStats, bps, median } from '@/lib/format';
 import { useMarketStore } from '@/store/market-store';
 
-const MAX_POINTS = 60;
-const MAX_EVENTS = 14;
-
-function timestampLabel(date: Date): string {
-  return date.toLocaleTimeString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    hour12: false,
-    minute: '2-digit',
-    second: '2-digit',
-  });
+/** One row per market_update, keyed by simulated time. */
+export interface TapeSample {
+  t: number;
+  price: number;
+  spreadBps: number | null;
+  bidDepth: number;
+  askDepth: number;
+  /** Aggressor volume over the backend's trailing 10 s window. */
+  buy10: number;
+  sell10: number;
+  fills: number;
+  level: string;
+  /** Shares traded since the previous sample, estimated from the 10 s window rate. */
+  volume: number;
 }
 
-function simulationTimeLabel(timestamp: number | undefined): string {
-  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
-    return timestampLabel(new Date());
-  }
-  return timestamp > 1_000_000_000
-    ? timestampLabel(new Date(timestamp * 1000))
-    : `T+${timestamp.toFixed(2)}`;
-}
+const MAX_SAMPLES = 1_800;
+const FLOW_WINDOW_SECONDS = 10;
 
-function pushPoint<T>(series: T[], point: T): T[] {
-  return [...series.slice(-(MAX_POINTS - 1)), point];
-}
-
-function mapBackendEventType(type: string): KernelEvent['type'] {
-  if (type === 'order_submission') return 'Order Submission';
-  if (type === 'order_match') return 'Order Match';
-  if (type === 'fill') return 'Fill';
-  if (type === 'cancellation') return 'Cancellation';
-  if (type === 'latency') return 'Latency';
-  return 'Kernel';
-}
-
-function mapBackendEvents(events: MarketEvent[] | undefined): KernelEvent[] {
-  return (events ?? []).slice(0, MAX_EVENTS).map((event) => ({
-    id: event.id,
-    time: simulationTimeLabel(event.timestamp),
-    type: mapBackendEventType(event.type),
-    message: event.message,
-    severity: event.severity,
-  }));
-}
-
-function mapBackendOrderStatus(status: string): RecentOrder['status'] {
-  if (status === 'filled') return 'Filled';
-  if (status === 'cancelled') return 'Cancelled';
-  if (status === 'partial') return 'Partial Fill';
-  return 'Submitted';
-}
-
-function mapBackendRecentOrders(orders: MarketRecentOrder[]): RecentOrder[] {
-  return orders.slice(0, 8).map((order) => ({
-    id: order.id,
-    agent: order.agent_type ? `${order.agent_type} ${order.agent_id}` : order.agent_id,
-    side: order.side === 'SELL' ? 'SELL' : 'BUY',
-    price: Number(order.price.toFixed(3)),
-    quantity: order.quantity,
-    status: mapBackendOrderStatus(order.status),
-  }));
-}
-
-function buildBackendAgentActivity(marketData: MarketUpdate): AgentActivity {
-  const flow = marketData.order_flow;
-  return {
-    recentOrders: mapBackendRecentOrders(marketData.recent_orders ?? []),
-    executionSummary: {
-      submitted: flow?.submitted ?? 0,
-      fills: flow?.fills ?? 0,
-      cancelled: flow?.cancelled ?? 0,
-      matchRate: Number((flow?.match_rate ?? 0).toFixed(1)),
-    },
-  };
-}
-
-function mergeBackendTradeFlow(
-  previous: TradeFlowPoint[],
-  orderFlow: MarketOrderFlow | undefined,
-  step: number,
-  time: string,
-): TradeFlowPoint[] {
-  if (!orderFlow) return previous;
-  return pushPoint(previous, {
-    id: `tf-${step}-${orderFlow.submitted}-${orderFlow.fills}`,
-    time,
-    buyVolume: orderFlow.buy_volume,
-    sellVolume: orderFlow.sell_volume,
-  });
-}
-
-export function useSimulationDashboardData(): SimulationDashboardData {
+/** Accumulates the live feed into a rolling tape; clears when the run resets. */
+export function useSessionTape(): TapeSample[] {
   const marketData = useMarketStore((state) => state.marketData);
-  const connected = useMarketStore((state) => state.connected);
-  const simulationRunning = useMarketStore((state) => state.simulationRunning);
-  const feedActive = connected && simulationRunning;
-  const [tradeFlow, setTradeFlow] = useState<TradeFlowPoint[]>([]);
-  const [events, setEvents] = useState<KernelEvent[]>([]);
+  const [tape, setTape] = useState<TapeSample[]>([]);
 
   useEffect(() => {
-    if (!feedActive || !marketData) return;
-    const now = timestampLabel(new Date());
-    setTradeFlow((previous) => mergeBackendTradeFlow(
-      previous,
-      marketData.order_flow,
-      marketData.step,
-      now,
-    ));
-    setEvents(mapBackendEvents(marketData.events));
-  }, [feedActive, marketData]);
+    if (!marketData) {
+      setTape([]);
+      return;
+    }
+    setTape((previous) => {
+      const last = previous.at(-1);
+      if (last && marketData.timestamp <= last.t) {
+        // A new run restarts the clock; anything else is a duplicate frame.
+        return marketData.timestamp < last.t ? [] : previous;
+      }
+      const book = bookStats(marketData.order_book);
+      const buy10 = marketData.order_flow?.buy_volume ?? 0;
+      const sell10 = marketData.order_flow?.sell_volume ?? 0;
+      const dt = last ? Math.min(FLOW_WINDOW_SECONDS, marketData.timestamp - last.t) : 0;
+      const sample: TapeSample = {
+        t: marketData.timestamp,
+        price: marketData.price,
+        spreadBps: bps(marketData.spread, marketData.price),
+        bidDepth: book.bidDepth,
+        askDepth: book.askDepth,
+        buy10,
+        sell10,
+        fills: marketData.order_flow?.fills ?? 0,
+        level: marketData.liquidity_prediction?.warning_level ?? 'safe',
+        volume: ((buy10 + sell10) * dt) / FLOW_WINDOW_SECONDS,
+      };
+      const next = previous.length >= MAX_SAMPLES ? previous.slice(previous.length - MAX_SAMPLES + 1) : previous.slice();
+      next.push(sample);
+      return next;
+    });
+  }, [marketData]);
 
-  useEffect(() => {
-    if (feedActive) return;
-    setTradeFlow([]);
-    setEvents([]);
-  }, [feedActive]);
+  return tape;
+}
 
-  const agentActivity = useMemo<AgentActivity>(() => {
-    if (feedActive && marketData) return buildBackendAgentActivity(marketData);
+export interface VolumeCandle extends Candle { volume: number }
 
-    return {
-      recentOrders: [],
-      executionSummary: { submitted: 0, fills: 0, cancelled: 0, matchRate: 0 },
-    };
-  }, [feedActive, marketData]);
+export function tapeCandles(tape: TapeSample[], intervalSeconds: number): VolumeCandle[] {
+  const volumes = new Map<number, number>();
+  for (const sample of tape) {
+    const bucket = Math.floor(sample.t / intervalSeconds) * intervalSeconds * 1000;
+    volumes.set(bucket, (volumes.get(bucket) ?? 0) + sample.volume);
+  }
+  return aggregateCandles(
+    tape.map((sample) => ({ receivedAt: sample.t * 1000, price: sample.price })),
+    intervalSeconds * 1000,
+  ).map((candle) => ({ ...candle, volume: volumes.get(candle.time) ?? 0 }));
+}
 
+/** Volume-weighted mid. An estimate: the feed carries a 10 s volume window, not trade prints. */
+export function estimatedVwap(tape: TapeSample[]): number | null {
+  let notional = 0;
+  let volume = 0;
+  for (const sample of tape) {
+    notional += sample.price * sample.volume;
+    volume += sample.volume;
+  }
+  return volume > 0 ? notional / volume : null;
+}
+
+export function tapeMedians(tape: TapeSample[]) {
   return {
-    tradeFlow,
-    agentActivity,
-    events,
+    spreadBps: median(tape.map((sample) => sample.spreadBps ?? NaN)),
+    bidDepth: median(tape.map((sample) => sample.bidDepth)),
+    askDepth: median(tape.map((sample) => sample.askDepth)),
   };
+}
+
+/** Time ranges (sim seconds) where the stress detector sat at warning or worse. */
+export function warningWindows(tape: TapeSample[]): Array<[number, number]> {
+  const windows: Array<[number, number]> = [];
+  let start: number | null = null;
+  for (const sample of tape) {
+    const raised = sample.level === 'warning' || sample.level === 'critical';
+    if (raised && start === null) start = sample.t;
+    if (!raised && start !== null) {
+      windows.push([start, sample.t]);
+      start = null;
+    }
+  }
+  if (start !== null && tape.length) windows.push([start, tape.at(-1)!.t]);
+  return windows;
+}
+
+/** The trailing 10 s aggressor window, sampled at the end of each bucket. */
+export function flowBuckets(tape: TapeSample[], bucketSeconds = 5, count = 24) {
+  const buckets = new Map<number, TapeSample>();
+  for (const sample of tape) buckets.set(Math.floor(sample.t / bucketSeconds), sample);
+  return [...buckets.values()].slice(-count).map((sample) => ({ t: sample.t, buy: sample.buy10, sell: sample.sell10 }));
 }

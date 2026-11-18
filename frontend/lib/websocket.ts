@@ -14,8 +14,7 @@ function finiteNumber(value: unknown, fallback: number): number {
 function normalizeMarketUpdate(data: Partial<MarketUpdate>): MarketUpdate {
   return {
     type: 'market_update',
-    market: data.market ?? 'NASDAQ',
-    venue: data.venue ?? data.market ?? 'NASDAQ',
+    venue: data.venue ?? 'NASDAQ',
     timestamp: finiteNumber(data.timestamp, 0),
     price: finiteNumber(data.price, 0),
     spread: finiteNumber(data.spread, 0),

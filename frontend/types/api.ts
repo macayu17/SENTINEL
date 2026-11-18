@@ -18,7 +18,6 @@ export interface SandboxScenario {
   spread_multiplier: number;
   oracle_sigma_multiplier: number;
   order_ttl_seconds: number;
-  volatility_multiplier: number;
   enable_spoofing: boolean;
   institutional_multiplier: number;
 }
@@ -92,3 +91,5 @@ export interface SimulationReport {
   warning_timeline: Array<Record<string, string | number | boolean | null | undefined>>;
   validation_metrics: Record<string, number>;
 }
+
+
