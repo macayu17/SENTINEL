@@ -132,7 +132,7 @@ export default function Home() {
       <section className="bg-ink text-fg">
         <div className={`${band} !grid items-end gap-14`} style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 440px), 1fr))' }}>
           <div className="flex flex-col gap-2">
-            <span className={`${display} text-[clamp(110px,16vw,180px)] leading-[0.85] !tracking-[-0.06em]`}>0.90</span>
+            <span className={`${display} text-[clamp(110px,16vw,180px)] leading-[0.85] !tracking-[-0.06em]`}>0.89</span>
             <span className="max-w-[440px] text-xl text-[#b9b7b0]">how well the warning model sees a liquidity crunch coming a minute out, on NASDAQ stocks it never trained on (ROC-AUC, where 1.0 is perfect).</span>
           </div>
           <div className="flex flex-col gap-3">

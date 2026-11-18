@@ -62,8 +62,8 @@
   "held_out_tickers": {
     "AAPL": {
       "model": {
-        "roc_auc": 0.8762,
-        "average_precision": 0.616,
+        "roc_auc": 0.8452,
+        "average_precision": 0.5849,
         "positive_rate": 0.135
       },
       "rule_baseline": {
@@ -74,8 +74,8 @@
     },
     "AMZN": {
       "model": {
-        "roc_auc": 0.895,
-        "average_precision": 0.6183,
+        "roc_auc": 0.8871,
+        "average_precision": 0.6451,
         "positive_rate": 0.0707
       },
       "rule_baseline": {
@@ -86,8 +86,8 @@
     },
     "GOOG": {
       "model": {
-        "roc_auc": 0.8462,
-        "average_precision": 0.558,
+        "roc_auc": 0.8448,
+        "average_precision": 0.5451,
         "positive_rate": 0.0931
       },
       "rule_baseline": {
@@ -98,8 +98,8 @@
     },
     "INTC": {
       "model": {
-        "roc_auc": 0.9984,
-        "average_precision": 0.6994,
+        "roc_auc": 0.9982,
+        "average_precision": 0.6584,
         "positive_rate": 0.004
       },
       "rule_baseline": {
@@ -112,387 +112,387 @@
   "held_out_simulator_runs": {
     "liquidity_shock/balanced/1000": {
       "model": {
-        "roc_auc": 0.645,
-        "average_precision": 0.2148,
-        "positive_rate": 0.0736
+        "roc_auc": 0.627,
+        "average_precision": 0.2363,
+        "positive_rate": 0.0494
       },
       "rule_baseline": {
-        "roc_auc": 0.6007,
-        "average_precision": 0.2323,
-        "positive_rate": 0.0736
+        "roc_auc": 0.5678,
+        "average_precision": 0.3245,
+        "positive_rate": 0.0494
       }
     },
     "normal/institutional/1001": {
       "model": {
-        "roc_auc": 0.8862,
-        "average_precision": 0.8301,
-        "positive_rate": 0.2897
+        "roc_auc": 0.9031,
+        "average_precision": 0.5181,
+        "positive_rate": 0.0483
       },
       "rule_baseline": {
-        "roc_auc": 0.7647,
-        "average_precision": 0.6926,
-        "positive_rate": 0.2897
+        "roc_auc": 0.6232,
+        "average_precision": 0.3471,
+        "positive_rate": 0.0483
       }
     },
     "volatility_spike/balanced/1002": {
       "model": {
-        "roc_auc": 0.8522,
-        "average_precision": 0.7169,
-        "positive_rate": 0.2701
+        "roc_auc": 0.8897,
+        "average_precision": 0.6255,
+        "positive_rate": 0.0405
       },
       "rule_baseline": {
-        "roc_auc": 0.6422,
-        "average_precision": 0.4794,
-        "positive_rate": 0.2701
+        "roc_auc": 0.7114,
+        "average_precision": 0.3601,
+        "positive_rate": 0.0405
       }
     },
     "market_open/balanced/1003": {
       "model": {
-        "roc_auc": 0.8382,
-        "average_precision": 0.8864,
-        "positive_rate": 0.5892
+        "roc_auc": 0.51,
+        "average_precision": 0.2855,
+        "positive_rate": 0.1334
       },
       "rule_baseline": {
-        "roc_auc": 0.6585,
-        "average_precision": 0.7561,
-        "positive_rate": 0.5892
+        "roc_auc": 0.5709,
+        "average_precision": 0.2478,
+        "positive_rate": 0.1334
       }
     },
     "spoofing_stress/balanced/1004": {
       "model": {
-        "roc_auc": 0.8397,
-        "average_precision": 0.7948,
-        "positive_rate": 0.2954
+        "roc_auc": 0.9714,
+        "average_precision": 0.923,
+        "positive_rate": 0.2293
       },
       "rule_baseline": {
-        "roc_auc": 0.7179,
-        "average_precision": 0.6098,
-        "positive_rate": 0.2954
+        "roc_auc": 0.7396,
+        "average_precision": 0.6325,
+        "positive_rate": 0.2293
       }
     },
     "close_auction/balanced/1005": {
       "model": {
-        "roc_auc": 0.854,
-        "average_precision": 0.8102,
-        "positive_rate": 0.2601
+        "roc_auc": 0.9145,
+        "average_precision": 0.7748,
+        "positive_rate": 0.3106
       },
       "rule_baseline": {
-        "roc_auc": 0.7477,
-        "average_precision": 0.6297,
-        "positive_rate": 0.2601
+        "roc_auc": 0.7192,
+        "average_precision": 0.6189,
+        "positive_rate": 0.3106
       }
     },
     "institutional_execution/balanced/1006": {
       "model": {
-        "roc_auc": 0.7543,
-        "average_precision": 0.6986,
-        "positive_rate": 0.3882
+        "roc_auc": 0.9305,
+        "average_precision": 0.5563,
+        "positive_rate": 0.031
       },
       "rule_baseline": {
-        "roc_auc": 0.6518,
-        "average_precision": 0.6129,
-        "positive_rate": 0.3882
+        "roc_auc": 0.6763,
+        "average_precision": 0.4623,
+        "positive_rate": 0.031
       }
     },
     "liquidity_shock/institutional/1007": {
       "model": {
-        "roc_auc": 0.8896,
-        "average_precision": 0.8757,
-        "positive_rate": 0.2509
+        "roc_auc": 0.7257,
+        "average_precision": 0.4375,
+        "positive_rate": 0.0549
       },
       "rule_baseline": {
-        "roc_auc": 0.7081,
-        "average_precision": 0.6454,
-        "positive_rate": 0.2509
+        "roc_auc": 0.658,
+        "average_precision": 0.4351,
+        "positive_rate": 0.0549
       }
     },
     "normal/balanced/1008": {
       "model": {
-        "roc_auc": 0.8189,
-        "average_precision": 0.7513,
-        "positive_rate": 0.2632
+        "roc_auc": 0.6177,
+        "average_precision": 0.2461,
+        "positive_rate": 0.0626
       },
       "rule_baseline": {
-        "roc_auc": 0.7192,
-        "average_precision": 0.6003,
-        "positive_rate": 0.2632
+        "roc_auc": 0.634,
+        "average_precision": 0.2615,
+        "positive_rate": 0.0626
       }
     },
     "volatility_spike/institutional/1009": {
       "model": {
-        "roc_auc": 0.7748,
-        "average_precision": 0.7444,
-        "positive_rate": 0.4086
+        "roc_auc": 0.7718,
+        "average_precision": 0.6666,
+        "positive_rate": 0.1382
       },
       "rule_baseline": {
-        "roc_auc": 0.6238,
-        "average_precision": 0.587,
-        "positive_rate": 0.4086
+        "roc_auc": 0.7371,
+        "average_precision": 0.5541,
+        "positive_rate": 0.1382
       }
     },
     "market_open/institutional/1010": {
       "model": {
-        "roc_auc": 0.8662,
-        "average_precision": 0.9208,
-        "positive_rate": 0.6584
+        "roc_auc": 0.5952,
+        "average_precision": 0.5312,
+        "positive_rate": 0.3111
       },
       "rule_baseline": {
-        "roc_auc": 0.6469,
-        "average_precision": 0.7883,
-        "positive_rate": 0.6584
+        "roc_auc": 0.5935,
+        "average_precision": 0.4767,
+        "positive_rate": 0.3111
       }
     },
     "spoofing_stress/institutional/1011": {
       "model": {
-        "roc_auc": 0.8854,
-        "average_precision": 0.9034,
-        "positive_rate": 0.4632
+        "roc_auc": 0.941,
+        "average_precision": 0.9211,
+        "positive_rate": 0.2325
       },
       "rule_baseline": {
-        "roc_auc": 0.7363,
-        "average_precision": 0.7557,
-        "positive_rate": 0.4632
+        "roc_auc": 0.7192,
+        "average_precision": 0.5735,
+        "positive_rate": 0.2325
       }
     },
     "close_auction/institutional/1012": {
       "model": {
-        "roc_auc": 0.8452,
-        "average_precision": 0.8306,
-        "positive_rate": 0.356
+        "roc_auc": 0.9149,
+        "average_precision": 0.8809,
+        "positive_rate": 0.2282
       },
       "rule_baseline": {
-        "roc_auc": 0.705,
-        "average_precision": 0.6697,
-        "positive_rate": 0.356
+        "roc_auc": 0.7488,
+        "average_precision": 0.6356,
+        "positive_rate": 0.2282
       }
     },
     "institutional_execution/institutional/1013": {
       "model": {
-        "roc_auc": 0.7532,
-        "average_precision": 0.7887,
-        "positive_rate": 0.5092
+        "roc_auc": 0.7664,
+        "average_precision": 0.4772,
+        "positive_rate": 0.031
       },
       "rule_baseline": {
-        "roc_auc": 0.6507,
-        "average_precision": 0.6918,
-        "positive_rate": 0.5092
+        "roc_auc": 0.7019,
+        "average_precision": 0.4841,
+        "positive_rate": 0.031
       }
     },
     "liquidity_shock/stress_test/1014": {
       "model": {
-        "roc_auc": 0.6475,
-        "average_precision": 0.5608,
-        "positive_rate": 0.296
+        "roc_auc": 0.6294,
+        "average_precision": 0.363,
+        "positive_rate": 0.1661
       },
       "rule_baseline": {
-        "roc_auc": 0.6827,
-        "average_precision": 0.5752,
-        "positive_rate": 0.296
+        "roc_auc": 0.6167,
+        "average_precision": 0.3713,
+        "positive_rate": 0.1661
       }
     },
     "normal/institutional/1015": {
       "model": {
-        "roc_auc": 0.8843,
-        "average_precision": 0.8524,
-        "positive_rate": 0.2739
+        "roc_auc": 0.8991,
+        "average_precision": 0.5373,
+        "positive_rate": 0.056
       },
       "rule_baseline": {
-        "roc_auc": 0.7047,
-        "average_precision": 0.5985,
-        "positive_rate": 0.2739
+        "roc_auc": 0.59,
+        "average_precision": 0.3134,
+        "positive_rate": 0.056
       }
     },
     "volatility_spike/stress_test/1016": {
       "model": {
-        "roc_auc": 0.8986,
-        "average_precision": 0.9751,
-        "positive_rate": 0.8451
+        "roc_auc": 0.59,
+        "average_precision": 0.4552,
+        "positive_rate": 0.3089
       },
       "rule_baseline": {
-        "roc_auc": 0.6209,
-        "average_precision": 0.9105,
-        "positive_rate": 0.8451
+        "roc_auc": 0.5953,
+        "average_precision": 0.4721,
+        "positive_rate": 0.3089
       }
     },
     "market_open/stress_test/1017": {
       "model": {
-        "roc_auc": 0.819,
-        "average_precision": 0.9768,
-        "positive_rate": 0.9056
+        "roc_auc": 0.7029,
+        "average_precision": 0.7229,
+        "positive_rate": 0.3896
       },
       "rule_baseline": {
-        "roc_auc": 0.6848,
-        "average_precision": 0.9558,
-        "positive_rate": 0.9056
+        "roc_auc": 0.6761,
+        "average_precision": 0.6413,
+        "positive_rate": 0.3896
       }
     },
     "spoofing_stress/stress_test/1018": {
       "model": {
-        "roc_auc": 0.8096,
-        "average_precision": 0.9588,
-        "positive_rate": 0.8379
+        "roc_auc": 0.8301,
+        "average_precision": 0.7984,
+        "positive_rate": 0.2902
       },
       "rule_baseline": {
-        "roc_auc": 0.7205,
-        "average_precision": 0.9332,
-        "positive_rate": 0.8379
+        "roc_auc": 0.7097,
+        "average_precision": 0.6163,
+        "positive_rate": 0.2902
       }
     },
     "close_auction/stress_test/1019": {
       "model": {
-        "roc_auc": 0.8445,
-        "average_precision": 0.9731,
-        "positive_rate": 0.8601
+        "roc_auc": 0.9198,
+        "average_precision": 0.8438,
+        "positive_rate": 0.3624
       },
       "rule_baseline": {
-        "roc_auc": 0.7177,
-        "average_precision": 0.9425,
-        "positive_rate": 0.8601
+        "roc_auc": 0.6948,
+        "average_precision": 0.6377,
+        "positive_rate": 0.3624
       }
     },
     "institutional_execution/stress_test/1020": {
       "model": {
-        "roc_auc": 0.7807,
-        "average_precision": 0.8719,
-        "positive_rate": 0.6109
+        "roc_auc": 0.6733,
+        "average_precision": 0.3079,
+        "positive_rate": 0.0856
       },
       "rule_baseline": {
-        "roc_auc": 0.6303,
-        "average_precision": 0.7598,
-        "positive_rate": 0.6109
+        "roc_auc": 0.6501,
+        "average_precision": 0.3195,
+        "positive_rate": 0.0856
       }
     },
     "liquidity_shock/balanced/1021": {
       "model": {
-        "roc_auc": 0.6815,
-        "average_precision": 0.5869,
-        "positive_rate": 0.2839
+        "roc_auc": 0.4538,
+        "average_precision": 0.1564,
+        "positive_rate": 0.0296
       },
       "rule_baseline": {
-        "roc_auc": 0.7245,
-        "average_precision": 0.6521,
-        "positive_rate": 0.2839
+        "roc_auc": 0.6659,
+        "average_precision": 0.3747,
+        "positive_rate": 0.0296
       }
     },
     "normal/balanced/1022": {
       "model": {
-        "roc_auc": 0.8609,
-        "average_precision": 0.8419,
-        "positive_rate": 0.2799
+        "roc_auc": 0.6572,
+        "average_precision": 0.2788,
+        "positive_rate": 0.0451
       },
       "rule_baseline": {
-        "roc_auc": 0.7538,
-        "average_precision": 0.698,
-        "positive_rate": 0.2799
+        "roc_auc": 0.7339,
+        "average_precision": 0.3408,
+        "positive_rate": 0.0451
       }
     },
     "volatility_spike/balanced/1023": {
       "model": {
-        "roc_auc": 0.709,
-        "average_precision": 0.5835,
-        "positive_rate": 0.2658
+        "roc_auc": 0.9336,
+        "average_precision": 0.4427,
+        "positive_rate": 0.0316
       },
       "rule_baseline": {
-        "roc_auc": 0.6597,
-        "average_precision": 0.4792,
-        "positive_rate": 0.2658
+        "roc_auc": 0.523,
+        "average_precision": 0.2486,
+        "positive_rate": 0.0316
       }
     },
     "market_open/balanced/1024": {
       "model": {
-        "roc_auc": 0.8652,
-        "average_precision": 0.9086,
-        "positive_rate": 0.5544
+        "roc_auc": 0.6769,
+        "average_precision": 0.5002,
+        "positive_rate": 0.1723
       },
       "rule_baseline": {
-        "roc_auc": 0.6682,
-        "average_precision": 0.765,
-        "positive_rate": 0.5544
+        "roc_auc": 0.6184,
+        "average_precision": 0.3705,
+        "positive_rate": 0.1723
       }
     },
     "spoofing_stress/balanced/1025": {
       "model": {
-        "roc_auc": 0.8527,
-        "average_precision": 0.7826,
-        "positive_rate": 0.2727
+        "roc_auc": 0.9208,
+        "average_precision": 0.8798,
+        "positive_rate": 0.2537
       },
       "rule_baseline": {
-        "roc_auc": 0.6769,
-        "average_precision": 0.5566,
-        "positive_rate": 0.2727
+        "roc_auc": 0.7089,
+        "average_precision": 0.6127,
+        "positive_rate": 0.2537
       }
     },
     "close_auction/balanced/1026": {
       "model": {
-        "roc_auc": 0.8518,
-        "average_precision": 0.8196,
-        "positive_rate": 0.383
+        "roc_auc": 0.9312,
+        "average_precision": 0.7687,
+        "positive_rate": 0.256
       },
       "rule_baseline": {
-        "roc_auc": 0.7191,
-        "average_precision": 0.6582,
-        "positive_rate": 0.383
+        "roc_auc": 0.7232,
+        "average_precision": 0.6164,
+        "positive_rate": 0.256
       }
     },
     "institutional_execution/balanced/1027": {
       "model": {
-        "roc_auc": 0.7647,
-        "average_precision": 0.6664,
-        "positive_rate": 0.3707
+        "roc_auc": 0.6287,
+        "average_precision": 0.345,
+        "positive_rate": 0.0486
       },
       "rule_baseline": {
-        "roc_auc": 0.5864,
-        "average_precision": 0.5194,
-        "positive_rate": 0.3707
+        "roc_auc": 0.6279,
+        "average_precision": 0.3493,
+        "positive_rate": 0.0486
       }
     }
   },
   "metrics": {
-    "held_out_ticker_roc_auc": 0.904,
-    "held_out_ticker_average_precision": 0.6229,
+    "held_out_ticker_roc_auc": 0.8938,
+    "held_out_ticker_average_precision": 0.6084,
     "rule_baseline_ticker_roc_auc": 0.6993,
     "rule_baseline_ticker_average_precision": 0.3605,
-    "held_out_sim_roc_auc": 0.8133,
-    "held_out_sim_average_precision": 0.7902,
+    "held_out_sim_roc_auc": 0.7688,
+    "held_out_sim_average_precision": 0.5529,
     "calibration_set": {
-      "roc_auc": 0.8997,
-      "average_precision": 0.7796,
-      "positive_rate": 0.2053
+      "roc_auc": 0.8228,
+      "average_precision": 0.5573,
+      "positive_rate": 0.1433
     },
-    "threshold": 0.33999999999999997
+    "threshold": 0.25999999999999995
   },
   "feature_importance_gain": {
-    "spread_ratio": 15665.9,
-    "depth_ratio": 107153.5,
-    "bid_depth_ratio": 9570.1,
-    "ask_depth_ratio": 14239.1,
-    "depth_change_1s": 729.8,
-    "depth_change_5s": 2690.6,
-    "spread_change_5s": 2642.5,
-    "imbalance": 40737.1,
-    "top_imbalance": 14465.7,
-    "vol_ratio": 6852.8,
-    "flow_pressure": 6215.3,
-    "recent_stress": 109083.1,
-    "max_spread_ratio_10s": 29806.4,
-    "min_depth_ratio_10s": 38068.5,
-    "since_stress": 823579.6,
-    "depth_change_30s": 5014.2,
-    "max_spread_ratio_60s": 379109.7,
-    "min_depth_ratio_60s": 67602.8,
-    "stress_300s": 47566.4,
-    "stress_900s": 96039.9,
-    "spread_ratio_300s": 14694.7,
-    "spread_ratio_900s": 46086.1,
-    "depth_ratio_300s": 24076.7,
-    "depth_ratio_900s": 103375.1,
-    "baseline_vs_300s": 384182.5,
-    "vol_ratio_300s": 12406.2,
-    "near_share": 19697.3,
-    "span_ratio": 9733.5,
-    "depth_dist_ratio": 8707.0,
-    "depth_volatility_10s": 17602.8,
-    "spread_vol_10s": 169699.2,
-    "abs_flow_30s": 51165.0
+    "spread_ratio": 52240.3,
+    "depth_ratio": 154618.0,
+    "bid_depth_ratio": 12568.3,
+    "ask_depth_ratio": 34262.9,
+    "depth_change_1s": 1852.6,
+    "depth_change_5s": 6274.5,
+    "spread_change_5s": 3574.7,
+    "imbalance": 58503.3,
+    "top_imbalance": 32339.5,
+    "vol_ratio": 17325.7,
+    "flow_pressure": 14768.9,
+    "recent_stress": 27619.4,
+    "max_spread_ratio_10s": 32887.7,
+    "min_depth_ratio_10s": 93760.8,
+    "since_stress": 502886.2,
+    "depth_change_30s": 4834.9,
+    "max_spread_ratio_60s": 302901.2,
+    "min_depth_ratio_60s": 157321.5,
+    "stress_300s": 101897.8,
+    "stress_900s": 103845.0,
+    "spread_ratio_300s": 30035.3,
+    "spread_ratio_900s": 96279.9,
+    "depth_ratio_300s": 33852.7,
+    "depth_ratio_900s": 168539.1,
+    "baseline_vs_300s": 1100048.8,
+    "vol_ratio_300s": 13113.2,
+    "near_share": 39335.3,
+    "span_ratio": 17140.5,
+    "depth_dist_ratio": 13218.3,
+    "depth_volatility_10s": 57400.2,
+    "spread_vol_10s": 100663.7,
+    "abs_flow_30s": 74676.2
   }
 }
