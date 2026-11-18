@@ -7,6 +7,7 @@ import pickle
 import os
 import numpy as np
 from .features import FeatureExtractor
+from .liquidity_features import LiquidityFeatureTracker, observation_from_state
 from ..utils.logger import get_logger
 
 logger = get_logger("liquidity_shock")
@@ -18,14 +19,6 @@ FEATURE_NAMES = [
     "mm_inventory_stress",
     "active_mm_count",
     "time_to_close",
-]
-LOBSTER_FEATURE_NAMES = [
-    "spread_bps",
-    "depth_log",
-    "imbalance",
-    "spread_ratio",
-    "depth_ratio",
-    "depth_change_ratio",
 ]
 
 WARNING_LEVELS = {
@@ -80,6 +73,7 @@ class LiquidityShockPredictor:
         self._baseline: deque[tuple[float, float, float]] = deque(
             maxlen=BASELINE_WINDOW
         )
+        self._tracker = LiquidityFeatureTracker()
 
     def predict(self, market_state: Dict) -> Dict:
         """
@@ -92,8 +86,10 @@ class LiquidityShockPredictor:
 
         if self.model is not None:
             if self.model_metadata.get("artifact_type") == "lobster_nasdaq_liquidity_shock":
-                features = self._lobster_features(market_state)
-                X = np.array([[features[f] for f in LOBSTER_FEATURE_NAMES]], dtype=np.float32)
+                # Same tracker the model was trained with, fed once per simulated second.
+                features, _ = self._tracker.update(observation_from_state(market_state))
+                names = self.model_metadata["feature_names"]
+                X = np.array([[features[f] for f in names]], dtype=np.float64)
                 method = "lobster_nasdaq_model"
                 market = "NASDAQ"
             else:
@@ -101,8 +97,7 @@ class LiquidityShockPredictor:
                 X = np.array([[features[f] for f in FEATURE_NAMES]], dtype=np.float32)
                 method = "trained_model"
                 market = None
-            proba = self.model.predict_proba(X)[0]
-            stress_score = float(proba[1]) if len(proba) > 1 else 0.0
+            stress_score = self._score(X)
             result = {
                 "probability": round(stress_score, 4),
                 "method": method,
@@ -126,30 +121,17 @@ class LiquidityShockPredictor:
         })
         return result
 
-    def _lobster_features(self, market_state: Dict) -> Dict[str, float]:
-        mid = max(0.01, float(market_state.get("mid_price", 100.0) or 100.0))
-        spread = max(0.0, float(market_state.get("spread", 0.0) or 0.0))
-        depth = max(1.0, float(market_state.get("total_depth", 0.0) or 0.0))
-        bid_depth = max(0.0, float(market_state.get("bid_depth", 0.0) or 0.0))
-        ask_depth = max(0.0, float(market_state.get("ask_depth", 0.0) or 0.0))
-        imbalance = float(market_state.get("order_book_imbalance", 0.0) or 0.0)
-        current_spread_ratio = spread / mid
-        current = (current_spread_ratio, depth, 0.0)
-        samples = list(self._baseline) or [current]
-        baseline_spread_bps = median(sample[0] for sample in samples) * 10_000
-        baseline_depth = median(sample[1] for sample in samples)
-        previous_depth = samples[-1][1]
-        features = {
-            "spread_bps": spread / mid * 10_000,
-            "depth_log": float(np.log1p(depth)),
-            "imbalance": imbalance if bid_depth or ask_depth else 0.0,
-            "spread_ratio": (spread / mid * 10_000) / max(1e-9, baseline_spread_bps),
-            "depth_ratio": depth / max(1e-9, baseline_depth),
-            "depth_change_ratio": depth / max(1e-9, previous_depth),
-        }
-        if features["spread_ratio"] <= 2.5 and features["depth_ratio"] >= 0.4:
-            self._baseline.append(current)
-        return features
+    def _score(self, X: np.ndarray) -> float:
+        """Model probability, through the artifact's isotonic calibration when it has one."""
+        if hasattr(self.model, "predict_proba"):
+            proba = self.model.predict_proba(X)[0]
+            raw = float(proba[1]) if len(proba) > 1 else 0.0
+        else:  # native LightGBM booster: predict() already returns P(shock)
+            raw = float(self.model.predict(X)[0])
+        calibration = self.model_metadata.get("calibration")
+        if calibration:
+            return float(np.interp(raw, calibration["raw"], calibration["calibrated"]))
+        return raw
 
     def _adaptive_diagnostic(
         self, market_state: Dict

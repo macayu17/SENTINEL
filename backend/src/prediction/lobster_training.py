@@ -1,94 +1,108 @@
-"""Build leakage-safe liquidity-shock samples from LOBSTER snapshots."""
+"""Leakage-safe liquidity-shock samples from LOBSTER order book + message files.
+
+Each trading day is resampled to a 1-second grid and fed through the same
+LiquidityFeatureTracker the live predictor uses. The label looks strictly
+forward: within the next `horizon` seconds, does the spread reach
+`spread_multiplier`x its baseline, or visible depth fall to `depth_floor` of it?
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
+from .liquidity_features import FEATURE_NAMES, BookObservation, LiquidityFeatureTracker
 
-FEATURE_NAMES = (
-    "spread_bps",
-    "depth_log",
-    "imbalance",
-    "spread_ratio",
-    "depth_ratio",
-    "depth_change_ratio",
-)
+OPEN_SECONDS, CLOSE_SECONDS = 34_200, 57_600   # 09:30 and 16:00, seconds after midnight
+PRICE_SCALE = 10_000                              # LOBSTER prices are dollars x 10,000
+FLOW_WINDOW = 10
+EXECUTION_TYPES = (4, 5)                          # visible and hidden executions
 
 
 def select_probability_threshold(probabilities: np.ndarray, labels: np.ndarray) -> float:
-    best_threshold = 0.5
-    best_f1 = -1.0
+    """The probability cut that maximises F1 on a validation set."""
+    best_threshold, best_f1 = 0.5, -1.0
     for threshold in np.linspace(0.05, 0.95, 91):
         predicted = probabilities >= threshold
-        true_positive = float(np.sum(predicted & (labels == 1)))
-        false_positive = float(np.sum(predicted & (labels == 0)))
-        false_negative = float(np.sum(~predicted & (labels == 1)))
-        precision = true_positive / max(1.0, true_positive + false_positive)
-        recall = true_positive / max(1.0, true_positive + false_negative)
+        tp = float(np.sum(predicted & (labels == 1)))
+        fp = float(np.sum(predicted & (labels == 0)))
+        fn = float(np.sum(~predicted & (labels == 1)))
+        precision = tp / max(1.0, tp + fp)
+        recall = tp / max(1.0, tp + fn)
         f1 = 2 * precision * recall / max(1e-12, precision + recall)
         if f1 > best_f1:
-            best_f1 = f1
-            best_threshold = float(threshold)
+            best_f1, best_threshold = f1, float(threshold)
     return best_threshold
 
 
-def load_lobster_orderbook(path: Path) -> np.ndarray:
-    rows = np.loadtxt(Path(path), delimiter=",", dtype=np.float64)
-    if rows.ndim != 2 or rows.shape[1] < 4 or rows.shape[1] % 4:
-        raise ValueError("LOBSTER orderbook must contain four columns per level.")
-    return rows
+def load_day(orderbook_path: Path, message_path: Path) -> tuple[np.ndarray, np.ndarray]:
+    orderbook = np.loadtxt(orderbook_path, delimiter=",", dtype=np.float64)
+    messages = np.loadtxt(message_path, delimiter=",", dtype=np.float64, usecols=(0, 1, 3, 5))
+    if orderbook.ndim != 2 or orderbook.shape[1] % 4 or len(orderbook) != len(messages):
+        raise ValueError("Expected aligned LOBSTER orderbook (4 columns per level) and message files.")
+    return orderbook, messages
 
 
-def _market_values(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    asks = rows[:, 0::4]
-    ask_sizes = rows[:, 1::4]
-    bids = rows[:, 2::4]
-    bid_sizes = rows[:, 3::4]
-    mid = (asks[:, 0] + bids[:, 0]) / 2.0
-    spread_bps = (asks[:, 0] - bids[:, 0]) / mid * 10_000
-    depth = ask_sizes.sum(axis=1) + bid_sizes.sum(axis=1)
-    imbalance = (bid_sizes.sum(axis=1) - ask_sizes.sum(axis=1)) / np.maximum(depth, 1.0)
-    return spread_bps, depth, imbalance
+def grid_observations(orderbook: np.ndarray, messages: np.ndarray) -> list[BookObservation]:
+    """The book as it stood at the end of every second of the session."""
+    times = messages[:, 0]
+    executed = np.isin(messages[:, 1], EXECUTION_TYPES)
+    # Direction is the resting order's side; the aggressor is the other one.
+    signed = np.where(executed, -messages[:, 3] * messages[:, 2], 0.0)
+    cumulative = np.concatenate([[0.0], np.cumsum(signed)])
+
+    grid = np.arange(OPEN_SECONDS + 1, CLOSE_SECONDS + 1, 1.0)
+    row = np.searchsorted(times, grid, side="right") - 1
+    valid = row >= 0
+    grid, row = grid[valid], row[valid]
+    window_row = np.searchsorted(times, grid - FLOW_WINDOW, side="right") - 1
+    flow = cumulative[row + 1] - cumulative[window_row + 1]
+
+    book = orderbook[row]
+    ask_px, ask_sz = book[:, 0::4] / PRICE_SCALE, book[:, 1::4]
+    bid_px, bid_sz = book[:, 2::4] / PRICE_SCALE, book[:, 3::4]
+    out = []
+    for i in range(len(book)):
+        bids = tuple((p, z) for p, z in zip(bid_px[i].tolist(), bid_sz[i].tolist()) if z > 0)
+        asks = tuple((p, z) for p, z in zip(ask_px[i].tolist(), ask_sz[i].tolist()) if z > 0)
+        out.append(BookObservation(
+            mid=(ask_px[i, 0] + bid_px[i, 0]) / 2, spread=ask_px[i, 0] - bid_px[i, 0],
+            bid_depth=float(bid_sz[i].sum()), ask_depth=float(ask_sz[i].sum()),
+            top_bid_size=float(bid_sz[i, 0]), top_ask_size=float(ask_sz[i, 0]),
+            signed_volume_10s=float(flow[i]), bid_levels=bids, ask_levels=asks,
+        ))
+    return out
 
 
-def build_liquidity_samples(
-    orderbook: np.ndarray,
+def build_samples(
+    observations: list[BookObservation],
     *,
-    baseline_events: int = 100,
-    horizon_events: int = 20,
-    sample_step: int = 10,
+    horizon: int = 60,
     spread_multiplier: float = 2.5,
-    depth_ratio_threshold: float = 0.4,
-) -> list[dict[str, object]]:
-    """Create features from past snapshots and labels from a future window."""
-    if baseline_events < 1 or horizon_events < 1 or sample_step < 1:
-        raise ValueError("Baseline, horizon, and sample step must be positive.")
-    spread, depth, imbalance = _market_values(np.asarray(orderbook, dtype=np.float64))
-    samples: list[dict[str, object]] = []
-    last_index = len(spread) - horizon_events
-    for index in range(baseline_events, last_index, sample_step):
-        baseline_spread = float(np.median(spread[index - baseline_events:index]))
-        baseline_depth = float(np.median(depth[index - baseline_events:index]))
-        if baseline_spread <= 0 or baseline_depth <= 0:
-            continue
-        current_depth = float(depth[index])
-        future_spread = spread[index + 1:index + horizon_events + 1]
-        future_depth = depth[index + 1:index + horizon_events + 1]
-        samples.append({
-            "features": {
-                "spread_bps": float(spread[index]),
-                "depth_log": float(np.log1p(current_depth)),
-                "imbalance": float(imbalance[index]),
-                "spread_ratio": float(spread[index] / baseline_spread),
-                "depth_ratio": float(current_depth / baseline_depth),
-                "depth_change_ratio": float(current_depth / max(depth[index - 1], 1e-12)),
-            },
-            "label": int(
-                np.any(future_spread >= baseline_spread * spread_multiplier)
-                or np.any(future_depth <= baseline_depth * depth_ratio_threshold)
-            ),
-            "index": index,
-        })
-    return samples
+    depth_floor: float = 0.4,
+    warmup: int = 60,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Features from the past, labels from the next `horizon` observations. Returns (X, y)."""
+    tracker = LiquidityFeatureTracker()
+    rows, base_spread, base_depth = [], [], []
+    for obs in observations:
+        features, (spread_ref, depth_ref) = tracker.update(obs)
+        rows.append([features[name] for name in FEATURE_NAMES])
+        base_spread.append(spread_ref)
+        base_depth.append(depth_ref)
+
+    spread_bps = np.array([max(0.0, o.spread) / max(o.mid, 1e-9) * 10_000 for o in observations])
+    depth = np.array([max(1.0, o.bid_depth + o.ask_depth) for o in observations])
+    n = len(observations) - horizon
+    if n <= warmup:
+        return np.empty((0, len(FEATURE_NAMES))), np.empty(0, dtype=np.int8)
+    future_spread = sliding_window_view(spread_bps[1:], horizon).max(axis=1)[:n]
+    future_depth = sliding_window_view(depth[1:], horizon).min(axis=1)[:n]
+    labels = (
+        (future_spread >= spread_multiplier * np.asarray(base_spread[:n]))
+        | (future_depth <= depth_floor * np.asarray(base_depth[:n]))
+    ).astype(np.int8)
+    X = np.asarray(rows[:n], dtype=np.float64)
+    return X[warmup:], labels[warmup:]

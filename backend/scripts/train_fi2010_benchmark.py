@@ -7,7 +7,6 @@ import argparse
 import json
 from pathlib import Path
 import pickle
-import sys
 
 import numpy as np
 
