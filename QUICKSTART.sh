@@ -23,20 +23,11 @@ echo "Step 2: Frontend lint and build"
 echo "------------------------------------------"
 cd "$FRONTEND_DIR"
 npm run lint
+npm test
 npm run build
 echo "[ok] Frontend checks passed"
 echo ""
 
-echo "Step 3: Optional RL setup check"
-echo "------------------------------------------"
-cd "$SCRIPT_DIR"
-if command -v bash >/dev/null 2>&1 && { command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; }; then
-  bash "$SCRIPT_DIR/verify_rl_setup.sh" || echo "[warning] Optional RL setup check did not pass; install the reported packages before training."
-else
-  echo "[skip] bash/Python is not available; run verify_rl_setup.sh from Git Bash or WSL."
-fi
-
-echo ""
 echo "=========================================="
 echo "Run Locally"
 echo "=========================================="
@@ -50,6 +41,3 @@ echo "  npm run dev"
 echo ""
 echo "Dashboard:"
 echo "  http://localhost:3000/dashboard"
-echo ""
-echo "RL training help:"
-echo "  ./rl_train.sh help"

@@ -78,7 +78,6 @@ Copy `backend/.env.example` to `backend/.env` and adjust values if needed.
 
 ```text
 SIMULATION_DURATION=23400
-INITIAL_PRICE=100.0
 HOST=0.0.0.0
 PORT=8000
 FRONTEND_URL=http://localhost:3000

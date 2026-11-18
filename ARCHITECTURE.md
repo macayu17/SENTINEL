@@ -15,7 +15,6 @@ flowchart LR
     Sim --> Book[OrderBook]
     Sim --> Agents[Agents]
     Sim --> Pred[Predictors]
-    Sim --> RL[RL Policy Controller]
   end
 
   Book --> Trades[Trade Events]
@@ -33,18 +32,17 @@ flowchart LR
 ### 3.2 Simulation Core
 - Event-driven kernel schedules agent wakeups and order arrivals.
 - Limit order book provides price-time matching and depth aggregates.
-- Simulator maintains price history, volume history, and state snapshots.
+- Simulator maintains price and volume history plus a compact per-step sample used by session reports.
+- Scenarios (market open auction, liquidity shock, volatility spike, spoofing stress, ...) inject exogenous flow through the normal matching path.
 
 ### 3.3 Agents
 - Base agent manages positions, PnL, active orders, and metrics.
-- Specialized agents (market maker, HFT, institutional, retail, informed, noise, sentiment, spoofing, momentum, mean reversion, RL) implement strategy-specific order logic.
+- Specialized agents (market maker, HFT, institutional, retail, informed, noise, sentiment, spoofing, momentum, mean reversion, liquidity trader) implement strategy-specific order logic.
+- A central rule gate (price collar, drawdown halt, leverage cap, close-phase de-risking) applies to every agent order.
 
 ### 3.4 Predictors
 - Liquidity shock predictor computes a health score and warning level from market state features.
-- Large-order detector flags iceberg or TWAP patterns based on order flow statistics.
-
-### 3.5 RL Integration
-- RL policy can adjust market maker actions during simulation steps.
+- Large-order detector flags a visible book level that is unusually large relative to the rest of the book.
 
 ## 4. Frontend Architecture
 - Next.js app serves the dashboard route and UI layout.
@@ -72,7 +70,6 @@ flowchart LR
 ## 7. Configuration
 Key environment variables (backend):
 - SIMULATION_DURATION
-- INITIAL_PRICE
 - FRONTEND_URL
 - ALLOWED_ORIGINS
 

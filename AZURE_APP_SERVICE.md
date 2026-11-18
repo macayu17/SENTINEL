@@ -21,7 +21,6 @@ ENABLE_ORYX_BUILD=true
 FRONTEND_URL=https://your-vercel-domain.vercel.app
 ALLOWED_ORIGINS=https://your-vercel-domain.vercel.app
 SIMULATION_DURATION=23400
-INITIAL_PRICE=100.0
 ```
 
 Startup command:

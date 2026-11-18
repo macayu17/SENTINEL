@@ -42,3 +42,10 @@ frontend/.vercel/
 # Misc
 coverage/
 .firecrawl/
+
+# Local runtime output
+*.log
+/tmp/
+.playwright-mcp/
+backend/results/
+frontend/tsconfig.tsbuildinfo
