@@ -11,6 +11,7 @@ from backend.src.agents.base_agent import BaseAgent
 from backend.src.agents.noise import NoiseAgent
 from backend.src.market.latency_model import LatencyConfig, LatencyMode
 from backend.src.market.order import Order, OrderSide, OrderStatus, OrderType
+from backend.src.market.oracle import OracleConfig
 from backend.src.market.order_book import OrderBook
 from backend.src.market.simulator import MarketSimulator
 
@@ -81,8 +82,8 @@ def test_liquidity_floor_repairs_a_deep_but_excessively_wide_book():
     assert sim.order_book.spread <= 0.04
 
 
-def test_liquidity_floor_rebuilds_around_the_latest_executed_price():
-    sim = MarketSimulator([], initial_price=100.0, seed=3)
+def test_liquidity_floor_rebuilds_around_the_latest_executed_price_without_an_oracle():
+    sim = MarketSimulator([], initial_price=100.0, seed=3, oracle_config=OracleConfig(enabled=False))
     sim.current_price = 100.20
     _replace_book(sim.order_book, 99.0, 101.0, 5_000)
 
@@ -90,6 +91,20 @@ def test_liquidity_floor_rebuilds_around_the_latest_executed_price():
 
     assert sim.order_book.mid_price == pytest.approx(100.20)
     assert sim.order_book.spread == pytest.approx(0.02)
+
+
+def test_venue_ladder_quotes_around_the_public_value_and_drops_stale_seeds():
+    """A sweep that dragged the last price away meets fresh venue orders at fair value."""
+    sim = MarketSimulator([], initial_price=100.0, seed=3)
+    sim.current_price = 96.0                      # e.g. after a forced square-off
+    _replace_book(sim.order_book, 95.99, 96.01, 500)
+
+    sim._ensure_liquidity_floor()
+
+    public = sim.oracle.public_value
+    seeds = [o for o in sim.order_book.bids + sim.order_book.asks if o.agent_id == "SEED"]
+    assert seeds and all(abs(o.price - public) <= 0.13 for o in seeds)
+    assert sim.order_book.best_ask == pytest.approx(round(public, 2) + 0.01)
 
 
 class LagRecordingAgent(BaseAgent):

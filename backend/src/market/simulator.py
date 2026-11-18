@@ -37,6 +37,10 @@ logger = get_logger("simulator")
 STOP_TRIGGER_LATENCY_SECONDS = 0.0005
 LIQUIDITY_SHOCK_TRIGGER_FRACTION = 0.35
 LIQUIDITY_SHOCK_RECOVERY_UPDATES = 20.0
+VOLATILITY_NEWS_MOVE = 0.003  # fair-value move announced with each volatility impulse
+VENUE_LEVELS = 10          # price levels the venue ladder maintains on each side
+VENUE_LEVEL_SIZE = 350     # target resting size per venue level
+VENUE_REFILL_RATE = 0.2    # share of a level's target replenished per second
 LIQUIDITY_SHOCK_PRIMARY_WITHDRAWAL = 0.65
 LIQUIDITY_SHOCK_SECONDARY_WITHDRAWAL = 0.35
 LIQUIDITY_SHOCK_SWEEP_FRACTION = 0.40
@@ -191,7 +195,7 @@ class MarketSimulator:
         self._place_seed_ladder(
             self.initial_price,
             levels=10,
-            quantity=max(1, round(500 * self.scenario.seed_depth_multiplier)),
+            quantity=max(1, round(VENUE_LEVEL_SIZE * self.scenario.seed_depth_multiplier)),
             spread_multiplier=self.scenario.spread_multiplier,
         )
 
@@ -213,37 +217,56 @@ class MarketSimulator:
                 )
 
     def _ensure_liquidity_floor(self) -> None:
-        """Replenish thin books so the dashboard demo remains two-sided and responsive."""
-        floor_multiplier = self.scenario.liquidity_floor_multiplier
+        """Maintain the venue ladder: the many small passive participants a real book has.
+
+        Every second it re-anchors on the public value (the last price without an
+        oracle), drops seed orders that drifted
+        out of reach, and tops each of its levels up by a fraction of the target size,
+        so swept liquidity comes back over seconds rather than in one block.
+        """
+        target_multiplier = self.scenario.liquidity_floor_multiplier
         spread_multiplier = self.scenario.spread_multiplier
-        refill_levels = 5
-        shock_phase = "ACTIVE"
+        refill_levels = VENUE_LEVELS
         if self.scenario.name == "liquidity_shock":
-            shock_phase, _ = self._liquidity_shock_state()
-            floor_multiplier, spread_multiplier, refill_levels = self._liquidity_provision_profile()
-        total_depth = self.order_book.get_total_depth(levels=10)
-        depth_floor = max(100, int(600 * floor_multiplier))
-        max_healthy_spread = 0.04 * spread_multiplier
-        if self.scenario.name == "liquidity_shock" and shock_phase != "WARMUP":
-            # After the shock, "healthy" is measured against the pre-shock book.
-            depth_floor = max(depth_floor, int(self._liquidity_shock_baseline_depth * floor_multiplier))
-            max_healthy_spread = max(TICK, self._liquidity_shock_baseline_spread * spread_multiplier)
-        if (
-            self.order_book.best_bid is not None
-            and self.order_book.best_ask is not None
-            and total_depth >= depth_floor
-            and (self.order_book.spread or 0.0) <= max_healthy_spread
-        ):
+            target_multiplier, spread_multiplier, refill_levels = self._liquidity_provision_profile()
+
+        if self.oracle.enabled:
+            # Resting liquidity is priced off what the public knows, so a forced or
+            # one-sided sweep meets fresh orders at fair value instead of chasing itself.
+            anchor = round(self.oracle.public_value, 2)
+        else:
+            anchor = round(self.current_price or self.order_book.mid_price or self.initial_price, 2)
+        step = TICK * spread_multiplier
+        reach = (VENUE_LEVELS + 2) * step + 1e-9
+        book = self.order_book
+        stale = [o for o in book.bids + book.asks if o.agent_id == "SEED" and abs(o.price - anchor) > reach]
+        if stale:
+            stale_ids = {id(o) for o in stale}
+            for order in stale:
+                order.status = OrderStatus.CANCELLED
+            book.bids = [o for o in book.bids if id(o) not in stale_ids]
+            book.asks = [o for o in book.asks if id(o) not in stale_ids]
+            book._depth_cache.clear()
+        if refill_levels <= 0:
             return
 
-        anchor = round(self.current_price or self.order_book.mid_price or self.initial_price, 2)
-        quantity = max(25, int(150 * floor_multiplier))
-        if shock_phase == "RECOVERY":
-            depth_deficit = max(0, self._liquidity_shock_baseline_depth - total_depth)
-            quantity = max(quantity, int(depth_deficit * 0.08))
-        self._place_seed_ladder(
-            anchor, levels=refill_levels, quantity=quantity, spread_multiplier=spread_multiplier
-        )
+        target = max(1, round(VENUE_LEVEL_SIZE * target_multiplier))
+        increment = max(1, math.ceil(target * VENUE_REFILL_RATE))
+        resting: Dict[tuple, int] = {}
+        for order in book.bids + book.asks:
+            if order.agent_id == "SEED":
+                key = (order.side, round(order.price, 2))
+                resting[key] = resting.get(key, 0) + order.displayed_quantity
+        for i in range(1, refill_levels + 1):
+            offset = i * step
+            for side, price in ((OrderSide.BUY, round(anchor - offset, 2)), (OrderSide.SELL, round(anchor + offset, 2))):
+                opposite = book.best_ask if side == OrderSide.BUY else book.best_bid
+                if opposite is not None and (price >= opposite if side == OrderSide.BUY else price <= opposite):
+                    continue  # never cross: the venue rests, it does not take
+                deficit = target - resting.get((side, price), 0)
+                if deficit > 0:
+                    book.add_order(Order(agent_id="SEED", side=side, order_type=OrderType.LIMIT,
+                                         price=price, quantity=min(deficit, increment)))
 
     def _apply_scenario_driver(self) -> bool:
         """Apply explicit exogenous flow for scenarios that promise a market shock."""
@@ -262,6 +285,8 @@ class MarketSimulator:
             if self.current_time < trigger_time or key in self._scenario_events_triggered:
                 continue
             self._scenario_events_triggered.add(key)
+            if self.oracle.enabled:  # the impulse is news: fair value re-prices with it
+                self.oracle.announce(VOLATILITY_NEWS_MOVE if side == OrderSide.BUY else -VOLATILITY_NEWS_MOVE)
             self._sweep_scenario_flow(side)
             applied = True
         return applied
@@ -288,10 +313,10 @@ class MarketSimulator:
     def _liquidity_provision_profile(self) -> tuple[float, float, int]:
         phase, progress = self._liquidity_shock_state()
         if phase in {"WARMUP", "NORMALIZED"}:
-            return 1.0, 1.0, 5
+            return 1.0, 1.0, VENUE_LEVELS
         if phase == "IMPACT":
             return 0.2, 3.0, 0
-        return 0.2 + 0.8 * progress, 1.0 + 2.0 * (1.0 - progress), 1
+        return 0.2 + 0.8 * progress, 1.0 + 2.0 * (1.0 - progress), 1 + int((VENUE_LEVELS - 1) * progress)
 
     def _withdraw_liquidity(self, orders: List[Order], fraction: float) -> int:
         target = sum(order.displayed_quantity for order in orders) * fraction
@@ -378,10 +403,8 @@ class MarketSimulator:
         level. The public value lags the latent one, which is the window informed
         agents trade in.
         """
-        if (
-            not self.oracle.enabled
-            or self._session_profile()[0] in {"PREOPEN", "SQUAREOFF"}
-        ):
+        # Runs through the square-off too: forced selling meets arbitrage, not an empty book.
+        if not self.oracle.enabled or self._session_profile()[0] == "PREOPEN":
             return False
 
         mid = self.order_book.mid_price

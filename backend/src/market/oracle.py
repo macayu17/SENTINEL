@@ -63,6 +63,12 @@ class MeanRevertingOracle:
             self._history.append(self.current_value)
         return self.current_value
 
+    def announce(self, fraction: float) -> None:
+        """Public news: the value and the public's view of it move together, at once."""
+        factor = 1.0 + fraction
+        self.current_value = max(0.01, self.current_value * factor)
+        self._history = deque((v * factor for v in self._history), maxlen=self._history.maxlen)
+
     def get_mispricing(self, market_price: float) -> Dict:
         diff = market_price - self.current_value
         return {
