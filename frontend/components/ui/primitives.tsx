@@ -1,6 +1,71 @@
 'use client';
 
-import { useId, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+
+/**
+ * Small "i" button that explains a term on hover, keyboard focus or tap.
+ * The tooltip is fixed-positioned so panels with overflow hidden never clip it.
+ */
+export function InfoTip({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+  const id = useId();
+  const button = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; above: boolean } | null>(null);
+  const show = () => {
+    const rect = button.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.min(280, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8));
+    const above = rect.bottom + 170 > window.innerHeight;  // no room below: open upwards
+    setPos({ top: above ? rect.top - 6 : rect.bottom + 6, left, above });
+  };
+  const hide = () => setPos(null);
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); };
+  }, [pos]);
+  return (
+    <span className="inline-flex align-middle" onMouseEnter={show} onMouseLeave={hide}>
+      <button
+        ref={button}
+        type="button"
+        aria-label={`What is ${label}?`}
+        aria-describedby={id}
+        aria-expanded={pos !== null}
+        onClick={show}  /* a tap fires hover, focus and click: opening (never toggling) keeps it open */
+        onFocus={show}
+        onBlur={hide}
+        onKeyDown={(event) => { if (event.key === 'Escape') hide(); }}
+        className="relative grid size-[15px] flex-none place-items-center rounded-full border border-line-strong bg-transparent p-0 font-sans text-[9.5px] font-bold italic leading-none text-fg-muted transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-fg-muted hover:text-fg focus-visible:text-fg"
+      >
+        i
+      </button>
+      <span
+        id={id}
+        role="tooltip"
+        hidden={pos === null}
+        className="pointer-events-none fixed z-[100] w-[min(280px,calc(100vw-16px))] rounded-[10px] border border-line-strong bg-ink-3 px-3 py-2.5 text-left text-xs font-normal normal-case leading-[1.45] tracking-normal text-fg shadow-[0_8px_28px_rgba(0,0,0,0.45)]"
+        style={pos ? { top: pos.top, left: pos.left, transform: pos.above ? 'translateY(-100%)' : undefined } : undefined}
+      >
+        {title ? <strong className="mb-1 block text-[12.5px] font-semibold">{title}</strong> : null}
+        {children}
+      </span>
+    </span>
+  );
+}
+
+/** A label followed by its info button, when there is something to explain. */
+export function Term({ label, info, title, className = '' }: { label: ReactNode; info?: string; title?: string; className?: string }) {
+  if (!info) return <span className={className}>{label}</span>;
+  return (
+    <span className={`inline-flex min-w-0 items-center gap-1.5 ${className}`}>
+      <span className="truncate">{label}</span>
+      <InfoTip label={typeof label === 'string' ? label : title ?? 'this'} title={title}>{info}</InfoTip>
+    </span>
+  );
+}
 
 /** Rounded dark card with an h2 title and an optional caption on the right. */
 export function Panel({ title, caption, actions, children, className = '', flush = false }: {
@@ -34,8 +99,10 @@ export function StatGrid({ label, min = 150, children }: { label: string; min?: 
   );
 }
 
-export function Stat({ label, value, note, alert = false, size = 22 }: {
+export function Stat({ label, value, note, info, alert = false, size = 22 }: {
   label: string;
+  /** Plain-language explanation behind an "i" button. */
+  info?: string;
   value: ReactNode;
   note?: ReactNode;
   /** Tint the note orange: this reading is the reason to look. */
@@ -44,7 +111,7 @@ export function Stat({ label, value, note, alert = false, size = 22 }: {
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 bg-ink-2 px-3.5 py-3">
-      <span className="text-xs text-fg-muted">{label}</span>
+      <Term label={label} info={info} className="text-xs text-fg-muted" />
       <span className="truncate font-display font-semibold tracking-[-0.01em]" style={{ fontSize: size }}>{value}</span>
       {note ? <span className={`truncate text-xs ${alert ? 'text-accent' : 'text-fg-muted'}`}>{note}</span> : null}
     </div>
@@ -117,12 +184,12 @@ export function StatusDot({ live, label }: { live: boolean; label: ReactNode }) 
 }
 
 /** Label / value pairs in a grid. */
-export function Facts({ items, columns = 3 }: { items: Array<{ label: string; value: ReactNode; accent?: boolean }>; columns?: number }) {
+export function Facts({ items, columns = 3 }: { items: Array<{ label: string; value: ReactNode; accent?: boolean; info?: string }>; columns?: number }) {
   return (
     <dl className="m-0 grid gap-3" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
       {items.map((item) => (
         <div key={item.label} className="min-w-0">
-          <dt className="text-[11px] text-fg-muted">{item.label}</dt>
+          <dt className="text-[11px] text-fg-muted"><Term label={item.label} info={item.info} /></dt>
           <dd className={`m-0 truncate font-semibold ${item.accent ? 'text-accent' : ''}`}>{item.value}</dd>
         </div>
       ))}

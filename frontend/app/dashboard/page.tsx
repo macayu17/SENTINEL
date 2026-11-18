@@ -11,6 +11,7 @@ import AppHeader from '@/components/ui/AppHeader';
 import CandleChart from '@/components/ui/CandleChart';
 import Ticker from '@/components/ui/Ticker';
 import { EmptyState, Panel, Segmented, Stat, StatGrid, StatusDot } from '@/components/ui/primitives';
+import { TERM_GLOSSARY } from '@/lib/glossary';
 import { api } from '@/lib/api-client';
 import { estimatedVwap, flowBuckets, tapeCandles, tapeMedians, useSessionTape, warningWindows } from '@/lib/dashboard-data';
 import { TICK, bookStats, bps, int, num, pct, sessionClock, signed } from '@/lib/format';
@@ -178,14 +179,14 @@ export default function DashboardPage() {
         )}
 
         <StatGrid label="Market summary">
-          <Stat label="Mid price" value={num(data?.price, 3)} note={change == null ? 'session' : `${signed(change * 100, 2, '%')} · session`} alert={(change ?? 0) < 0} />
-          <Stat label="Spread" value={`${num(spreadBps, 1)} bps`} note={data ? `${int(data.spread / TICK)} tick${Math.round(data.spread / TICK) === 1 ? '' : 's'}${spreadRatio ? ` · ${num(spreadRatio, 1)}× median` : ''}` : undefined} alert={(spreadRatio ?? 0) > 1.5} />
-          <Stat label="Bid depth" value={int(data ? book.bidDepth : null)} note={bidShare ? `${pct(bidShare)} of median` : undefined} alert={(bidShare ?? 1) < 0.6} />
-          <Stat label="Ask depth" value={int(data ? book.askDepth : null)} note={askShare ? `${pct(askShare)} of median` : undefined} alert={(askShare ?? 1) < 0.6} />
-          <Stat label="Imbalance" value={data ? signed(book.imbalance) : '—'} note={data ? (book.imbalance < -0.2 ? 'sell-heavy book' : book.imbalance > 0.2 ? 'buy-heavy book' : 'balanced book') : undefined} alert={Math.abs(book.imbalance) > 0.2} />
-          <Stat label="Volatility" value={data ? `${num(data.volatility * 100, 1)}%` : '—'} note="realized, annualized" />
-          <Stat label="VWAP" value={num(vwap, 3)} note="session · estimated" />
-          <Stat label="Match rate" value={data?.order_flow ? `${num(data.order_flow.match_rate, 0)}%` : '—'} note={data?.order_flow ? `${int(data.order_flow.fills)} fills` : undefined} />
+          <Stat label="Mid price" info={TERM_GLOSSARY['Mid price']} value={num(data?.price, 3)} note={change == null ? 'session' : `${signed(change * 100, 2, '%')} · session`} alert={(change ?? 0) < 0} />
+          <Stat label="Spread" info={TERM_GLOSSARY['Spread']} value={`${num(spreadBps, 1)} bps`} note={data ? `${int(data.spread / TICK)} tick${Math.round(data.spread / TICK) === 1 ? '' : 's'}${spreadRatio ? ` · ${num(spreadRatio, 1)}× median` : ''}` : undefined} alert={(spreadRatio ?? 0) > 1.5} />
+          <Stat label="Bid depth" info={TERM_GLOSSARY['Bid depth']} value={int(data ? book.bidDepth : null)} note={bidShare ? `${pct(bidShare)} of median` : undefined} alert={(bidShare ?? 1) < 0.6} />
+          <Stat label="Ask depth" info={TERM_GLOSSARY['Ask depth']} value={int(data ? book.askDepth : null)} note={askShare ? `${pct(askShare)} of median` : undefined} alert={(askShare ?? 1) < 0.6} />
+          <Stat label="Imbalance" info={TERM_GLOSSARY['Imbalance']} value={data ? signed(book.imbalance) : '—'} note={data ? (book.imbalance < -0.2 ? 'sell-heavy book' : book.imbalance > 0.2 ? 'buy-heavy book' : 'balanced book') : undefined} alert={Math.abs(book.imbalance) > 0.2} />
+          <Stat label="Volatility" info={TERM_GLOSSARY['Volatility']} value={data ? `${num(data.volatility * 100, 1)}%` : '—'} note="realized, annualized" />
+          <Stat label="VWAP" info={TERM_GLOSSARY['VWAP']} value={num(vwap, 3)} note="session · estimated" />
+          <Stat label="Match rate" info={TERM_GLOSSARY['Match rate']} value={data?.order_flow ? `${num(data.order_flow.match_rate, 0)}%` : '—'} note={data?.order_flow ? `${int(data.order_flow.fills)} fills` : undefined} />
         </StatGrid>
 
         <div className="flex flex-wrap items-stretch gap-3">

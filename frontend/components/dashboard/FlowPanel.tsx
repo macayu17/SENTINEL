@@ -1,7 +1,8 @@
 'use client';
 
-import { Panel } from '@/components/ui/primitives';
+import { Panel, Term } from '@/components/ui/primitives';
 import { int, num, signed } from '@/lib/format';
+import { TERM_GLOSSARY } from '@/lib/glossary';
 import type { MarketUpdate } from '@/types/market';
 
 const compactUsd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 2 });
@@ -31,14 +32,14 @@ export default function FlowPanel({ data, buckets }: {
       <dl className="m-0 grid grid-cols-2 gap-3 sm:grid-cols-3">
         {counters.map((item) => (
           <div key={item.label}>
-            <dt className="text-[11px] text-fg-muted">{item.label}</dt>
+            <dt className="text-[11px] text-fg-muted"><Term label={item.label} info={TERM_GLOSSARY[item.label]} /></dt>
             <dd className="m-0 mt-0.5 font-display text-xl font-semibold">{item.value}</dd>
           </div>
         ))}
       </dl>
 
       <div className="flex flex-col gap-1.5">
-        <div className="flex justify-between text-xs text-fg-muted"><span>Aggressor buy volume</span><span>Aggressor sell volume</span></div>
+        <div className="flex justify-between text-xs text-fg-muted"><Term label="Aggressor buy volume" title="Aggressor volume" info={TERM_GLOSSARY['Aggressor volume']} /><span>Aggressor sell volume</span></div>
         <div className="flex h-2.5 gap-[3px] overflow-hidden rounded-[5px]" aria-hidden="true">
           {total ? <>
             <span className="rounded-[5px] bg-fg" style={{ width: `${(buy / total) * 100}%` }} />
@@ -65,9 +66,9 @@ export default function FlowPanel({ data, buckets }: {
 
       <div className="grid grid-cols-3 gap-3 border-t border-line pt-2.5 text-[13px]">
         {oracle?.fundamental_value != null ? <>
-          <div><span className="block text-[11px] text-fg-muted">Fundamental value</span><span className="font-semibold">{num(oracle.fundamental_value, 3)}</span></div>
-          <div><span className="block text-[11px] text-fg-muted">Mispricing</span><span className="font-semibold">{signed((oracle.mispricing_pct ?? 0) * 100, 1, ' bps')}</span></div>
-          <div><span className="block text-[11px] text-fg-muted">Oracle noise σ</span><span className="font-semibold">{num(oracle.observation_noise, 3)}</span></div>
+          <div><Term label="Fundamental value" info={TERM_GLOSSARY['Fundamental value']} className="!flex text-[11px] text-fg-muted" /><span className="font-semibold">{num(oracle.fundamental_value, 3)}</span></div>
+          <div><Term label="Mispricing" info={TERM_GLOSSARY.Mispricing} className="!flex text-[11px] text-fg-muted" /><span className="font-semibold">{signed((oracle.mispricing_pct ?? 0) * 100, 1, ' bps')}</span></div>
+          <div><Term label="Oracle noise σ" info={TERM_GLOSSARY['Oracle noise σ']} className="!flex text-[11px] text-fg-muted" /><span className="font-semibold">{num(oracle.observation_noise, 3)}</span></div>
         </> : <p className="col-span-3 m-0 text-fg-muted">Fundamental value hidden: informed access is off for this run.</p>}
       </div>
     </Panel>

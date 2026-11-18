@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Panel, Segmented, EmptyState } from '@/components/ui/primitives';
+import { Panel, Segmented, EmptyState, Term } from '@/components/ui/primitives';
+import { TERM_GLOSSARY } from '@/lib/glossary';
 import { groupByType, int, num, sessionClock, signed } from '@/lib/format';
 import type { MarketUpdate } from '@/types/market';
 
@@ -26,7 +27,7 @@ export default function ActivityPanel({ data }: { data: MarketUpdate | null }) {
       <div className="overflow-x-auto" role="tabpanel">
         {tab === 'agents' && (agents.length ? (
           <table className="data-table min-w-[860px]">
-            <thead><tr><th scope="col">Agent type</th><th scope="col" className="num">Count</th><th scope="col" className="num">Net position</th><th scope="col" className="num">Trades</th><th scope="col" className="num">Realized PnL</th><th scope="col" className="num">Unrealized PnL</th><th scope="col" className="num">Total PnL</th><th scope="col">Status</th></tr></thead>
+            <thead><tr><th scope="col"><Term label="Agent type" info={TERM_GLOSSARY['Agent type']} /></th><th scope="col" className="num"><Term label="Count" info={TERM_GLOSSARY['Count']} /></th><th scope="col" className="num"><Term label="Net position" info={TERM_GLOSSARY['Net position']} /></th><th scope="col" className="num"><Term label="Trades" info={TERM_GLOSSARY['Trades']} /></th><th scope="col" className="num"><Term label="Realized PnL" info={TERM_GLOSSARY['Realized PnL']} /></th><th scope="col" className="num"><Term label="Unrealized PnL" info={TERM_GLOSSARY['Unrealized PnL']} /></th><th scope="col" className="num"><Term label="Total PnL" info={TERM_GLOSSARY['Total PnL']} /></th><th scope="col"><Term label="Status" info={TERM_GLOSSARY['Status']} /></th></tr></thead>
             <tbody>
               {agents.map((row) => (
                 <tr key={row.type}>

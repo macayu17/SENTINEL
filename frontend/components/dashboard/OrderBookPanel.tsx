@@ -1,6 +1,7 @@
 'use client';
 
-import { Panel, EmptyState } from '@/components/ui/primitives';
+import { Panel, EmptyState, Term } from '@/components/ui/primitives';
+import { TERM_GLOSSARY } from '@/lib/glossary';
 import { bps, int, num } from '@/lib/format';
 import type { LargeOrderDetection, OrderBook } from '@/types/market';
 
@@ -43,7 +44,7 @@ export default function OrderBookPanel({ book, mid, spread, flagged }: {
     <Panel title="Order book · L2" caption={`${LEVELS} levels per side · tick 0.01`} className="flex-[1_1_380px]">
       {!asks.length && !bids.length ? <EmptyState>Waiting for the order book.</EmptyState> : (
         <div className="flex flex-col">
-          <div className="grid grid-cols-3 py-1 text-[11px] text-fg-muted"><span>Price</span><span className="text-right">Size</span><span className="text-right">Cumulative</span></div>
+          <div className="grid grid-cols-3 py-1 text-[11px] text-fg-muted"><Term label="Price" info={TERM_GLOSSARY.Price} /><Term label="Size" info={TERM_GLOSSARY.Size} className="justify-self-end" /><Term label="Cumulative" info={TERM_GLOSSARY.Cumulative} className="justify-self-end" /></div>
           {asks.map((level, i) => ({ level, cum: askCum[i] })).reverse().map(({ level, cum }) => row('sell', level.price, level.size, cum))}
           <div className="my-0.5 flex flex-wrap justify-between gap-2 border-y border-line py-[7px] text-[13px]">
             <span className="font-bold">Mid {num(mid, 3)}</span>

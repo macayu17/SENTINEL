@@ -1,4 +1,6 @@
+import { InfoTip } from '@/components/ui/primitives';
 import { LEVEL_COLOR, STRESS_BANDS, num } from '@/lib/format';
+import { TERM_GLOSSARY } from '@/lib/glossary';
 
 /** Big stress score, its level chip, and the four backend bands with the current one lit. */
 export default function StressMeter({ stress, level, health }: { stress: number; level: string; health: number }) {
@@ -6,8 +8,10 @@ export default function StressMeter({ stress, level, health }: { stress: number;
     <div className="flex flex-col gap-3.5">
       <div className="flex flex-wrap items-baseline gap-3">
         <span className="font-display text-5xl font-semibold leading-none tracking-[-0.02em]">{num(stress)}</span>
+        <InfoTip label="stress score" title="Stress score">{TERM_GLOSSARY['Stress score']}</InfoTip>
         <LevelChip level={level} />
-        <span className="text-[13px] text-fg-muted">health {num(health / 100)}</span>
+        <InfoTip label="warning level" title="Warning level">{TERM_GLOSSARY['Warning level']}</InfoTip>
+        <span className="inline-flex items-center gap-1.5 text-[13px] text-fg-muted">health {num(health / 100)} <InfoTip label="health" title="Health">{TERM_GLOSSARY.Health}</InfoTip></span>
       </div>
       <div className="grid grid-cols-4 gap-[3px]" aria-label={`Stress bands; current level ${level}`}>
         {STRESS_BANDS.map((band) => {
