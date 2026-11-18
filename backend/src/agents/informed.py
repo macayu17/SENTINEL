@@ -1,16 +1,19 @@
-"""Informed agent that trades on the simulator's optional fundamental oracle."""
+"""Informed agent that trades on a private, noisy read of the fundamental."""
 
-from typing import List, Dict
-from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, near_touch_price, risk_limited_exit_order, risk_limited_order
+from typing import List, Dict, Optional
+from .base_agent import BaseAgent, TAKER_FEE_PER_SHARE
+from .risk import TICK, AgentRiskProfile, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
 
 
 class InformedAgent(BaseAgent):
     """
-    Has a small probability each step of receiving private information.
-    When informed, trades aggressively in the signal direction
-    until the signal expires.
+    Occasionally receives a private signal: one noisy look at the hidden
+    fundamental. It acts only when the gap to the market beats a round trip
+    (spread + fees + a tick of margin), then works toward its own estimate,
+    crossing the spread when the edge is large and resting near the touch when
+    it is thin. Below the hurdle it stops adding and holds; it exits once the
+    price passes the estimate or the signal goes stale.
     """
 
     def __init__(
@@ -21,13 +24,14 @@ class InformedAgent(BaseAgent):
         signal_duration: int = 120,
         max_position: int = 5000,
     ) -> None:
-        super().__init__(agent_id, "Informed", initial_capital, latency_seconds=0.005)
+        super().__init__(agent_id, "Informed", initial_capital)
         self.wakeup_interval = 0.6
         self.signal_probability = signal_probability
         self.signal_duration = signal_duration
         self.max_position = max_position
 
         self._active_signal: str | None = None  # "buy" or "sell"
+        self._estimate: Optional[float] = None
         self._signal_start_time: float = 0.0
         self.risk_profile = AgentRiskProfile(
             max_inventory=max_position,
@@ -38,98 +42,67 @@ class InformedAgent(BaseAgent):
             stale_ticks=3,
         )
 
+    @staticmethod
+    def _hurdle(spread: float) -> float:
+        """Edge a trade must clear: cross the spread, pay two taker fees, keep a tick."""
+        return spread + 2 * TAKER_FEE_PER_SHARE + TICK
+
+    def _drop_signal(self, market_state: Dict, price: float) -> List[Order]:
+        self._active_signal = None
+        self._estimate = None
+        order = self._exit_order(market_state, price, aggression=1.5)
+        return [order] if order is not None else []
+
     def decide_action(self, market_state: Dict) -> List[Order]:
-        current_time = market_state.get("current_time", 0.0)
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        closing = self._close_out(market_state)
+        if closing is not None:
+            self._active_signal = self._estimate = None
+            return closing
+        current_time = float(market_state.get("current_time", 0.0) or 0.0)
+        price = self._mid(market_state)
         spread = float(market_state.get("spread", 0.05) or 0.05)
-        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         oracle = market_state.get("oracle") or {}
         fundamental = oracle.get("fundamental_value")
-        orders: List[Order] = []
 
-        # Check if current signal has expired
-        if self._active_signal and (current_time - self._signal_start_time) > self.signal_duration:
-            # Unwind position
-            if self.position != 0:
-                order = risk_limited_exit_order(
-                    self.risk_profile,
-                    agent_id=self.agent_id,
-                    position=self.position,
-                    price=price,
-                    market_state=market_state,
-                    volatility=volatility,
-                    aggression=1.5,
-                )
-                if order is not None:
-                    orders.append(order)
-            self._active_signal = None
-            return orders
+        if (
+            self._estimate is None
+            and isinstance(fundamental, (int, float))
+            and self.rng.random() < self.signal_probability
+        ):
+            noise = max(0.0, float(oracle.get("observation_noise", 0.0) or 0.0))
+            estimate = fundamental + self.rng.gauss(0.0, noise)
+            if abs(estimate - price) > self._hurdle(spread):
+                self._estimate = estimate
+                self._active_signal = "buy" if estimate > price else "sell"
+                self._signal_start_time = current_time
 
-        if self._active_signal and isinstance(fundamental, (int, float)):
-            gap = fundamental - price
-            live_direction = "buy" if gap > 0 else "sell"
-            if abs(gap) <= max(0.01, spread / 2) or live_direction != self._active_signal:
-                if self.position != 0:
-                    order = risk_limited_exit_order(
-                        self.risk_profile,
-                        agent_id=self.agent_id,
-                        position=self.position,
-                        price=price,
-                        market_state=market_state,
-                        volatility=volatility,
-                        aggression=1.5,
-                    )
-                    if order is not None:
-                        orders.append(order)
-                self._active_signal = None
-                return orders
+        if self._estimate is None:
+            return self._drop_signal(market_state, price)  # no live signal: flatten leftovers
+        direction = 1 if self._active_signal == "buy" else -1
+        edge = direction * (self._estimate - price)
+        if current_time - self._signal_start_time > self.signal_duration or edge <= 0:
+            return self._drop_signal(market_state, price)  # stale, or the price got there
+        hurdle = self._hurdle(spread)
+        if edge < hurdle:
+            # Our own buying ate the edge. That impact is temporary: hold for the
+            # information to reach the price instead of selling back into it.
+            return []
 
-        # Check for new signal
-        if not self._active_signal and self.rng.random() < self.signal_probability:
-            if not isinstance(fundamental, (int, float)):
-                return orders
-            observation_noise = max(
-                0.0,
-                float(oracle.get("observation_noise", 0.0) or 0.0),
+        side = OrderSide.BUY if direction > 0 else OrderSide.SELL
+        # Kyle-style intensity: trade harder the larger the remaining mispricing.
+        aggression = max(0.5, min(2.0, edge / hurdle))
+        if edge >= 2 * hurdle:
+            order = self._entry_order(market_state, side, OrderType.MARKET, price, aggression=aggression)
+        else:
+            order = self._entry_order(
+                market_state, side, OrderType.LIMIT, near_touch_price(price, side, spread), aggression=aggression
             )
-            observed_fundamental = fundamental + self.rng.gauss(
-                0.0,
-                observation_noise,
-            )
-            if abs(observed_fundamental - price) <= max(0.01, spread / 2):
-                return orders
-            direction = "buy" if observed_fundamental > price else "sell"
-            self._active_signal = direction
-            self._signal_start_time = current_time
-
-        # Trade on active signal
-        if self._active_signal:
-            side = OrderSide.BUY if self._active_signal == "buy" else OrderSide.SELL
-            current_pos = abs(self.position)
-
-            if current_pos < self.max_position:
-                order_type = OrderType.MARKET if spread <= 0.05 else OrderType.LIMIT
-                order = risk_limited_order(
-                    self.risk_profile,
-                    agent_id=self.agent_id,
-                    side=side,
-                    order_type=order_type,
-                    price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
-                    position=self.position,
-                    market_state=market_state,
-                    volatility=volatility,
-                    active_orders=self.active_orders,
-                    aggression=1.3,
-                )
-                if order is None:
-                    return orders
-                orders.append(order)
-
-        return orders
+        return [order] if order is not None else []
 
     def reset(self) -> None:
         super().reset()
         self._active_signal = None
+        self._estimate = None
         self._signal_start_time = 0.0
 
     def cancel_for_state(self, market_state: Dict) -> List[str]:
@@ -141,7 +114,7 @@ class InformedAgent(BaseAgent):
             or current_time - self._signal_start_time > self.signal_duration
         ):
             return self.cancel_all_active_orders()
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        price = self._mid(market_state)
         spread = float(market_state.get("spread", 0.05) or 0.05)
         side = OrderSide.BUY if self._active_signal == "buy" else OrderSide.SELL
         target = near_touch_price(price, side, spread)

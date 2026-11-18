@@ -16,13 +16,9 @@ class ScenarioConfig:
     spread_multiplier: float = 1.0
     oracle_sigma_multiplier: float = 1.0
     order_ttl_seconds: float = 20.0
-    volatility_multiplier: float = 1.0
     enable_spoofing: bool = False
     enable_opening_auction: bool = False
     institutional_multiplier: float = 1.0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 SCENARIOS: dict[str, ScenarioConfig] = {
@@ -39,7 +35,6 @@ SCENARIOS: dict[str, ScenarioConfig] = {
         liquidity_floor_multiplier=1.25,
         spread_multiplier=2.5,
         order_ttl_seconds=8.0,
-        volatility_multiplier=1.4,
         enable_opening_auction=True,
     ),
     "liquidity_shock": ScenarioConfig(
@@ -55,7 +50,6 @@ SCENARIOS: dict[str, ScenarioConfig] = {
         liquidity_floor_multiplier=1.0,
         spread_multiplier=1.25,
         institutional_multiplier=2.0,
-        volatility_multiplier=1.2,
     ),
     "volatility_spike": ScenarioConfig(
         name="volatility_spike",
@@ -66,7 +60,6 @@ SCENARIOS: dict[str, ScenarioConfig] = {
         spread_multiplier=3.0,
         oracle_sigma_multiplier=2.5,
         order_ttl_seconds=7.0,
-        volatility_multiplier=2.8,
     ),
     "spoofing_stress": ScenarioConfig(
         name="spoofing_stress",
@@ -76,7 +69,6 @@ SCENARIOS: dict[str, ScenarioConfig] = {
         liquidity_floor_multiplier=0.8,
         spread_multiplier=1.75,
         order_ttl_seconds=6.0,
-        volatility_multiplier=1.5,
         enable_spoofing=True,
     ),
     "close_auction": ScenarioConfig(
@@ -98,7 +90,7 @@ def get_scenario_config(name: str | None) -> ScenarioConfig:
 
 
 def list_scenarios() -> list[dict]:
-    return [scenario.to_dict() for scenario in SCENARIOS.values()]
+    return [asdict(scenario) for scenario in SCENARIOS.values()]
 
 
 def apply_scenario_agent_counts(

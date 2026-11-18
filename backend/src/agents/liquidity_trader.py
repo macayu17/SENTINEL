@@ -27,7 +27,7 @@ class LiquidityTraderAgent(BaseAgent):
         min_child_qty: int = 50,
         max_child_qty: int = 300,
     ) -> None:
-        super().__init__(agent_id, "LiquidityTrader", initial_capital, latency_seconds=0.02)
+        super().__init__(agent_id, "LiquidityTrader", initial_capital)
         self.wakeup_interval = wakeup_interval
         self.start_probability = start_probability
         self.min_parent_qty = min_parent_qty
@@ -48,7 +48,7 @@ class LiquidityTraderAgent(BaseAgent):
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         orders: List[Order] = []
-        mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        mid = self._mid(market_state)
         volatility = float(market_state.get("volatility", 0.0) or 0.0)
 
         if self._remaining_parent_qty <= 0:
@@ -133,7 +133,7 @@ class LiquidityTraderAgent(BaseAgent):
             return []
         if self._active_side is None:
             return self.cancel_all_active_orders()
-        mid = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        mid = self._mid(market_state)
         spread = market_state.get("spread", 0.05)
         target = near_touch_price(mid, self._active_side, spread)
         if self.risk_profile.should_reprice(

@@ -2,7 +2,7 @@
 
 from typing import List, Dict, Optional
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, risk_limited_exit_order, risk_limited_order
+from .risk import TICK, AgentRiskProfile
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -15,7 +15,7 @@ class SpoofingAgent(BaseAgent):
     Lifecycle:
     1. IDLE → wait for cooldown, then pick a side to spoof
     2. SPOOFING → place large phantom order, count down steps
-    3. TRADING → cancel spoof (by not resubmitting), place real trade opposite
+    3. TRADING → spoof already cancelled; place the real trade opposite
     4. COOLDOWN → wait before next cycle
     """
 
@@ -38,7 +38,7 @@ class SpoofingAgent(BaseAgent):
         cooldown_max: int = 100,
         position_limit: int = 2000,
     ) -> None:
-        super().__init__(agent_id, "Spoofing", initial_capital, latency_seconds=0.0005)
+        super().__init__(agent_id, "Spoofing", initial_capital)
         self.spoof_size_min = spoof_size_min
         self.spoof_size_max = spoof_size_max
         self.real_order_size = real_order_size
@@ -65,22 +65,20 @@ class SpoofingAgent(BaseAgent):
         )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
-        volatility = float(market_state.get("volatility", 0.0) or 0.0)
+        price = self._mid(market_state)
         orders: List[Order] = []
         self._steps_in_state += 1
 
+        closing = self._close_out(market_state)
+        if closing is not None:
+            if self._spoof_order_id is not None:
+                self._pending_cancellations.append(self._spoof_order_id)
+                self._spoof_order_id = None
+            return closing
+
         # ── Flatten if over position limit ──────────────────────────────
         if abs(self.position) >= self.position_limit:
-            order = risk_limited_exit_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                position=self.position,
-                price=price,
-                market_state=market_state,
-                volatility=volatility,
-                aggression=1.5,
-            )
+            order = self._exit_order(market_state, price, aggression=1.5)
             if order is not None:
                 orders.append(order)
             return orders
@@ -95,13 +93,12 @@ class SpoofingAgent(BaseAgent):
         if self._state == self.SPOOFING:
             if self._spoof_order_id is None:
                 # Place one large phantom order away from best price.
-                tick = 0.01
                 spoof_size = self.rng.randint(self.spoof_size_min, self.spoof_size_max)
 
                 if self._spoof_side == OrderSide.BUY:
-                    spoof_price = round(price - self.spoof_ticks_offset * tick, 2)
+                    spoof_price = round(price - self.spoof_ticks_offset * TICK, 2)
                 else:
-                    spoof_price = round(price + self.spoof_ticks_offset * tick, 2)
+                    spoof_price = round(price + self.spoof_ticks_offset * TICK, 2)
 
                 spoof_order = Order(
                     agent_id=self.agent_id,
@@ -113,28 +110,23 @@ class SpoofingAgent(BaseAgent):
                 self._spoof_order_id = spoof_order.order_id
                 orders.append(spoof_order)
 
-            # After enough steps, move to trading phase
+            # After enough steps, pull the phantom order. Cancels are processed at the
+            # start of the next wakeup, so the layer is gone before the real trade lands.
             if self._steps_in_state >= self.spoof_duration_steps:
+                if self._spoof_order_id is not None:
+                    self._pending_cancellations.append(self._spoof_order_id)
+                    self._spoof_order_id = None
                 self._state = self.TRADING
                 self._steps_in_state = 0
 
         elif self._state == self.TRADING:
-            if self._spoof_order_id is not None:
-                self._pending_cancellations.append(self._spoof_order_id)
-                self._spoof_order_id = None
-
             # Trade in the OPPOSITE direction of the spoof
             real_side = OrderSide.SELL if self._spoof_side == OrderSide.BUY else OrderSide.BUY
-            order = risk_limited_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                side=real_side,
-                order_type=OrderType.MARKET,
-                price=price,
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                active_orders=self.active_orders,
+            order = self._entry_order(
+                market_state,
+                real_side,
+                OrderType.MARKET,
+                price,
                 aggression=1.2,
             )
             if order is None:

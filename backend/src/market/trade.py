@@ -1,8 +1,10 @@
 """Trade data structure for the SENTINEL market simulator."""
 
 from dataclasses import dataclass, field
-import uuid
+from itertools import count
 import time
+
+_trade_ids = count(1)
 
 
 @dataclass
@@ -16,7 +18,7 @@ class Trade:
     price: float
     quantity: int
     taker_agent_id: str = ""  # aggressor; the other side rested and earns the maker rate
-    trade_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    trade_id: str = field(default_factory=lambda: f"T{next(_trade_ids)}")
     timestamp: float = field(default_factory=time.time)
 
     @property

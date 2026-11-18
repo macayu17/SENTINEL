@@ -1,18 +1,16 @@
 """Mean-reverting fundamental value oracle.
 
-Generates a "true" hidden price via an Ornstein-Uhlenbeck process.
-Informed agents can observe a noisy version; the gap between market
-price and fundamental drives trading opportunities.
-
-Supports two modes:
-  - Synthetic: OU random walk anchored to r_bar
-  - Replay:    Steps through a real historical price series
+Generates a hidden "true" price with an Ornstein-Uhlenbeck process plus rare
+news jumps. Informed agents may observe the current value; the market at large
+only learns it `public_lag_seconds` later, which is what gives private
+information its edge.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from collections import deque
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 import numpy as np
 
@@ -26,101 +24,50 @@ class OracleConfig:
     sigma_s: float = 0.02
     observation_noise: float = 0.005
     enabled: bool = True
-    replay_path: List[float] = field(default_factory=list)
+    jump_rate: float = 1 / 1800          # news events per second (~13 per session)
+    jump_sigma_pct: float = 0.0015       # jump size, as a fraction of the value
+    public_lag_seconds: int = 30         # how stale the publicly known value is
 
 
 class MeanRevertingOracle:
-    """Ornstein-Uhlenbeck fundamental value process.
+    """Ornstein-Uhlenbeck fundamental value process with Poisson news jumps."""
 
-    Usage:
-        oracle = MeanRevertingOracle(OracleConfig(r_bar=100, kappa=0.05))
-        for _ in range(1000):
-            true_val  = oracle.advance(dt=1.0)
-            noisy_obs = oracle.observe()
-    """
-
-    def __init__(self, config: Optional[OracleConfig] = None, rng: Optional[np.random.RandomState] = None) -> None:
+    def __init__(self, config: Optional[OracleConfig] = None) -> None:
         self.config = config or OracleConfig()
-        self.rng = rng or np.random.RandomState()
-        self._current_value: float = self.config.r_bar
-        self._history: List[float] = [self._current_value]
-        self._time: float = 0.0
-        self._replay_index: int = 0
-
-    @property
-    def current_value(self) -> float:
-        return self._current_value
+        self.rng = np.random.RandomState()
+        self.reset()
 
     @property
     def enabled(self) -> bool:
         return self.config.enabled
 
+    @property
+    def public_value(self) -> float:
+        """The value as the public knows it: `public_lag_seconds` behind."""
+        return self._history[0]
+
     def reset(self, seed: Optional[int] = None) -> None:
         if seed is not None:
             self.rng = np.random.RandomState(seed)
-        self._current_value = self.config.r_bar
-        self._history = [self._current_value]
-        self._time = 0.0
-        self._replay_index = 0
+        self.current_value = self.config.r_bar
+        self._history = deque([self.current_value], maxlen=max(0, self.config.public_lag_seconds) + 1)
 
     def advance(self, dt: float = 1.0) -> float:
-        """Advance oracle by dt seconds. Returns new fundamental value."""
-        if not self.config.enabled:
-            return self._current_value
-
-        # Replay mode
-        if self.config.replay_path:
-            path = self.config.replay_path
-            if self._replay_index < len(path):
-                self._current_value = float(path[self._replay_index])
-                self._replay_index += 1
-            else:
-                sigma = self.config.sigma_s
-                noise = sigma * np.sqrt(dt) * self.rng.randn()
-                self._current_value = max(0.01, self._current_value + noise)
-            self._history.append(self._current_value)
-            self._time += dt
-            return self._current_value
-
-        # Synthetic OU mode
-        kappa = self.config.kappa
-        r_bar = self.config.r_bar
-        sigma = self.config.sigma_s
-        drift = kappa * (r_bar - self._current_value) * dt
-        diffusion = sigma * np.sqrt(dt) * self.rng.randn()
-        self._current_value += drift + diffusion
-        self._current_value = max(self._current_value, 0.01)
-        self._history.append(self._current_value)
-        self._time += dt
-        return self._current_value
-
-    def observe(self, sigma_n: Optional[float] = None) -> float:
-        """Return a noisy observation of the fundamental value."""
-        if not self.config.enabled:
-            return self._current_value
-        noise_std = sigma_n if sigma_n is not None else self.config.observation_noise
-        return self._current_value + noise_std * self.rng.randn()
+        """Advance the process by dt seconds and return the new fundamental value."""
+        if self.config.enabled:
+            drift = self.config.kappa * (self.config.r_bar - self.current_value) * dt
+            diffusion = self.config.sigma_s * np.sqrt(dt) * self.rng.randn()
+            if self.rng.rand() < self.config.jump_rate * dt:
+                diffusion += self.config.jump_sigma_pct * self.current_value * self.rng.randn()
+            self.current_value = max(0.01, self.current_value + drift + diffusion)
+            self._history.append(self.current_value)
+        return self.current_value
 
     def get_mispricing(self, market_price: float) -> Dict:
-        diff = market_price - self._current_value
-        pct = (diff / self._current_value * 100) if self._current_value > 0 else 0.0
+        diff = market_price - self.current_value
         return {
-            "fundamental_value": self._current_value,
+            "fundamental_value": self.current_value,
             "mispricing": diff,
-            "mispricing_pct": pct,
+            "mispricing_pct": diff / self.current_value * 100,
             "observation_noise": self.config.observation_noise,
         }
-
-    def describe(self) -> Dict:
-        return {
-            "enabled": self.config.enabled,
-            "r_bar": self.config.r_bar,
-            "kappa": self.config.kappa,
-            "sigma_s": self.config.sigma_s,
-            "current_value": self._current_value,
-            "time": self._time,
-            "replay_mode": bool(self.config.replay_path),
-        }
-
-    def get_recent_history(self, n: int = 100) -> List[float]:
-        return self._history[-n:]

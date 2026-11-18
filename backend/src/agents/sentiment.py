@@ -3,7 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
+from .risk import AgentRiskProfile, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -13,6 +13,7 @@ class SentimentAgent(BaseAgent):
     In 'herding' mode (default 70%), follows the recent price trend.
     In 'contrarian' mode (30%), trades against it.
     Sentiment regime flips randomly with a small probability each step.
+    Positions are trades, not investments: each is held at most `max_hold_seconds`.
     """
 
     def __init__(
@@ -25,14 +26,17 @@ class SentimentAgent(BaseAgent):
         herding_probability: float = 0.70,
         regime_switch_prob: float = 0.02,
         action_probability: float = 0.15,
+        max_hold_seconds: float = 300.0,
     ) -> None:
-        super().__init__(agent_id, "Sentiment", initial_capital, latency_seconds=0.05)
+        super().__init__(agent_id, "Sentiment", initial_capital)
         self.lookback = lookback
         self.position_limit = position_limit
         self.order_size = order_size
         self.herding_probability = herding_probability
         self.regime_switch_prob = regime_switch_prob
         self.action_probability = action_probability
+        self.max_hold_seconds = max_hold_seconds
+        self._opened_at: float | None = None
         self._price_history: deque = deque(maxlen=lookback + 5)
 
         # Start in herding or contrarian mode randomly
@@ -47,11 +51,22 @@ class SentimentAgent(BaseAgent):
         )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        price = self._mid(market_state)
         spread = float(market_state.get("spread", 0.05) or 0.05)
-        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         self._price_history.append(price)
         orders: List[Order] = []
+        closing = self._close_out(market_state)
+        if closing is not None:
+            return closing
+
+        now = float(market_state.get("current_time", 0.0) or 0.0)
+        if self.position == 0:
+            self._opened_at = None
+        elif self._opened_at is None:
+            self._opened_at = now
+        elif now - self._opened_at >= self.max_hold_seconds:
+            order = self._exit_order(market_state, price, aggression=1.0)
+            return [order] if order is not None else orders
 
         if len(self._price_history) < self.lookback:
             return orders
@@ -85,16 +100,11 @@ class SentimentAgent(BaseAgent):
         # ── Place order if within limits ────────────────────────────────
         if want_buy and self.position < self.position_limit:
             order_type = OrderType.MARKET if spread <= 0.04 else OrderType.LIMIT
-            order = risk_limited_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                side=OrderSide.BUY,
-                order_type=order_type,
-                price=price if order_type == OrderType.MARKET else near_touch_price(price, OrderSide.BUY, spread),
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                active_orders=self.active_orders,
+            order = self._entry_order(
+                market_state,
+                OrderSide.BUY,
+                order_type,
+                price if order_type == OrderType.MARKET else near_touch_price(price, OrderSide.BUY, spread),
                 aggression=0.8,
             )
             if order is not None:
@@ -102,16 +112,11 @@ class SentimentAgent(BaseAgent):
 
         elif not want_buy and self.position > -self.position_limit:
             order_type = OrderType.MARKET if spread <= 0.04 else OrderType.LIMIT
-            order = risk_limited_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                side=OrderSide.SELL,
-                order_type=order_type,
-                price=price if order_type == OrderType.MARKET else near_touch_price(price, OrderSide.SELL, spread),
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                active_orders=self.active_orders,
+            order = self._entry_order(
+                market_state,
+                OrderSide.SELL,
+                order_type,
+                price if order_type == OrderType.MARKET else near_touch_price(price, OrderSide.SELL, spread),
                 aggression=0.8,
             )
             if order is not None:
@@ -122,12 +127,13 @@ class SentimentAgent(BaseAgent):
     def reset(self) -> None:
         super().reset()
         self._price_history.clear()
+        self._opened_at = None
         self._is_herding = self.rng.random() < self.herding_probability
 
     def cancel_for_state(self, market_state: Dict) -> List[str]:
         if not self.active_orders:
             return []
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        price = self._mid(market_state)
         spread = float(market_state.get("spread", 0.05) or 0.05)
         if self.risk_profile.should_reprice(
             self.active_orders,

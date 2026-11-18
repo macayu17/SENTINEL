@@ -79,10 +79,3 @@ class LatencyModel:
         jitter_sec = base * self.rng.pareto(self.config.jitter_exponent)
         jitter_sec = min(max(jitter_sec, min_jitter), max_jitter)
         return base + jitter_sec
-
-    def describe(self) -> dict:
-        return {
-            "mode": self.config.mode.name,
-            "jitter_exponent": self.config.jitter_exponent,
-            "tiers": {k: f"{v*1e6:.0f}μs" for k, v in _TIER_DELAYS.items()},
-        }

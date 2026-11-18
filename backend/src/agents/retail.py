@@ -3,7 +3,7 @@
 from typing import List, Dict
 from collections import deque
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, risk_limited_exit_order, risk_limited_order
+from .risk import AgentRiskProfile
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -21,7 +21,7 @@ class RetailAgent(BaseAgent):
         take_profit: float = 0.05,
         order_size: int = 50,
     ) -> None:
-        super().__init__(agent_id, "Retail", initial_capital, latency_seconds=0.1)
+        super().__init__(agent_id, "Retail", initial_capital)
         self.wakeup_interval = 2.0
         self.stop_loss = stop_loss
         self.take_profit = take_profit
@@ -38,19 +38,9 @@ class RetailAgent(BaseAgent):
         )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
-        volatility = float(market_state.get("volatility", 0.0) or 0.0)
+        price = self._mid(market_state)
         self._price_history.append(price)
         orders: List[Order] = []
-
-        if len(self._price_history) < 50:
-            return orders
-
-        prices = list(self._price_history)
-
-        # Moving averages
-        ma20 = sum(prices[-20:]) / 20
-        ma50 = sum(prices[-50:]) / 50
 
         # Arm a resting stop once, so the venue triggers it the instant price
         # breaches — not on the next wakeup, several stale ticks later.
@@ -72,6 +62,13 @@ class RetailAgent(BaseAgent):
         if self.position == 0:
             self._stop_armed = False
 
+        if len(self._price_history) < 51:  # the previous-bar MA50 needs 51 samples
+            return orders
+
+        prices = list(self._price_history)
+        ma20 = sum(prices[-20:]) / 20
+        ma50 = sum(prices[-50:]) / 50
+
         # Take-profit is discretionary, so it stays a wakeup-time decision.
         if self.position != 0 and self.avg_entry_price > 0:
             pnl_pct = (price - self.avg_entry_price) / self.avg_entry_price
@@ -80,15 +77,7 @@ class RetailAgent(BaseAgent):
 
             if pnl_pct >= self.take_profit:
                 # Close position
-                order = risk_limited_exit_order(
-                    self.risk_profile,
-                    agent_id=self.agent_id,
-                    position=self.position,
-                    price=price,
-                    market_state=market_state,
-                    volatility=volatility,
-                    aggression=1.2,
-                )
+                order = self._exit_order(market_state, price, aggression=1.2)
                 if order is not None:
                     orders.append(order)
                 return orders
@@ -100,16 +89,11 @@ class RetailAgent(BaseAgent):
 
             # Bullish crossover
             if prev_ma20 <= prev_ma50 and ma20 > ma50:
-                order = risk_limited_order(
-                    self.risk_profile,
-                    agent_id=self.agent_id,
-                    side=OrderSide.BUY,
-                    order_type=OrderType.MARKET,
-                    price=price,
-                    position=self.position,
-                    market_state=market_state,
-                    volatility=volatility,
-                    active_orders=self.active_orders,
+                order = self._entry_order(
+                    market_state,
+                    OrderSide.BUY,
+                    OrderType.MARKET,
+                    price,
                     aggression=0.7,
                 )
                 if order is None:
@@ -118,16 +102,11 @@ class RetailAgent(BaseAgent):
 
             # Bearish crossover
             elif prev_ma20 >= prev_ma50 and ma20 < ma50:
-                order = risk_limited_order(
-                    self.risk_profile,
-                    agent_id=self.agent_id,
-                    side=OrderSide.SELL,
-                    order_type=OrderType.MARKET,
-                    price=price,
-                    position=self.position,
-                    market_state=market_state,
-                    volatility=volatility,
-                    active_orders=self.active_orders,
+                order = self._entry_order(
+                    market_state,
+                    OrderSide.SELL,
+                    OrderType.MARKET,
+                    price,
                     aggression=0.7,
                 )
                 if order is None:

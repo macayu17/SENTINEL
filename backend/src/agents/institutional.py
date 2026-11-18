@@ -1,15 +1,15 @@
-"""Institutional agent — executes large orders via TWAP over a time window."""
+"""Institutional agent — works a large parent order against a TWAP schedule."""
 
 from typing import List, Dict
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
+from .risk import AgentRiskProfile, near_touch_price
 from ..market.order import Order, OrderSide, OrderType
 
 
 class InstitutionalAgent(BaseAgent):
     """
-    Executes a large order using TWAP (Time-Weighted Average Price) slicing.
-    Splits the target quantity into intervals over the execution window.
+    Works a large parent order over an execution window against a TWAP schedule,
+    escalating from passive iceberg slices to marketable ones when fills lag.
     """
 
     def __init__(
@@ -22,7 +22,7 @@ class InstitutionalAgent(BaseAgent):
         max_slice_size: int = 1000,
         start_after_seconds: float | None = None,
     ) -> None:
-        super().__init__(agent_id, "Institutional", initial_capital, latency_seconds=0.01)
+        super().__init__(agent_id, "Institutional", initial_capital)
         self.target_quantity = target_quantity
         self.execution_window = execution_window
         self.slice_interval = slice_interval
@@ -45,9 +45,8 @@ class InstitutionalAgent(BaseAgent):
 
     def decide_action(self, market_state: Dict) -> List[Order]:
         current_time = market_state.get("current_time", 0.0)
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        price = self._mid(market_state)
         spread = float(market_state.get("spread", 0.05) or 0.05)
-        volatility = float(market_state.get("volatility", 0.0) or 0.0)
         orders: List[Order] = []
 
         if self.active_orders and self._has_fresh_active_order(market_state):
@@ -65,42 +64,33 @@ class InstitutionalAgent(BaseAgent):
             self._start_time = self._scheduled_start_time
             self._last_slice_time = self._scheduled_start_time
 
-        # TWAP: slice at regular intervals
-        elapsed_since_slice = current_time - self._last_slice_time
-        if elapsed_since_slice >= self.slice_interval:
-            remaining = self.target_quantity - self.executed_quantity
-            elapsed_execution = max(0.0, current_time - self._start_time)
-            num_remaining_slices = max(
-                1,
-                int((self.execution_window - elapsed_execution) / self.slice_interval),
-            )
-            twap_size = min(
-                remaining,
-                self.max_slice_size,
-                remaining // num_remaining_slices + 1,
-            )
-            urgent = elapsed_execution > self.execution_window * 0.85
-            order_type = OrderType.MARKET if urgent and spread <= 0.05 else OrderType.LIMIT
-            order = risk_limited_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                side=self.side,
-                order_type=order_type,
-                price=price if order_type == OrderType.MARKET else near_touch_price(price, self.side, spread),
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                active_orders=self.active_orders,
-                aggression=1.0,
-                quantity_cap=twap_size,
-            )
-            if order is not None:
-                # Work the slice as an iceberg so the parent order's true size
-                # is not advertised to the book.
-                if order.order_type != OrderType.MARKET and order.quantity > 1:
-                    order.display_quantity = max(1, order.quantity // 4)
-                orders.append(order)
-                self._last_slice_time = current_time
+        # Schedule-tracking TWAP: compare fills with a straight-line schedule and pick
+        # the urgency from the gap — behind crosses, on-track rests, ahead waits.
+        if current_time - self._last_slice_time < self.slice_interval:
+            return orders
+        remaining = self.target_quantity - self.executed_quantity
+        elapsed = max(0.0, current_time - self._start_time)
+        scheduled = self.target_quantity * min(1.0, elapsed / max(1.0, self.execution_window))
+        behind = scheduled - self.executed_quantity
+        remaining_slices = max(1, int((self.execution_window - elapsed) / self.slice_interval))
+        twap_size = remaining // remaining_slices + 1
+        if behind < -twap_size:
+            return orders  # ahead of schedule: let the book come to us
+        urgent = behind > 2 * twap_size and spread <= 0.05
+        order_type = OrderType.MARKET if urgent else OrderType.LIMIT
+        order = self._entry_order(
+            market_state,
+            self.side,
+            order_type,
+            price if urgent else near_touch_price(price, self.side, spread),
+            quantity_cap=min(remaining, self.max_slice_size, max(0, int(behind)) + twap_size),
+        )
+        if order is not None:
+            # Work resting slices as icebergs so the parent size is not advertised.
+            if not urgent and order.quantity > 1:
+                order.display_quantity = max(1, order.quantity // 4)
+            orders.append(order)
+            self._last_slice_time = current_time
 
         return orders
 
@@ -140,7 +130,7 @@ class InstitutionalAgent(BaseAgent):
         return self.cancel_all_active_orders()
 
     def _has_fresh_active_order(self, market_state: Dict) -> bool:
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        price = self._mid(market_state)
         spread = float(market_state.get("spread", 0.05) or 0.05)
         target = near_touch_price(price, self.side, spread)
         return not self.risk_profile.should_reprice(

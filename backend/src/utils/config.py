@@ -47,20 +47,6 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip().rstrip("/") for item in value.split(",") if item.strip()]
 
 
-def _get_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _resolve_repo_path(value: str) -> str:
-    path = Path(value).expanduser()
-    if path.is_absolute():
-        return str(path)
-    return str((_BACKEND_ROOT / path).resolve())
-
-
 def _default_allowed_origins() -> list[str]:
     origins = [
         "http://localhost:3000",
@@ -77,29 +63,20 @@ def _default_allowed_origins() -> list[str]:
 
     origins.extend(_split_csv(os.getenv("ALLOWED_ORIGINS", "")))
 
-    deduped: list[str] = []
-    for origin in origins:
-        if origin not in deduped:
-            deduped.append(origin)
-    return deduped
+    return list(dict.fromkeys(origins))  # de-duplicate, keep order
 
 
 @dataclass
 class Config:
     """Global configuration loaded from environment variables."""
 
-    # Simulation
-    initial_price: float = float(os.getenv("INITIAL_PRICE", "100.0"))
     simulation_duration: int = int(os.getenv("SIMULATION_DURATION", "23400"))
-
-    # Server
-    host: str = os.getenv("HOST", "0.0.0.0")
-    port: int = int(os.getenv("PORT", "8000"))
     allowed_origins: list[str] = field(default_factory=_default_allowed_origins)
 
     # Feature baselines
     baseline_spread: float = 0.001
     baseline_depth: float = 1000.0
     baseline_volatility: float = 0.02
+
 
 config = Config()

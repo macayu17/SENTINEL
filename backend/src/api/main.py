@@ -1,9 +1,8 @@
 """FastAPI application — REST endpoints and WebSocket for SENTINEL."""
 
-from contextlib import asynccontextmanager
 from datetime import datetime
 from math import sqrt
-from typing import Iterable, Optional
+from typing import Optional
 import asyncio
 import secrets
 
@@ -24,24 +23,17 @@ from ..report_pdf import build_simulation_pdf
 
 logger = get_logger("api")
 
-# Global singletons
 simulator: Optional[MarketSimulator] = None
 liquidity_predictor = LiquidityShockPredictor()
 large_order_detector = LargeOrderDetector()
 manager = ConnectionManager()
 
-# Simulation task handle
 _sim_task: Optional[asyncio.Task] = None
 _warning_timeline: list[dict] = []
 _warning_states: dict[str, tuple] = {}
 _last_simulation_report: Optional[dict] = None
 
-LATENCY_MODES = {
-    "zero": LatencyMode.ZERO,
-    "deterministic": LatencyMode.DETERMINISTIC,
-    "cubic": LatencyMode.CUBIC,
-}
-
+MAX_WARNING_EVENTS = 500
 AGENT_METRIC_FIELDS = (
     "total_pnl",
     "realized_pnl",
@@ -52,23 +44,10 @@ AGENT_METRIC_FIELDS = (
     "num_trades",
 )
 
-
-def _clamp_simulation_speed(speed: float) -> float:
-    return max(0.1, min(20.0, float(speed)))
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("SENTINEL API starting up")
-    yield
-    logger.info("SENTINEL API shutting down")
-
-
 app = FastAPI(
     title="SENTINEL API",
     description="Smart Early-warning Network for Trading, Institutional orders, and Liquidity Events",
     version="2.0.0",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -80,51 +59,42 @@ app.add_middleware(
 )
 
 
-# ── REST Endpoints ──────────────────────────────────────────────────────────
+def _clamp_simulation_speed(speed: float) -> float:
+    return max(0.1, min(20.0, float(speed)))
 
 
-@app.get("/api/health")
-async def health_check():
-    simulation_active = simulator is not None and simulator.running
-    return {
-        "status": "healthy",
-        "simulation_active": simulation_active,
-        "connected_clients": manager.client_count,
-        "engine": "SENTINEL",
-    }
+# ── Run lifecycle ───────────────────────────────────────────────────────────
 
 
-def _latency_config(latency_mode: str) -> LatencyConfig:
-    return LatencyConfig(mode=LATENCY_MODES.get(latency_mode, LatencyMode.DETERMINISTIC))
+def _reset_run_tracking() -> None:
+    global _warning_timeline, _warning_states
+    liquidity_predictor.reset()
+    _warning_timeline = []
+    _warning_states = {}
 
 
-def _stop_native_simulation() -> None:
+def _stop_running_simulation() -> None:
     global _sim_task
-    if simulator and simulator.running:
+    if simulator is not None:
         simulator.stop()
-    if _sim_task:
+    if _sim_task is not None:
         _sim_task.cancel()
         _sim_task = None
 
 
-def _prepare_simulator_replacement() -> None:
-    _stop_native_simulation()
-    liquidity_predictor.reset()
-    large_order_detector.reset()
+def _finalize_report(sim: MarketSimulator) -> None:
+    """Freeze the finished run into the session report served by /report and /report.pdf."""
+    global _last_simulation_report
+    _last_simulation_report = {
+        **sim.get_export_snapshot(_warning_timeline),
+        "status": "completed",
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
 
 
 def _record_warning_event(event: dict) -> None:
     _warning_timeline.append(event)
-    if len(_warning_timeline) > 500:
-        del _warning_timeline[:-500]
-
-
-def _agent_metrics_for(agents: Iterable, price: float) -> dict:
-    metrics = {}
-    for agent in agents:
-        values = agent.get_metrics(price)
-        metrics[agent.agent_id] = {field: values[field] for field in AGENT_METRIC_FIELDS}
-    return metrics
+    del _warning_timeline[:-MAX_WARNING_EVENTS]
 
 
 def _record_step_warnings(
@@ -133,21 +103,22 @@ def _record_step_warnings(
     liquidity_prediction: Optional[dict],
     large_order_detection: Optional[dict],
 ) -> None:
+    """Log detector transitions, not every tick a detector stays raised."""
     scenario_name = state.get("scenario", {}).get("name")
     timestamp = state.get("current_time", 0.0)
 
     liquidity_level = liquidity_prediction.get("warning_level") if liquidity_prediction else None
-    if liquidity_level not in {None, "safe"}:
+    if liquidity_level not in (None, "safe"):
         signature = (liquidity_level, scenario_name)
         if _warning_states.get("liquidity_stress") != signature:
             _record_warning_event({
-            "timestamp": timestamp,
-            "detector": "liquidity_stress",
-            "warning_level": liquidity_level,
-            "probability": liquidity_prediction.get("probability"),
-            "stress_score": liquidity_prediction.get("stress_score"),
-            "health_score": liquidity_prediction.get("health_score"),
-            "scenario": scenario_name,
+                "timestamp": timestamp,
+                "detector": "liquidity_stress",
+                "warning_level": liquidity_level,
+                "probability": liquidity_prediction.get("probability"),
+                "stress_score": liquidity_prediction.get("stress_score"),
+                "health_score": liquidity_prediction.get("health_score"),
+                "scenario": scenario_name,
             })
             _warning_states["liquidity_stress"] = signature
     else:
@@ -161,59 +132,63 @@ def _record_step_warnings(
         )
         if _warning_states.get("visible_liquidity") != signature:
             _record_warning_event({
-            "timestamp": timestamp,
-            "detector": "visible_liquidity",
-            "pattern": large_order_detection.get("pattern"),
-            "side": large_order_detection.get("side"),
-            "confidence": large_order_detection.get("confidence"),
-            "estimated_size": large_order_detection.get("estimated_size"),
-            "scenario": scenario_name,
+                "timestamp": timestamp,
+                "detector": "visible_liquidity",
+                "pattern": large_order_detection.get("pattern"),
+                "side": large_order_detection.get("side"),
+                "confidence": large_order_detection.get("confidence"),
+                "estimated_size": large_order_detection.get("estimated_size"),
+                "scenario": scenario_name,
             })
             _warning_states["visible_liquidity"] = signature
     else:
         _warning_states.pop("visible_liquidity", None)
 
 
+# ── REST Endpoints ──────────────────────────────────────────────────────────
+
+
+@app.get("/api/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "simulation_active": simulator is not None and simulator.running,
+        "connected_clients": manager.client_count,
+        "engine": "SENTINEL",
+    }
+
+
 @app.post("/api/simulation/stop")
 async def stop_simulation():
-    global simulator, _sim_task, _warning_timeline, _warning_states, _last_simulation_report
-
-    _stop_native_simulation()
-
+    _stop_running_simulation()
     if simulator is not None:
-        _last_simulation_report = {
-            **simulator.get_export_snapshot(_warning_timeline),
-            "status": "completed",
-            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        }
-
-    liquidity_predictor.reset()
-    large_order_detector.reset()
-    _warning_timeline = []
-    _warning_states = {}
+        _finalize_report(simulator)
+    _reset_run_tracking()
     return {"status": "stopped", "report_available": _last_simulation_report is not None}
 
 
 @app.get("/api/simulation/export")
 async def export_simulation_run():
-    if simulator is not None:
-        return simulator.get_export_snapshot(_warning_timeline)
-    raise HTTPException(status_code=409, detail="No active simulation")
+    if simulator is None:
+        raise HTTPException(status_code=409, detail="No active simulation")
+    return simulator.get_export_snapshot(_warning_timeline)
 
 
-@app.get("/api/simulation/report")
-async def get_simulation_report():
+def _require_report() -> dict:
     if _last_simulation_report is None:
         raise HTTPException(status_code=409, detail="No completed simulation report")
     return _last_simulation_report
 
 
+@app.get("/api/simulation/report")
+async def get_simulation_report():
+    return _require_report()
+
+
 @app.get("/api/simulation/report.pdf")
 async def download_simulation_report_pdf():
-    if _last_simulation_report is None:
-        raise HTTPException(status_code=409, detail="No completed simulation report")
     return Response(
-        content=build_simulation_pdf(_last_simulation_report),
+        content=build_simulation_pdf(_require_report()),
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=sentinel-simulation-report.pdf"},
     )
@@ -235,7 +210,7 @@ async def list_sandbox_scenarios():
 class SandboxCreateRequest(BaseModel):
     preset: str = "balanced"
     initial_price: float = 100.0
-    oracle_enabled: bool = False
+    oracle_enabled: bool = False  # grants Informed agents a view of the hidden fundamental
     latency_mode: str = "deterministic"
     speed: float = 1.0
     scenario: str = "normal"
@@ -246,40 +221,38 @@ class SandboxCreateRequest(BaseModel):
 async def create_sandbox(request: SandboxCreateRequest):
     global simulator, _sim_task, _last_simulation_report
 
-    _prepare_simulator_replacement()
+    _stop_running_simulation()
+    _reset_run_tracking()
 
     scenario = get_scenario_config(request.scenario)
     run_seed = request.seed if request.seed is not None else secrets.randbits(32)
     run_speed = _clamp_simulation_speed(request.speed)
-    agents = create_sandbox_agents(
-        request.preset,
-        scenario=scenario,
-        seed=run_seed,
-    )
+    agents = create_sandbox_agents(request.preset, scenario=scenario, seed=run_seed)
 
-    base_sigma = (
-        request.initial_price
-        * 0.30
-        / sqrt(252 * 390 * 60)
-    )
+    # 20% annualized fundamental volatility per simulated second. Microstructure noise and
+    # news jumps add the rest; this lands realized 1 s volatility in the 13-20% band of
+    # the NASDAQ LOBSTER sample days, with matching fat tails.
+    base_sigma = request.initial_price * 0.20 / sqrt(252 * 390 * 60)
     oracle_cfg = OracleConfig(
         r_bar=request.initial_price,
         kappa=0.001,
         sigma_s=base_sigma * scenario.oracle_sigma_multiplier,
-        enabled=True,
     )
-    latency_cfg = _latency_config(request.latency_mode)
+    latency_mode = LatencyMode.__members__.get(request.latency_mode.upper(), LatencyMode.DETERMINISTIC)
 
     simulator = MarketSimulator(
-        agents, initial_price=request.initial_price,
+        agents,
+        initial_price=request.initial_price,
         duration_seconds=config.simulation_duration,
-        oracle_config=oracle_cfg, latency_config=latency_cfg, speed_multiplier=run_speed,
-        scenario=scenario.name,
+        oracle_config=oracle_cfg,
+        latency_config=LatencyConfig(mode=latency_mode),
+        speed_multiplier=run_speed,
+        scenario=scenario,
         informed_oracle_access=request.oracle_enabled,
         seed=run_seed,
     )
     _last_simulation_report = None
-    _sim_task = asyncio.create_task(_run_simulation_loop())
+    _sim_task = asyncio.create_task(_run_simulation_loop(simulator))
     return {"status": "started", "preset": request.preset, "agents": len(agents),
             "oracle_enabled": request.oracle_enabled, "speed": run_speed,
             "scenario": scenario.name, "seed": run_seed}
@@ -292,7 +265,7 @@ class SpeedRequest(BaseModel):
 @app.put("/api/sandbox/speed")
 async def set_sandbox_speed(request: SpeedRequest):
     if simulator is None:
-        return {"error": "No active simulation"}
+        raise HTTPException(status_code=409, detail="No active simulation")
     simulator.speed_multiplier = _clamp_simulation_speed(request.speed)
     return {"speed": simulator.speed_multiplier}
 
@@ -305,14 +278,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive, receive any client messages
-            try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
-            except asyncio.TimeoutError:
-                pass
+            await websocket.receive_text()  # clients only listen; this just waits for disconnect
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception:
+        pass
+    finally:
         manager.disconnect(websocket)
 
 
@@ -333,73 +302,68 @@ def _build_market_update(
         "price": state["current_price"],
         "spread": state["spread"],
         "depth": state["total_depth"],
-        "order_book": {"bids": state["bid_levels"][:10], "asks": state["ask_levels"][:10]},
+        "order_book": {"bids": state["bid_levels"], "asks": state["ask_levels"]},
         "liquidity_prediction": liquidity_prediction,
         "large_order_detection": large_order_detection,
         "agent_metrics": agent_metrics,
         "step": state["step"],
         "volatility": state["volatility"],
-        "speed": getattr(active_simulator, "speed_multiplier", 1.0),
+        "speed": active_simulator.speed_multiplier,
         "session_phase": state["session_phase"],
         "activity_multiplier": state["activity_multiplier"],
         "scenario": state["scenario"],
         "venue": state["venue"],
-        "market": state["market"],
-        "latency_mode": active_simulator.latency_model.describe()["mode"],
+        "latency_mode": active_simulator.latency_model.config.mode.name,
         "events": active_simulator.get_recent_events(limit=20),
         "order_flow": active_simulator.get_order_flow_summary(),
         "recent_orders": active_simulator.get_recent_orders(limit=20),
     }
-
     if "oracle" in state:
         update["oracle"] = state["oracle"]
-
     return update
 
 
-async def _run_simulation_loop():
-    """Run the simulation and broadcast updates via WebSocket."""
-    global simulator
-
-    if simulator is None:
-        return
-
-    simulator.running = True
+async def _run_simulation_loop(sim: MarketSimulator) -> None:
+    """Step `sim` in real time, broadcasting each state until it finishes or is stopped."""
+    global _sim_task
+    sim.running = True
     logger.info("Simulation loop started")
-
     try:
-        while simulator.running and simulator.current_time < simulator.duration_seconds:
-            state = simulator.step()
-
-            liquidity_pred = liquidity_predictor.predict(state)
-            large_order_det = large_order_detector.detect(state)
+        while sim.running and sim.current_time < sim.duration_seconds:
+            state = sim.step()
+            liquidity_prediction = liquidity_predictor.predict(state)
+            large_order_detection = large_order_detector.detect(state)
             _record_step_warnings(
                 state=state,
-                liquidity_prediction=liquidity_pred,
-                large_order_detection=large_order_det,
+                liquidity_prediction=liquidity_prediction,
+                large_order_detection=large_order_detection,
             )
+            if manager.client_count:
+                agent_metrics = {
+                    agent.agent_id: {
+                        field: value
+                        for field, value in agent.get_metrics(sim.current_price).items()
+                        if field in AGENT_METRIC_FIELDS
+                    }
+                    for agent in sim.agents
+                }
+                await manager.broadcast(_build_market_update(
+                    state=state,
+                    liquidity_prediction=liquidity_prediction,
+                    large_order_detection=large_order_detection,
+                    agent_metrics=agent_metrics,
+                    active_simulator=sim,
+                ))
+            await asyncio.sleep(0.1 / _clamp_simulation_speed(sim.speed_multiplier))
 
-            agent_metrics = _agent_metrics_for(simulator.agents, simulator.current_price)
-
-            update = _build_market_update(
-                state=state,
-                liquidity_prediction=liquidity_pred,
-                large_order_detection=large_order_det,
-                agent_metrics=agent_metrics,
-                active_simulator=simulator,
-            )
-
-            if manager.client_count > 0:
-                await manager.broadcast(update)
-
-            sleep_time = 0.1 / _clamp_simulation_speed(simulator.speed_multiplier)
-            await asyncio.sleep(sleep_time)
-
+        if sim.running:  # reached the session close on its own
+            _finalize_report(sim)
+            _sim_task = None
     except asyncio.CancelledError:
         logger.info("Simulation loop cancelled")
-    except Exception as e:
-        logger.error(f"Simulation loop error: {e}")
+    except Exception:
+        logger.exception("Simulation loop error")
     finally:
-        if simulator:
-            simulator.running = False
+        sim.running = False
         logger.info("Simulation loop ended")
+

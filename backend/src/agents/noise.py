@@ -2,7 +2,7 @@
 
 from typing import List, Dict
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, displayed_depth_for_side
+from .risk import TICK, AgentRiskProfile, displayed_depth_for_side
 from ..market.order import Order, OrderSide, OrderType
 
 
@@ -10,6 +10,9 @@ class NoiseAgent(BaseAgent):
     """
     Submits random orders to provide background liquidity / noise.
     50% market orders, 50% limit orders, random sizes between min/max.
+    Activity jumps after large price moves (attention-driven trading), the
+    self-excitation behind volatility clustering, and passive orders sit mostly
+    at the first tick with a thinning tail, as in real limit-order data.
     """
 
     def __init__(
@@ -20,7 +23,7 @@ class NoiseAgent(BaseAgent):
         min_size: int = 10,
         max_size: int = 200,
     ) -> None:
-        super().__init__(agent_id, "Noise", initial_capital, latency_seconds=0.05)
+        super().__init__(agent_id, "Noise", initial_capital)
         self.wakeup_interval = 1.0
         self.order_rate = order_rate
         self.min_size = min_size
@@ -35,10 +38,12 @@ class NoiseAgent(BaseAgent):
         )
 
     def decide_action(self, market_state: Dict) -> List[Order]:
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
+        price = self._mid(market_state)
         orders: List[Order] = []
 
-        if self.rng.random() > self.order_rate:
+        move = abs(float(market_state.get("recent_price_change") or 0.0))
+        attention = 1.0 + min(3.0, (move / 0.001) ** 2)
+        if self.rng.random() > self.order_rate * attention:
             return orders
 
         side = self.rng.choice([OrderSide.BUY, OrderSide.SELL])
@@ -68,7 +73,7 @@ class NoiseAgent(BaseAgent):
             )
         else:
             # Passive background liquidity belongs near the touch, not deep in the book.
-            offset = self.rng.randint(1, 3) * 0.01
+            offset = min(3, 1 + int(self.rng.expovariate(1.2))) * TICK
             limit_price = round(
                 price - offset if side == OrderSide.BUY else price + offset, 2
             )

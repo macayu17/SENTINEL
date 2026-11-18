@@ -4,7 +4,7 @@ from backend.src.agents.base_agent import BaseAgent
 from backend.src.agents.informed import InformedAgent
 from backend.src.agents.risk import AgentRiskProfile
 from backend.src.market.latency_model import LatencyConfig, LatencyMode, LatencyModel
-from backend.src.market.oracle import OracleConfig
+from backend.src.market.oracle import MeanRevertingOracle, OracleConfig
 from backend.src.market.order import Order, OrderSide, OrderType
 from backend.src.market.simulator import MarketSimulator, create_sandbox_agents
 from backend.src.prediction.large_order import LargeOrderDetector
@@ -14,7 +14,7 @@ from backend.src.api import main as api_main
 
 class StaticAgent(BaseAgent):
     def __init__(self, agent_id: str, agent_type: str = "Retail") -> None:
-        super().__init__(agent_id, agent_type, latency_seconds=0.25)
+        super().__init__(agent_id, agent_type)
         self.risk_profile = AgentRiskProfile(max_inventory=1_000, base_order_size=10)
 
     def decide_action(self, market_state):
@@ -178,7 +178,7 @@ def test_hidden_reference_process_advances_without_leaking_into_public_state():
     assert "oracle" not in state
 
 
-def test_reference_flow_moves_one_visible_level_toward_latent_value():
+def test_reference_flow_takes_every_quote_mispriced_against_public_value():
     simulator = MarketSimulator(
         [],
         initial_price=100.0,
@@ -190,13 +190,27 @@ def test_reference_flow_moves_one_visible_level_toward_latent_value():
 
     assert simulator._apply_reference_flow() is True
 
-    reference_trades = [
-        trade for trade in simulator._all_trades
+    prices = {
+        trade.price for trade in simulator._all_trades
         if trade.taker_agent_id == "REFERENCE_FLOW"
-    ]
-    assert reference_trades
-    assert {trade.price for trade in reference_trades} == {initial_ask}
-    assert simulator.order_book.best_ask > initial_ask
+    }
+    assert min(prices) == initial_ask
+    assert max(prices) <= 100.09
+    assert len(prices) > 1  # one sweep, several levels
+    assert simulator.order_book.best_ask > 100.09
+
+
+def test_public_value_trails_the_latent_value_by_the_news_lag():
+    oracle = MeanRevertingOracle(OracleConfig(r_bar=100.0, sigma_s=0.05, public_lag_seconds=3))
+    oracle.reset(seed=4)
+    path = [oracle.advance() for _ in range(5)]
+
+    assert oracle.public_value == path[1]
+    assert oracle.current_value == path[4]
+
+
+
+
 
 
 def test_liquidity_diagnostic_learns_baseline_and_reports_observed_stress(tmp_path: Path):
@@ -236,7 +250,6 @@ def test_simulation_market_is_explicitly_nasdaq():
     state = simulator.get_market_state()
 
     assert state["venue"] == "NASDAQ"
-    assert state["market"] == "NASDAQ"
 
 
 def test_visible_liquidity_detector_flags_only_concentrated_book_levels():

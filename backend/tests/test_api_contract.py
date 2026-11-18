@@ -14,6 +14,12 @@ from backend.src.market.order import Order, OrderSide, OrderType
 from backend.src import report_pdf
 
 
+
+def _replace_book(book, bid, ask, size):
+    """Swap the book for a single resting level per side."""
+    book.bids = [Order("SEED", OrderSide.BUY, OrderType.LIMIT, bid, size)]
+    book.asks = [Order("SEED", OrderSide.SELL, OrderType.LIMIT, ask, size)]
+
 def test_live_shadow_routes_are_removed():
     paths = {route.path for route in api_main.app.routes}
 
@@ -177,7 +183,7 @@ def test_sandbox_defaults_to_calibrated_hidden_reference_process():
         assert api_main.simulator.informed_oracle_access is False
         assert api_main.simulator.oracle.config.kappa == pytest.approx(0.001)
         assert api_main.simulator.oracle.config.sigma_s == pytest.approx(
-            100.0 * 0.30 / (252 * 390 * 60) ** 0.5
+            100.0 * 0.20 / (252 * 390 * 60) ** 0.5
         )
         assert "oracle" not in api_main.simulator.get_market_state()
     finally:
@@ -189,10 +195,7 @@ def test_sandbox_defaults_to_calibrated_hidden_reference_process():
 
 def test_market_update_includes_real_trace_contract_fields():
     active_sim = api_main.MarketSimulator([], initial_price=100.0)
-    active_sim.order_book.replace_depth(
-        bids=[{"price": 99.9, "size": 100}],
-        asks=[{"price": 100.1, "size": 100}],
-    )
+    _replace_book(active_sim.order_book, 99.9, 100.1, 100)
     active_sim._process_order(
         Order(
             agent_id="TRACE_AGENT",

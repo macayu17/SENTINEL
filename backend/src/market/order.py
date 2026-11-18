@@ -2,9 +2,10 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
-import uuid
+from itertools import count
 import time
+
+_order_ids = count(1)
 
 
 class OrderSide(str, Enum):
@@ -40,12 +41,13 @@ class Order:
     order_type: OrderType
     price: float
     quantity: int
-    order_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    order_id: str = field(default_factory=lambda: f"O{next(_order_ids)}")
     timestamp: float = field(default_factory=time.time)
     filled_quantity: int = 0
     status: OrderStatus = OrderStatus.PENDING
     #: Iceberg: shares shown to the book at a time. 0 means fully displayed.
     display_quantity: int = 0
+
     @property
     def remaining_quantity(self) -> int:
         return self.quantity - self.filled_quantity

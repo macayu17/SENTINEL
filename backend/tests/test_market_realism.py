@@ -15,6 +15,12 @@ from backend.src.market.order_book import OrderBook
 from backend.src.market.simulator import MarketSimulator
 
 
+
+def _replace_book(book, bid, ask, size):
+    """Swap the book for a single resting level per side."""
+    book.bids = [Order("SEED", OrderSide.BUY, OrderType.LIMIT, bid, size)]
+    book.asks = [Order("SEED", OrderSide.SELL, OrderType.LIMIT, ask, size)]
+
 def _order(agent_id, side, order_type=OrderType.LIMIT, price=100.0, quantity=100):
     return Order(agent_id, side, order_type, price, quantity)
 
@@ -68,10 +74,7 @@ def test_market_order_rejects_stale_touch_outside_arrival_reference_band():
 
 def test_liquidity_floor_repairs_a_deep_but_excessively_wide_book():
     sim = MarketSimulator([], initial_price=100.0, seed=3)
-    sim.order_book.replace_depth(
-        bids=[{"price": 99.0, "size": 5_000}],
-        asks=[{"price": 101.0, "size": 5_000}],
-    )
+    _replace_book(sim.order_book, 99.0, 101.0, 5_000)
 
     sim._ensure_liquidity_floor()
 
@@ -81,10 +84,7 @@ def test_liquidity_floor_repairs_a_deep_but_excessively_wide_book():
 def test_liquidity_floor_rebuilds_around_the_latest_executed_price():
     sim = MarketSimulator([], initial_price=100.0, seed=3)
     sim.current_price = 100.20
-    sim.order_book.replace_depth(
-        bids=[{"price": 99.0, "size": 5_000}],
-        asks=[{"price": 101.0, "size": 5_000}],
-    )
+    _replace_book(sim.order_book, 99.0, 101.0, 5_000)
 
     sim._ensure_liquidity_floor()
 

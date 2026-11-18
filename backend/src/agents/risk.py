@@ -8,6 +8,8 @@ from typing import Callable, Mapping
 
 from ..market.order import Order, OrderSide, OrderType
 
+TICK = 0.01
+
 
 @dataclass(frozen=True)
 class AgentRiskProfile:
@@ -86,36 +88,24 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 def active_exposure_for_side(active_orders: Mapping[str, Order], side: OrderSide) -> int:
     """Count resting same-side shares that still consume inventory capacity."""
-    exposure = 0
-    for order in active_orders.values():
-        if order.side != side:
-            continue
-        try:
-            remaining = int(order.remaining_quantity)
-        except (TypeError, ValueError):
-            remaining = 0
-        exposure += max(0, remaining)
-    return exposure
+    return sum(
+        max(0, order.remaining_quantity) for order in active_orders.values() if order.side == side
+    )
+
+
+def _book_depth(market_state: Mapping, key: str) -> float:
+    fallback = market_state.get("total_depth") or 1_000
+    return max(1.0, float(market_state.get(key) or fallback))
 
 
 def displayed_depth_for_side(market_state: Mapping, side: OrderSide) -> float:
     """Depth available on the side an aggressive child order would consume."""
-    key = "ask_depth" if side == OrderSide.BUY else "bid_depth"
-    fallback = market_state.get("total_depth", 1_000) or 1_000
-    try:
-        return max(1.0, float(market_state.get(key, fallback) or fallback))
-    except (TypeError, ValueError):
-        return 1_000.0
+    return _book_depth(market_state, "ask_depth" if side == OrderSide.BUY else "bid_depth")
 
 
 def passive_depth_for_side(market_state: Mapping, side: OrderSide) -> float:
     """Depth already resting on the same side as a passive quote."""
-    key = "bid_depth" if side == OrderSide.BUY else "ask_depth"
-    fallback = market_state.get("total_depth", 1_000) or 1_000
-    try:
-        return max(1.0, float(market_state.get(key, fallback) or fallback))
-    except (TypeError, ValueError):
-        return 1_000.0
+    return _book_depth(market_state, "bid_depth" if side == OrderSide.BUY else "ask_depth")
 
 
 def risk_limited_order(
@@ -187,19 +177,19 @@ def risk_limited_exit_order(
 
 
 def near_touch_price(mid: float, side: OrderSide, spread: float, *, ticks: int = 1) -> float:
-    tick = 0.01
-    half = max(tick, float(spread or tick) / 2)
-    offset = half + max(0, ticks - 1) * tick
+    half = max(TICK, float(spread or TICK) / 2)
+    offset = half + max(0, ticks - 1) * TICK
     return round(mid - offset if side == OrderSide.BUY else mid + offset, 2)
 
 
 # ── Central rule gate ────────────────────────────────────────────────────
-# Applied by the simulator to EVERY sim-mode agent order, regardless of how
-# the agent built it (risk_limited_order, raw Order, RL policy, ...).
+# Applied by the simulator to every agent order, however the agent built it.
 MAX_LEVERAGE = 2.0           # gross exposure ≤ 2× initial capital
 MAX_DRAWDOWN_PCT = 0.25      # total PnL ≤ -25% of capital → reduce-only
 PRICE_COLLAR_PCT = 0.05      # limit prices > 5% from mid are fat-fingers
 CLOSE_PHASE_SIZE_FACTOR = 0.5  # de-risk: halve opening size in CLOSE phase
+# Stops are excluded: their trigger sits away from mid by design.
+PRICED_ORDER_TYPES = frozenset({OrderType.LIMIT, OrderType.POST_ONLY, OrderType.IOC})
 
 
 def enforce_trading_rules(
@@ -207,10 +197,10 @@ def enforce_trading_rules(
     orders: list[Order],
     market_state: Mapping,
 ) -> tuple[list[Order], list[tuple[Order, str]]]:
-    """Uniform per-agent trading rules for sim mode.
+    """Uniform per-agent trading rules.
 
     Rules, in order per order:
-      1. price collar — reject limit prices > PRICE_COLLAR_PCT from mid
+      1. price collar — reject priced orders > PRICE_COLLAR_PCT from mid
       2. drawdown kill switch — latches agent.risk_halted; halted agents
          may only reduce their position
       3. CLOSE session phase — opening size is halved (uses session_phase)
@@ -244,7 +234,7 @@ def enforce_trading_rules(
     projected = agent.position  # folds in orders accepted earlier in this batch
 
     for order in orders:
-        if order.order_type == OrderType.LIMIT and (
+        if order.order_type in PRICED_ORDER_TYPES and (
             not math.isfinite(order.price) or abs(order.price - mid) > collar
         ):
             rejected.append((order, "price_collar"))

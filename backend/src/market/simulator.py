@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 from dataclasses import replace
+from itertools import islice
 import math
 import random
 from collections import deque
@@ -11,9 +12,22 @@ from .order_book import OrderBook
 from .order import RESTING_ORDER_TYPES, Order, OrderSide, OrderType, OrderStatus
 from .trade import Trade
 from .oracle import MeanRevertingOracle, OracleConfig
-from .latency_model import LatencyModel, LatencyConfig, LatencyMode
+from .latency_model import LatencyModel, LatencyConfig
 from .scenario import ScenarioConfig, apply_scenario_agent_counts, get_scenario_config
-from ..agents.base_agent import BaseAgent
+from ..agents import (
+    BaseAgent,
+    HFTAgent,
+    InformedAgent,
+    InstitutionalAgent,
+    LiquidityTraderAgent,
+    MarketMakerAgent,
+    MeanReversionAgent,
+    MomentumAgent,
+    NoiseAgent,
+    RetailAgent,
+    SentimentAgent,
+    SpoofingAgent,
+)
 from ..agents.risk import enforce_trading_rules
 from ..utils.logger import get_logger
 
@@ -26,6 +40,9 @@ LIQUIDITY_SHOCK_RECOVERY_UPDATES = 20.0
 LIQUIDITY_SHOCK_PRIMARY_WITHDRAWAL = 0.65
 LIQUIDITY_SHOCK_SECONDARY_WITHDRAWAL = 0.35
 LIQUIDITY_SHOCK_SWEEP_FRACTION = 0.40
+TICK = 0.01
+# Venue-side pseudo-participants. Their flow drives scenarios but is not traced as agent activity.
+SYSTEM_AGENT_IDS = frozenset({"SEED", "REFERENCE_FLOW", "SCENARIO_FLOW", "LIQUIDITY_SHOCK_FLOW"})
 
 
 class MarketSimulator:
@@ -53,7 +70,7 @@ class MarketSimulator:
         venue: str = "NASDAQ",
         preset: str = "custom",
     ) -> None:
-        self.agents = sorted(agents, key=lambda agent: agent.latency_seconds)
+        self.agents = list(agents)
         self._agents_by_id: Dict[str, BaseAgent] = {}
         self._index_agents()
         self.order_book = OrderBook()
@@ -80,7 +97,7 @@ class MarketSimulator:
         self.step_count: int = 0
         self.running: bool = False
         self._price_history: deque[float] = deque(maxlen=1_000)
-        self._state_history: List[Dict] = []
+        self._samples: List[Dict[str, Any]] = []  # one compact row per step, for reports
         self._all_trades: List[Trade] = []
         self._recent_volume_history: deque[tuple[float, int]] = deque(maxlen=2_000)
         self._submitted_order_count: int = 0
@@ -130,7 +147,7 @@ class MarketSimulator:
 
         self._price_history.clear()
         self._price_history.append(self.initial_price)
-        self._state_history.clear()
+        self._samples.clear()
         self._all_trades.clear()
         self._recent_volume_history.clear()
         self._submitted_order_count = 0
@@ -169,30 +186,31 @@ class MarketSimulator:
 
         return self.get_market_state()
 
-    def _seed_order_book(self, anchor: Optional[float] = None) -> None:
+    def _seed_order_book(self) -> None:
         """Place initial resting orders to bootstrap the book."""
-        reference_price = self.initial_price if anchor is None else anchor
-        tick_spacing = 0.01
-        level_size = max(1, round(500 * self.scenario.seed_depth_multiplier))
-        spread_multiplier = self.scenario.spread_multiplier
-        for i in range(10):
-            offset = (i + 1) * tick_spacing * spread_multiplier
-            bid = Order(
-                agent_id="SEED",
-                side=OrderSide.BUY,
-                order_type=OrderType.LIMIT,
-                price=round(reference_price - offset, 2),
-                quantity=level_size,
-            )
-            ask = Order(
-                agent_id="SEED",
-                side=OrderSide.SELL,
-                order_type=OrderType.LIMIT,
-                price=round(reference_price + offset, 2),
-                quantity=level_size,
-            )
-            self.order_book.add_order(bid)
-            self.order_book.add_order(ask)
+        self._place_seed_ladder(
+            self.initial_price,
+            levels=10,
+            quantity=max(1, round(500 * self.scenario.seed_depth_multiplier)),
+            spread_multiplier=self.scenario.spread_multiplier,
+        )
+
+    def _place_seed_ladder(
+        self, anchor: float, *, levels: int, quantity: int, spread_multiplier: float
+    ) -> None:
+        """Rest symmetric venue liquidity around `anchor`, one tick-multiple per level."""
+        for i in range(1, levels + 1):
+            offset = i * TICK * spread_multiplier
+            for side, price in ((OrderSide.BUY, anchor - offset), (OrderSide.SELL, anchor + offset)):
+                self.order_book.add_order(
+                    Order(
+                        agent_id="SEED",
+                        side=side,
+                        order_type=OrderType.LIMIT,
+                        price=round(price, 2),
+                        quantity=quantity,
+                    )
+                )
 
     def _ensure_liquidity_floor(self) -> None:
         """Replenish thin books so the dashboard demo remains two-sided and responsive."""
@@ -202,22 +220,14 @@ class MarketSimulator:
         shock_phase = "ACTIVE"
         if self.scenario.name == "liquidity_shock":
             shock_phase, _ = self._liquidity_shock_state()
-            floor_multiplier, spread_multiplier, refill_levels = (
-                self._liquidity_provision_profile()
-            )
+            floor_multiplier, spread_multiplier, refill_levels = self._liquidity_provision_profile()
         total_depth = self.order_book.get_total_depth(levels=10)
         depth_floor = max(100, int(600 * floor_multiplier))
-        if self.scenario.name == "liquidity_shock" and shock_phase != "WARMUP":
-            depth_floor = max(
-                depth_floor,
-                int(self._liquidity_shock_baseline_depth * floor_multiplier),
-            )
         max_healthy_spread = 0.04 * spread_multiplier
         if self.scenario.name == "liquidity_shock" and shock_phase != "WARMUP":
-            max_healthy_spread = max(
-                0.01,
-                self._liquidity_shock_baseline_spread * spread_multiplier,
-            )
+            # After the shock, "healthy" is measured against the pre-shock book.
+            depth_floor = max(depth_floor, int(self._liquidity_shock_baseline_depth * floor_multiplier))
+            max_healthy_spread = max(TICK, self._liquidity_shock_baseline_spread * spread_multiplier)
         if (
             self.order_book.best_bid is not None
             and self.order_book.best_ask is not None
@@ -226,36 +236,14 @@ class MarketSimulator:
         ):
             return
 
-        anchor = round(
-            self.current_price or self.order_book.mid_price or self.initial_price,
-            2,
+        anchor = round(self.current_price or self.order_book.mid_price or self.initial_price, 2)
+        quantity = max(25, int(150 * floor_multiplier))
+        if shock_phase == "RECOVERY":
+            depth_deficit = max(0, self._liquidity_shock_baseline_depth - total_depth)
+            quantity = max(quantity, int(depth_deficit * 0.08))
+        self._place_seed_ladder(
+            anchor, levels=refill_levels, quantity=quantity, spread_multiplier=spread_multiplier
         )
-        tick_spacing = 0.01
-        for i in range(refill_levels):
-            offset = (i + 1) * tick_spacing * spread_multiplier
-            quantity = max(25, int(150 * floor_multiplier))
-            if shock_phase == "RECOVERY":
-                depth_deficit = max(
-                    0,
-                    self._liquidity_shock_baseline_depth - total_depth,
-                )
-                quantity = max(quantity, int(depth_deficit * 0.08))
-            bid = Order(
-                agent_id="SEED",
-                side=OrderSide.BUY,
-                order_type=OrderType.LIMIT,
-                price=round(anchor - offset, 2),
-                quantity=quantity,
-            )
-            ask = Order(
-                agent_id="SEED",
-                side=OrderSide.SELL,
-                order_type=OrderType.LIMIT,
-                price=round(anchor + offset, 2),
-                quantity=quantity,
-            )
-            self.order_book.add_order(bid)
-            self.order_book.add_order(ask)
 
     def _apply_scenario_driver(self) -> bool:
         """Apply explicit exogenous flow for scenarios that promise a market shock."""
@@ -383,7 +371,13 @@ class MarketSimulator:
         return True
 
     def _apply_reference_flow(self) -> bool:
-        """Move the synthetic book toward its latent value through normal matching."""
+        """Arbitrage the book to publicly known value, as news traders would.
+
+        Every quote mispriced against the public value is taken in one sweep, so
+        public information moves the price at once instead of dragging it level by
+        level. The public value lags the latent one, which is the window informed
+        agents trade in.
+        """
         if (
             not self.oracle.enabled
             or self._session_profile()[0] in {"PREOPEN", "SQUAREOFF"}
@@ -395,25 +389,31 @@ class MarketSimulator:
         if mid is None or spread is None:
             return False
 
-        gap = self.oracle.current_value - mid
-        if abs(gap) < 0.01 + spread / 2:
+        target = self.oracle.public_value
+        gap = target - mid
+        if abs(gap) < TICK + spread / 2:
             return False
 
         side = OrderSide.BUY if gap > 0 else OrderSide.SELL
-        depth = self.order_book.get_depth(levels=1)
+        limit = round(target - TICK if side == OrderSide.BUY else target + TICK, 2)
+        depth = self.order_book.get_depth(levels=10)
         levels = depth["asks"] if side == OrderSide.BUY else depth["bids"]
-        if not levels:
+        mispriced = sum(
+            int(level["size"])
+            for level in levels
+            if (level["price"] <= limit if side == OrderSide.BUY else level["price"] >= limit)
+        )
+        if mispriced <= 0:
             return False
 
-        touch = levels[0]
         before = len(self._all_trades)
         self._process_order(
             Order(
                 agent_id="REFERENCE_FLOW",
                 side=side,
                 order_type=OrderType.IOC,
-                price=float(touch["price"]),
-                quantity=max(1, int(touch["size"])),
+                price=limit,
+                quantity=mispriced,
             )
         )
         return len(self._all_trades) > before
@@ -447,12 +447,7 @@ class MarketSimulator:
         agent = self.get_agent(agent_id)
         if agent is not None:
             return agent.agent_type
-        if agent_id in {
-            "SEED",
-            "EXTERNAL_DEPTH",
-            "REFERENCE_FLOW",
-            "LIQUIDITY_SHOCK_FLOW",
-        }:
+        if agent_id in SYSTEM_AGENT_IDS:
             return agent_id
         return "External"
 
@@ -531,11 +526,7 @@ class MarketSimulator:
         self._submitted_order_count += 1
         self._submitted_notional += abs(order.price * order.quantity)
         self._record_recent_order(order, status="submitted")
-        trace_order_events = order.agent_id not in {
-            "REFERENCE_FLOW",
-            "SCENARIO_FLOW",
-            "LIQUIDITY_SHOCK_FLOW",
-        }
+        trace_order_events = order.agent_id not in SYSTEM_AGENT_IDS
         if trace_order_events:
             self._record_event(
                 "order_submission",
@@ -732,19 +723,19 @@ class MarketSimulator:
         price = self.current_price
         still_resting: List[Order] = []
         for stop in self._resting_stops:
-            breached = (
-                price >= stop.price if stop.side == OrderSide.BUY else price <= stop.price
-            )
             owner = self.get_agent(stop.agent_id)
-            if not breached or owner is None:
-                still_resting.append(stop)
+            if owner is None:
                 continue
-
-            # A stop protects a position; it must never open a new one.
+            # A stop protects a position; it must never open a new one. Once the
+            # position it guards is flat or flipped, the stop dies with it.
             exit_sign = -1 if stop.side == OrderSide.BUY else 1
             quantity = min(stop.quantity, max(0, owner.position * exit_sign))
             if quantity < 1:
-                continue  # position already gone — the stop dies with it
+                continue
+            breached = price >= stop.price if stop.side == OrderSide.BUY else price <= stop.price
+            if not breached:
+                still_resting.append(stop)
+                continue
 
             self._record_event(
                 "stop_triggered",
@@ -1012,19 +1003,6 @@ class MarketSimulator:
             return "CLOSE", 1.35
         return "CONTINUOUS", 0.85
 
-    def run(self, steps: Optional[int] = None) -> Dict:
-        """Run the simulation synchronously until the requested horizon."""
-        self.reset()
-        self.running = True
-        target_time = float(steps if steps is not None else self.duration_seconds)
-
-        logger.info(f"Starting kernel event loop until T={target_time:.2f}s")
-        while self.running and self.current_time < target_time:
-            self.step()
-
-        self.running = False
-        return self.get_results()
-
     def step(self) -> Dict:
         """Advance the simulation by one second of simulated time."""
         if not self.running:
@@ -1061,9 +1039,27 @@ class MarketSimulator:
             self._settle_close_positions()
 
         state = self.get_market_state()
-
-        self._state_history.append(state)
+        self._samples.append(self._sample(state))
         return state
+
+    @staticmethod
+    def _sample(state: Dict[str, Any]) -> Dict[str, Any]:
+        """The per-step fields reports and validation metrics need — not the whole snapshot."""
+        liquidity = state["scenario"].get("liquidity", {})
+        return {
+            "timestamp": state["current_time"],
+            "price": state["current_price"],
+            "spread": state["spread"],
+            "depth": state["total_depth"],
+            "imbalance": state["order_book_imbalance"],
+            "signed_volume": state["recent_signed_volume"],
+            "volatility": state["volatility"],
+            "trade_rate_per_second": state["trade_rate_per_second"],
+            "scenario_phase": state["scenario"]["phase"],
+            "baseline_depth": liquidity.get("baseline_depth"),
+            "depth_depletion": liquidity.get("depth_depletion"),
+            "spread_ratio": liquidity.get("spread_ratio"),
+        }
 
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
         """Return the simulator agent with the requested ID, if present."""
@@ -1124,7 +1120,6 @@ class MarketSimulator:
 
         state = {
             "venue": self.venue,
-            "market": self.venue,
             "current_time": self.current_time,
             "mid_price": mid_price,
             "best_bid": None if preopen else self.order_book.best_bid,
@@ -1152,7 +1147,7 @@ class MarketSimulator:
                 agent.agent_id: {
                     "type": agent.agent_type,
                     "position": agent.position,
-                    "inventory_ratio": self._inventory_ratio(agent),
+                    "inventory_ratio": agent.risk_profile.inventory_ratio(agent.position),
                 }
                 for agent in self.agents
             }
@@ -1165,34 +1160,13 @@ class MarketSimulator:
             state["oracle"] = self.oracle.get_mispricing(self.current_price)
         return state
 
-    def get_results(self) -> Dict:
-        """Return final simulation results."""
-        agent_metrics = {}
-        for agent in self.agents:
-            agent_metrics[agent.agent_id] = agent.get_metrics(self.current_price)
-
-        return {
-            "final_price": self.current_price,
-            "initial_price": self.initial_price,
-            "total_trades": len(self._all_trades),
-            "total_steps": self.step_count,
-            "price_history": list(self._price_history),
-            "agent_metrics": agent_metrics,
-        }
-
     def get_recent_events(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Return recent exchange events newest first."""
-        limit = max(0, limit)
-        if limit == 0:
-            return []
-        return list(reversed(self._event_log))[:limit]
+        return list(islice(reversed(self._event_log), max(0, limit)))
 
     def get_recent_orders(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Return recent order status snapshots newest first."""
-        limit = max(0, limit)
-        if limit == 0:
-            return []
-        return list(reversed(self._recent_orders))[:limit]
+        return list(islice(reversed(self._recent_orders), max(0, limit)))
 
     def get_order_flow_summary(self, window_seconds: float = 10.0) -> Dict[str, Any]:
         """Summarize recent aggressor flow and run-level execution counters."""
@@ -1223,24 +1197,6 @@ class MarketSimulator:
 
     def get_export_snapshot(self, warning_timeline: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Return a serializable research snapshot for validation and demos."""
-        price_path = [
-            {
-                "timestamp": state.get("current_time", 0.0),
-                "price": state.get("current_price", 0.0),
-                "spread": state.get("spread", 0.0),
-                "depth": state.get("total_depth", 0),
-                "imbalance": state.get("order_book_imbalance", 0.0),
-                "signed_volume": state.get("recent_signed_volume", 0.0),
-                "volatility": state.get("volatility", 0.0),
-                "scenario_phase": state.get("scenario", {}).get("phase"),
-                "baseline_depth": state.get("scenario", {}).get("liquidity", {}).get("baseline_depth"),
-                "depth_depletion": state.get("scenario", {}).get("liquidity", {}).get("depth_depletion"),
-                "spread_ratio": state.get("scenario", {}).get("liquidity", {}).get("spread_ratio"),
-            }
-            for state in self._state_history
-        ]
-        timeline = list(warning_timeline or [])
-
         return {
             "run_config": {
                 "preset": self.preset,
@@ -1252,11 +1208,11 @@ class MarketSimulator:
                 "speed": self.speed_multiplier,
                 "venue": self.venue,
                 "agent_count": len(self.agents),
-                "latency_mode": self.latency_model.describe()["mode"],
+                "latency_mode": self.latency_model.config.mode.name,
                 "informed_access": self.informed_oracle_access,
                 "steps": self.step_count,
             },
-            "price_path": price_path,
+            "price_path": list(self._samples),
             "order_flow": {
                 "submitted_orders": self._submitted_order_count,
                 "cancel_requests": self._cancel_request_count,
@@ -1279,82 +1235,57 @@ class MarketSimulator:
                 agent.agent_id: agent.get_metrics(self.current_price)
                 for agent in self.agents
             },
-            "warning_timeline": timeline,
+            "warning_timeline": list(warning_timeline or []),
             "validation_metrics": self.get_microstructure_metrics(),
         }
 
     def get_microstructure_metrics(self) -> Dict[str, float]:
-        states = self._state_history or [self.get_market_state()]
+        samples = self._samples or [self._sample(self.get_market_state(include_agents=False))]
 
-        def avg(key: str) -> float:
-            values = [float(state.get(key, 0.0) or 0.0) for state in states]
+        def mean(values: List[float]) -> float:
             return round(sum(values) / max(1, len(values)), 6)
 
-        spread_values = [float(state.get("spread", 0.0) or 0.0) for state in states]
-        impact_samples = []
-        prices = [float(state.get("current_price", 0.0) or 0.0) for state in states]
-        for before, after in zip(prices, prices[1:]):
-            if before > 0:
-                impact_samples.append(abs(after - before) / before * 10_000)
+        def column(key: str) -> List[float]:
+            return [float(sample[key] or 0.0) for sample in samples]
 
+        prices = column("price")
+        impact_bps = [
+            abs(after - before) / before * 10_000
+            for before, after in zip(prices, prices[1:])
+            if before > 0
+        ]
         return {
-            "spread_mean": avg("spread"),
-            "spread_max": round(max(spread_values) if spread_values else 0.0, 6),
-            "trade_rate_per_second_mean": avg("trade_rate_per_second"),
-            "cancel_to_trade_ratio": round(
-                self._cancel_request_count / max(1, len(self._all_trades)),
-                6,
-            ),
-            "depth_imbalance_mean": avg("order_book_imbalance"),
-            "signed_volume_abs_mean": round(
-                sum(abs(float(state.get("recent_signed_volume", 0.0) or 0.0)) for state in states)
-                / max(1, len(states)),
-                6,
-            ),
-            "volatility_mean": avg("volatility"),
-            "impact_bps_mean": round(
-                sum(impact_samples) / max(1, len(impact_samples)),
-                6,
-            ),
-            "slippage_bps_mean": round(
-                sum(self._slippage_bps_samples) / max(1, len(self._slippage_bps_samples)),
-                6,
-            ),
+            "spread_mean": mean(column("spread")),
+            "spread_max": round(max(column("spread")), 6),
+            "trade_rate_per_second_mean": mean(column("trade_rate_per_second")),
+            "cancel_to_trade_ratio": round(self._cancel_request_count / max(1, len(self._all_trades)), 6),
+            "depth_imbalance_mean": mean(column("imbalance")),
+            "signed_volume_abs_mean": mean([abs(value) for value in column("signed_volume")]),
+            "volatility_mean": mean(column("volatility")),
+            "impact_bps_mean": mean(impact_bps),
+            "slippage_bps_mean": mean(self._slippage_bps_samples),
         }
 
     def _compute_volatility(self) -> float:
-        """Compute annualized volatility from recent log returns."""
-        if len(self._price_history) < 20:
+        """Annualized volatility of the last 20 recorded price samples.
+
+        ponytail: samples mix trade prints and per-step mids, and the 252*390
+        factor treats them as one-minute bars. The number is a consistent
+        stress gauge the agents are tuned against, not a calibrated estimate.
+        """
+        window = list(self._price_history)[-20:]
+        if len(window) < 20:
             return 0.0
-
-        window_size = 20
-        window = [
-            self._price_history[-window_size + i]
-            for i in range(window_size)
+        log_returns = [
+            math.log(after / before)
+            for before, after in zip(window, window[1:])
+            if before > 0 and after > 0
         ]
-        log_returns = []
-        for i in range(1, len(window)):
-            if window[i] > 0 and window[i - 1] > 0:
-                log_returns.append(math.log(window[i] / window[i - 1]))
-
         if len(log_returns) < 2:
             return 0.0
-
-        mean_ret = sum(log_returns) / len(log_returns)
-        variance = sum((ret - mean_ret) ** 2 for ret in log_returns) / (len(log_returns) - 1)
-        std = math.sqrt(variance) if variance > 0 else 0.0
-
-        return std * math.sqrt(252 * 390) * self.scenario.volatility_multiplier
-
-    def _inventory_ratio(self, agent: BaseAgent) -> float:
-        limit = (
-            getattr(agent, "max_inventory", None)
-            or getattr(agent, "max_position", None)
-            or getattr(agent, "position_limit", None)
-        )
-        if not limit:
-            return 0.0
-        return abs(agent.position) / float(limit)
+        mean_return = sum(log_returns) / len(log_returns)
+        variance = sum((r - mean_return) ** 2 for r in log_returns) / (len(log_returns) - 1)
+        return math.sqrt(variance) * math.sqrt(252 * 390)
 
     def stop(self) -> None:
         """Stop the simulation loop."""
@@ -1363,6 +1294,20 @@ class MarketSimulator:
 
 
 # ── Sandbox Presets ─────────────────────────────────────────────────────────
+
+AGENT_CLASSES = {
+    "MarketMaker": MarketMakerAgent,
+    "HFT": HFTAgent,
+    "Institutional": InstitutionalAgent,
+    "Retail": RetailAgent,
+    "Informed": InformedAgent,
+    "Noise": NoiseAgent,
+    "Momentum": MomentumAgent,
+    "MeanReversion": MeanReversionAgent,
+    "Spoofing": SpoofingAgent,
+    "Sentiment": SentimentAgent,
+    "LiquidityTrader": LiquidityTraderAgent,
+}
 
 def get_sandbox_presets() -> Dict:
     """Return available sandbox configuration presets."""
@@ -1403,25 +1348,6 @@ def create_sandbox_agents(
     seed: Optional[int] = None,
 ) -> List:
     """Create agents from a preset name or custom dict."""
-    from ..agents.market_maker import MarketMakerAgent
-    from ..agents.hft_agent import HFTAgent
-    from ..agents.institutional import InstitutionalAgent
-    from ..agents.retail import RetailAgent
-    from ..agents.informed import InformedAgent
-    from ..agents.noise import NoiseAgent
-    from ..agents.momentum import MomentumAgent
-    from ..agents.mean_reversion import MeanReversionAgent
-    from ..agents.spoofing import SpoofingAgent
-    from ..agents.sentiment import SentimentAgent
-    from ..agents.liquidity_trader import LiquidityTraderAgent
-
-    AGENT_MAP = {
-        "MarketMaker": MarketMakerAgent, "HFT": HFTAgent, "Institutional": InstitutionalAgent,
-        "Retail": RetailAgent, "Informed": InformedAgent, "Noise": NoiseAgent,
-        "Momentum": MomentumAgent, "MeanReversion": MeanReversionAgent,
-        "Spoofing": SpoofingAgent, "Sentiment": SentimentAgent, "LiquidityTrader": LiquidityTraderAgent,
-    }
-
     if custom_agents and any(v > 0 for v in custom_agents.values()):
         agent_counts = dict(custom_agents)
     else:
@@ -1433,17 +1359,13 @@ def create_sandbox_agents(
     rng = random.Random(seed)
     agents = []
     for agent_type, count in agent_counts.items():
-        cls = AGENT_MAP.get(agent_type)
+        cls = AGENT_CLASSES.get(agent_type)
         if cls and count > 0:
             for i in range(int(count)):
                 agent = cls(f"{agent_type}_{i}")
                 agent.set_random_seed(rng.getrandbits(64))
                 agent.reset()
 
-                agent.latency_seconds = max(
-                    0.000001,
-                    agent.latency_seconds * rng.uniform(0.85, 1.15),
-                )
                 if hasattr(agent, "wakeup_interval"):
                     agent.wakeup_interval = max(
                         0.01,

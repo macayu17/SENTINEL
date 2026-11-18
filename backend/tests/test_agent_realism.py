@@ -65,16 +65,16 @@ def test_market_maker_widens_quotes_in_high_volatility():
     assert stress_width > calm_width
 
 
-def test_market_maker_joins_the_touch_in_a_calm_market():
+def test_market_maker_quotes_a_ladder_from_the_touch_in_a_calm_market():
     agent = MarketMakerAgent("MM_TOUCH", base_spread=0.001, quote_size=200)
 
     orders = agent.decide_action(_state(mid_price=100.0, spread=0.02))
-    prices = {order.side: order.price for order in orders}
+    bids = sorted((o.price for o in orders if o.side == OrderSide.BUY), reverse=True)
+    asks = sorted(o.price for o in orders if o.side == OrderSide.SELL)
 
-    assert prices == {
-        OrderSide.BUY: 99.99,
-        OrderSide.SELL: 100.01,
-    }
+    assert bids == [99.99, 99.97, 99.95, 99.93]  # joins the touch, rungs 2 ticks apart
+    assert asks == [100.01, 100.03, 100.05, 100.07]
+    assert all(o.order_type == OrderType.POST_ONLY for o in orders)
 
 
 def test_market_maker_near_inventory_cap_only_quotes_flattening_side():
@@ -116,7 +116,7 @@ def test_market_maker_reduces_passive_bid_when_bid_queue_is_crowded():
 def test_market_maker_keeps_fresh_quotes_and_cancels_stale_quotes():
     agent = MarketMakerAgent("MM_STALE", base_spread=0.001, quote_size=200)
     first_orders = agent.decide_action(_state())
-    assert len(first_orders) == 2
+    assert len(first_orders) == 2 * agent.quote_levels
 
     agent.active_orders = {order.order_id: order for order in first_orders}
 
@@ -128,40 +128,64 @@ def test_market_maker_keeps_fresh_quotes_and_cancels_stale_quotes():
     assert set(cancellations) == {order.order_id for order in first_orders}
 
 
-def test_hft_imbalance_scalp_does_not_wait_for_price_history_warmup():
-    agent = HFTAgent("HFT_IMB")
+def _book(bid, bid_size, ask, ask_size, **overrides):
+    return _state(
+        mid_price=round((bid + ask) / 2, 4),
+        current_price=round((bid + ask) / 2, 4),
+        best_bid=bid,
+        best_ask=ask,
+        spread=round(ask - bid, 2),
+        bid_levels=[{"price": bid, "size": bid_size}],
+        ask_levels=[{"price": ask, "size": ask_size}],
+        **overrides,
+    )
 
-    orders = agent.decide_action(_state(order_book_imbalance=0.65, spread=0.04))
 
-    assert orders
+def test_hft_quotes_the_favoured_side_and_improves_a_wide_spread():
+    agent = HFTAgent("HFT_PASSIVE")
+
+    orders = agent.decide_action(_book(99.99, 1000, 100.01, 200))  # thin ask: mid leans up
+
+    assert len(orders) == 1
     assert orders[0].side == OrderSide.BUY
-    assert orders[0].order_type == OrderType.LIMIT
+    assert orders[0].order_type == OrderType.POST_ONLY
+    assert orders[0].price == 100.0  # one tick inside the two-tick spread
 
 
-def test_hft_keeps_fresh_scalp_order_until_reprice():
+def test_hft_never_crosses_the_spread_to_open_a_position():
+    agent = HFTAgent("HFT_PASSIVE_ONLY")
+
+    assert agent.decide_action(_book(99.99, 500, 100.0, 450)) == []  # balanced: no edge
+    orders = agent.decide_action(_book(99.99, 2_000, 100.0, 100))  # ask queue about to clear
+
+    assert orders[0].side == OrderSide.BUY
+    assert orders[0].order_type == OrderType.POST_ONLY
+    assert orders[0].price == 99.99  # joins a one-tick touch, never lifts the offer
+
+
+def test_hft_works_a_passive_exit_then_bails_at_the_holding_limit():
+    agent = HFTAgent("HFT_EXIT", max_hold_seconds=10.0)
+    agent.position, agent.avg_entry_price = 100, 100.0
+
+    exit_quote = agent.decide_action(_book(99.99, 500, 100.01, 500, current_time=0.0))[0]
+    assert (exit_quote.side, exit_quote.order_type, exit_quote.price) == (OrderSide.SELL, OrderType.POST_ONLY, 100.0)
+    agent.active_orders = {exit_quote.order_id: exit_quote}
+
+    late = _book(99.99, 500, 100.01, 500, current_time=10.0)
+    assert agent.cancel_for_state(late) == [exit_quote.order_id]
+    bail = agent.decide_action(late)[0]
+    assert (bail.side, bail.order_type, bail.quantity) == (OrderSide.SELL, OrderType.MARKET, 100)
+
+
+def test_hft_keeps_a_backed_quote_until_the_touch_moves():
     agent = HFTAgent("HFT_KEEP")
-    state = _state(order_book_imbalance=0.65, spread=0.04)
-    first_orders = agent.decide_action(state)
-    assert len(first_orders) == 1
-
-    agent.active_orders = {first_orders[0].order_id: first_orders[0]}
+    state = _book(99.99, 1000, 100.01, 200)
+    quote = agent.decide_action(state)[0]
+    agent.active_orders = {quote.order_id: quote}
 
     assert agent.cancel_for_state(state) == []
     assert agent.decide_action(state) == []
-
-    cancellations = agent.cancel_for_state(_state(mid_price=101.0, current_price=101.0, order_book_imbalance=0.65, spread=0.04))
-
-    assert cancellations == [first_orders[0].order_id]
-
-
-def test_hft_never_submits_conflicting_sides_in_one_wakeup():
-    agent = HFTAgent("HFT_CONFLICT")
-    for _ in range(19):
-        agent.decide_action(_state(mid_price=100.0, current_price=100.0))
-
-    orders = agent.decide_action(_state(mid_price=101.0, current_price=101.0))
-
-    assert len({order.side for order in orders}) <= 1
+    assert agent.cancel_for_state(_book(100.99, 1000, 101.01, 200)) == [quote.order_id]
 
 
 def test_institutional_child_order_respects_participation_of_displayed_depth():

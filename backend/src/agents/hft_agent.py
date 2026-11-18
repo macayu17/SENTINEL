@@ -1,16 +1,22 @@
-"""HFT agent — high-frequency mean-reversion and short-term momentum."""
+"""HFT agent — sub-second microstructure scalper that stays close to flat."""
 
-from typing import List, Dict
-from collections import deque
+from typing import List, Dict, Optional
 from .base_agent import BaseAgent
-from .risk import AgentRiskProfile, near_touch_price, risk_limited_order
+from .risk import TICK, AgentRiskProfile
 from ..market.order import Order, OrderSide, OrderType
 
 
 class HFTAgent(BaseAgent):
     """
-    Uses z-score of recent prices for mean-reversion signals
-    and short-term momentum for trend-following.
+    Passive market maker that leans on the touch imbalance. When one side of
+    the book is much thinner, the microprice sits near it and the next mid move
+    is predictable, so the agent quotes only the favoured side (improving a
+    wide spread by a tick, joining a tight one) and earns the maker rebate.
+
+    It never crosses to enter: in this market the move after a queue clears is
+    usually one tick, which a taker fee and half-spread eat. Positions are held
+    for seconds with a passive exit at the far touch; it crosses only to cut a
+    loss (tick stop), a clearly reversed signal, or a stale position.
     """
 
     def __init__(
@@ -18,160 +24,107 @@ class HFTAgent(BaseAgent):
         agent_id: str,
         initial_capital: float = 5_000_000.0,
         position_limit: int = 1000,
-        lookback: int = 100,
-        z_threshold: float = 2.0,
-        momentum_threshold: float = 0.001,
+        signal_threshold: float = 0.5,
+        reversal_threshold: float = 0.95,
+        stop_ticks: int = 5,
+        max_hold_seconds: float = 90.0,
     ) -> None:
-        super().__init__(agent_id, "HFT", initial_capital, latency_seconds=0.0001)
+        super().__init__(agent_id, "HFT", initial_capital)
         self.wakeup_interval = 0.2
         self.position_limit = position_limit
-        self.lookback = lookback
-        self.z_threshold = z_threshold
-        self.momentum_threshold = momentum_threshold
-        self._price_history: deque = deque(maxlen=lookback)
+        self.signal_threshold = signal_threshold
+        self.reversal_threshold = reversal_threshold
+        self.stop_ticks = stop_ticks
+        self.max_hold_seconds = max_hold_seconds
+        self._entry_time: Optional[float] = None
         self.risk_profile = AgentRiskProfile(
             max_inventory=position_limit,
             base_order_size=120,
             min_order_size=10,
             participation_rate=0.04,
-            max_active_orders=3,
+            max_active_orders=2,
             stale_ticks=1,
         )
 
-    def decide_action(self, market_state: Dict) -> List[Order]:
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
-        imbalance = market_state.get("order_book_imbalance", 0.0)
-        spread = market_state.get("spread", 0.05)
-        volatility = float(market_state.get("volatility", 0.0) or 0.0)
-        self._price_history.append(price)
-        orders: List[Order] = []
+    def _signal(self, market_state: Dict) -> float:
+        """Microprice offset from mid in half-spreads: +1 means it sits on the ask."""
+        half = max(TICK / 2, float(market_state.get("spread") or TICK) / 2)
+        return (self._microprice(market_state) - self._mid(market_state)) / half
 
-        if self.active_orders and self._has_fresh_active_order(market_state):
-            return orders
+    @staticmethod
+    def _passive_price(market_state: Dict, side: OrderSide) -> float:
+        """Join a one-tick touch, or improve a wider one by a tick (never crossing)."""
+        best_bid, best_ask = market_state.get("best_bid"), market_state.get("best_ask")
+        mid = BaseAgent._mid(market_state)
+        if best_bid is None or best_ask is None:
+            best_bid, best_ask = mid - TICK, mid + TICK
+        improve = TICK if best_ask - best_bid > TICK + 1e-9 else 0.0
+        return round(best_bid + improve if side == OrderSide.BUY else best_ask - improve, 2)
 
-        imbalance_order = self._imbalance_scalp_order(
-            price=price,
-            spread=spread,
-            imbalance=imbalance,
-            market_state=market_state,
-            volatility=volatility,
+    def _must_exit(self, market_state: Dict, signal: float) -> bool:
+        if self.position == 0:
+            return False
+        sign = 1 if self.position > 0 else -1
+        pnl_ticks = sign * (self._mid(market_state) - self.avg_entry_price) / TICK
+        held = float(market_state.get("current_time", 0.0)) - (self._entry_time or 0.0)
+        return (
+            pnl_ticks <= -self.stop_ticks
+            or held >= self.max_hold_seconds
+            or sign * signal <= -self.reversal_threshold
         )
 
-        if len(self._price_history) < 20:
-            return [imbalance_order] if imbalance_order is not None else orders
+    def decide_action(self, market_state: Dict) -> List[Order]:
+        closing = self._close_out(market_state)
+        if closing is not None:
+            return closing
+        now = float(market_state.get("current_time", 0.0))
+        signal = self._signal(market_state)
 
-        # Z-score mean reversion
-        prices = list(self._price_history)
-        mean = sum(prices) / len(prices)
-        std = (sum((p - mean) ** 2 for p in prices) / len(prices)) ** 0.5
-
-        if std > 0:
-            z_score = (price - mean) / std
-        else:
-            z_score = 0.0
-
-        # Momentum (short-term return)
-        momentum = (price - prices[-5]) / prices[-5] if len(prices) >= 5 else 0.0
-
-        # Mean reversion signal
-        if z_score > self.z_threshold and self.position > -self.position_limit:
-            order = risk_limited_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                side=OrderSide.SELL,
-                order_type=OrderType.LIMIT,
-                price=round(price + 0.01, 2),
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                active_orders=self.active_orders,
-                aggression=min(1.6, abs(z_score) / self.z_threshold),
-            )
-            if order is not None:
-                orders.append(order)
-        elif z_score < -self.z_threshold and self.position < self.position_limit:
-            order = risk_limited_order(
-                self.risk_profile,
-                agent_id=self.agent_id,
-                side=OrderSide.BUY,
-                order_type=OrderType.LIMIT,
-                price=round(price - 0.01, 2),
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                active_orders=self.active_orders,
-                aggression=min(1.6, abs(z_score) / self.z_threshold),
-            )
-            if order is not None:
-                orders.append(order)
-
-        # Strong short-term momentum takes precedence over the slower z-score.
-        if abs(momentum) > self.momentum_threshold:
-            side = OrderSide.BUY if momentum > 0 else OrderSide.SELL
-            order_type = OrderType.MARKET if spread <= 0.03 and volatility < 0.04 else OrderType.LIMIT
-            order = risk_limited_order(
-                self.risk_profile,
+        if self.position != 0:
+            if self._entry_time is None:
+                self._entry_time = now
+            if self._must_exit(market_state, signal):
+                order = self._exit_order(market_state, self._mid(market_state), aggression=2.0)
+                return [order] if order is not None else []
+            if self.active_orders:
+                return []
+            side = OrderSide.SELL if self.position > 0 else OrderSide.BUY
+            return [Order(
                 agent_id=self.agent_id,
                 side=side,
-                order_type=order_type,
-                price=price if order_type == OrderType.MARKET else near_touch_price(price, side, spread),
-                position=self.position,
-                market_state=market_state,
-                volatility=volatility,
-                active_orders=self.active_orders,
-                aggression=min(1.5, abs(momentum) / self.momentum_threshold),
-            )
-            if order is not None:
-                orders = [order]
+                order_type=OrderType.POST_ONLY,
+                price=self._passive_price(market_state, side),
+                quantity=abs(self.position),
+            )]
 
-        # Use imbalance only when neither directional signal fired.
-        if not orders and imbalance_order is not None:
-            orders.append(imbalance_order)
-        return orders
-
-    def _imbalance_scalp_order(
-        self,
-        *,
-        price: float,
-        spread: float,
-        imbalance: float,
-        market_state: Dict,
-        volatility: float,
-    ) -> Order | None:
-        if spread < 0.02 or abs(imbalance) <= 0.2:
-            return None
-        quote_side = OrderSide.BUY if imbalance > 0 else OrderSide.SELL
-        quote_px = round(price - 0.01, 2) if quote_side == OrderSide.BUY else round(price + 0.01, 2)
-        return risk_limited_order(
-            self.risk_profile,
-            agent_id=self.agent_id,
-            side=quote_side,
-            order_type=OrderType.LIMIT,
-            price=quote_px,
-            position=self.position,
-            market_state=market_state,
-            volatility=volatility,
-            active_orders=self.active_orders,
-            aggression=0.3,
+        self._entry_time = None
+        if self.active_orders or abs(signal) < self.signal_threshold:
+            return []
+        side = OrderSide.BUY if signal > 0 else OrderSide.SELL
+        order = self._entry_order(
+            market_state, side, OrderType.POST_ONLY, self._passive_price(market_state, side), aggression=0.6
         )
+        return [order] if order is not None else []
+
+    def cancel_for_state(self, market_state: Dict) -> List[str]:
+        """Pull resting quotes once the touch moves away or the signal no longer backs them."""
+        if not self.active_orders:
+            return []
+        signal = self._signal(market_state)
+        if self.position == 0:
+            backed = all(
+                (signal if order.side == OrderSide.BUY else -signal) >= self.signal_threshold
+                for order in self.active_orders.values()
+            )
+        else:
+            backed = not self._must_exit(market_state, signal)
+        stale = self.risk_profile.should_reprice(
+            self.active_orders,
+            target_bid=self._passive_price(market_state, OrderSide.BUY),
+            target_ask=self._passive_price(market_state, OrderSide.SELL),
+        )
+        return self.cancel_all_active_orders() if stale or not backed else []
 
     def reset(self) -> None:
         super().reset()
-        self._price_history.clear()
-
-    def cancel_for_state(self, market_state: Dict) -> List[str]:
-        if not self.active_orders:
-            return []
-        if self._has_fresh_active_order(market_state):
-            return []
-        return self.cancel_all_active_orders()
-
-    def _has_fresh_active_order(self, market_state: Dict) -> bool:
-        price = market_state.get("mid_price") or market_state.get("current_price", 100.0)
-        target_bid = round(price - 0.01, 2)
-        target_ask = round(price + 0.01, 2)
-        return not self.risk_profile.should_reprice(
-            self.active_orders,
-            target_bid=target_bid,
-            target_ask=target_ask,
-        )
+        self._entry_time = None

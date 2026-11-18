@@ -1,11 +1,12 @@
 """Abstract base agent for the SENTINEL market simulator."""
 
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from typing import List, Dict, Optional
 import math
 import random
-from ..market.order import Order
+from ..market.order import Order, OrderSide, OrderType
 from ..market.trade import Trade
+from .risk import AgentRiskProfile, displayed_depth_for_side, risk_limited_exit_order, risk_limited_order
 
 # Generic NASDAQ maker-taker research assumptions, in USD per share.
 TAKER_FEE_PER_SHARE = 0.003
@@ -27,14 +28,12 @@ class BaseAgent(ABC):
         agent_id: str,
         agent_type: str,
         initial_capital: float = 100_000.0,
-        latency_seconds: float = 0.0,
     ) -> None:
         self.agent_id = agent_id
         self.agent_type = agent_type
         self.initial_capital = initial_capital
         self.capital = initial_capital
         self.cash = initial_capital
-        self.latency_seconds = latency_seconds
 
         # Position tracking
         self.position: int = 0  # net shares held (positive=long, negative=short)
@@ -44,6 +43,8 @@ class BaseAgent(ABC):
         self.num_trades: int = 0
         self.active_orders: Dict[str, Order] = {}
         self.risk_halted: bool = False  # latched by the sim rule gate on max drawdown
+        # Subclasses replace this; the default has no inventory limit.
+        self.risk_profile = AgentRiskProfile(max_inventory=0, base_order_size=1)
         self._random_seed: int | None = None
         self.rng = random.Random()
 
@@ -59,6 +60,71 @@ class BaseAgent(ABC):
         Must be implemented by every agent subclass.
         """
         ...
+
+    @staticmethod
+    def _mid(market_state: Dict) -> float:
+        return market_state.get("mid_price") or market_state.get("current_price", 100.0)
+
+    @classmethod
+    def _microprice(cls, market_state: Dict) -> float:
+        """Touch prices weighted by the opposite queue: leans toward the side about to deplete."""
+        bids, asks = market_state.get("bid_levels"), market_state.get("ask_levels")
+        if not bids or not asks:
+            return cls._mid(market_state)
+        bid, ask = bids[0], asks[0]
+        total = bid["size"] + ask["size"]
+        if total <= 0:
+            return cls._mid(market_state)
+        return (bid["price"] * ask["size"] + ask["price"] * bid["size"]) / total
+
+    def _close_out(self, market_state: Dict) -> Optional[List[Order]]:
+        """Speculative books open nothing once the close starts and work their risk down.
+
+        Returns None outside the closing phases, so callers fall through to normal logic.
+        """
+        if market_state.get("session_phase") not in ("CLOSE", "SQUAREOFF"):
+            return None
+        order = self._exit_order(market_state, self._mid(market_state), aggression=1.5)
+        return [order] if order is not None else []
+
+    def _entry_order(
+        self,
+        market_state: Dict,
+        side: OrderSide,
+        order_type: OrderType,
+        price: float,
+        *,
+        aggression: float = 1.0,
+        quantity_cap: Optional[int] = None,
+        depth_fn=displayed_depth_for_side,
+    ) -> Optional[Order]:
+        """A risk-profile-sized order that opens or adds to a position, or None if no size is left."""
+        return risk_limited_order(
+            self.risk_profile,
+            agent_id=self.agent_id,
+            side=side,
+            order_type=order_type,
+            price=price,
+            position=self.position,
+            market_state=market_state,
+            volatility=float(market_state.get("volatility", 0.0) or 0.0),
+            active_orders=self.active_orders,
+            aggression=aggression,
+            quantity_cap=quantity_cap,
+            depth_fn=depth_fn,
+        )
+
+    def _exit_order(self, market_state: Dict, price: float, *, aggression: float = 1.0) -> Optional[Order]:
+        """A reduce-only market order working the current position down, or None if flat."""
+        return risk_limited_exit_order(
+            self.risk_profile,
+            agent_id=self.agent_id,
+            position=self.position,
+            price=price,
+            market_state=market_state,
+            volatility=float(market_state.get("volatility", 0.0) or 0.0),
+            aggression=aggression,
+        )
 
     def consume_cancellations(self) -> List[str]:
         """Return any outstanding order IDs the simulator should cancel."""

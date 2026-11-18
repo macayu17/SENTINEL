@@ -1,11 +1,5 @@
-numpy
-pandas
-scikit-learn
-xgboost
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-websockets==12.0
-pydantic
-pytest==7.4.0
-python-dotenv==1.0.0
+# Root tooling (paper figures, synopsis). The API's own dependencies live in backend/requirements.txt.
+-r backend/requirements.txt
 matplotlib
+scipy
+python-docx

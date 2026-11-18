@@ -11,9 +11,6 @@ class LargeOrderDetector:
         self.min_order_size = min_order_size
         self.concentration_multiple = concentration_multiple
 
-    def reset(self) -> None:
-        """Retained for the simulator lifecycle contract; this detector is stateless."""
-
     def detect(self, market_state: Dict) -> Optional[Dict]:
         levels = []
         for key, side in (("bid_levels", "buy"), ("ask_levels", "sell")):

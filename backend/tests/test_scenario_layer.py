@@ -12,7 +12,6 @@ def _agent_population_profile(agents):
     return [
         (
             agent.agent_type,
-            agent.latency_seconds,
             getattr(agent, "wakeup_interval", 1.0),
             agent.risk_profile.max_inventory,
             agent.risk_profile.base_order_size,
