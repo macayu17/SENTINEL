@@ -15,7 +15,7 @@ export type {
 } from '@/types/api';
 
 class SentinelAPI {
-  private async request<T>(path: string, options?: RequestInit): Promise<T> {
+  async request<T>(path: string, options?: RequestInit): Promise<T> {
     const baseUrl = getApiBaseUrl();
     const url = `${baseUrl}${path}`;
     let response: Response;

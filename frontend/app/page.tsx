@@ -4,6 +4,7 @@ import CopyCommand from '@/components/landing/CopyCommand';
 import LiveCard from '@/components/landing/LiveCard';
 import ScenarioPicker from '@/components/landing/ScenarioPicker';
 import Ticker from '@/components/ui/Ticker';
+import { LocalNavLink } from '@/components/ui/AppHeader';
 
 const GITHUB = 'https://github.com/macayu17/sentinel';
 
@@ -49,6 +50,7 @@ export default function Home() {
           <nav aria-label="Primary" className="flex flex-wrap items-center gap-x-7 gap-y-2 font-medium">
             <a href="#how" className="no-underline">how it works</a>
             <Link href="/docs" className="no-underline">docs</Link>
+            <LocalNavLink className="no-underline" />
             <a href={GITHUB} className="no-underline">github</a>
             <Link href="/start" className="btn btn-pill btn-light min-h-[46px] px-[22px] font-bold">try it</Link>
           </nav>

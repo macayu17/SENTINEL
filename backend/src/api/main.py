@@ -367,3 +367,10 @@ async def _run_simulation_loop(sim: MarketSimulator) -> None:
         sim.running = False
         logger.info("Simulation loop ended")
 
+
+try:  # Optional routes that exist only on a developer machine.
+    from .local_routes import router as _local_router
+except ImportError:
+    pass
+else:
+    app.include_router(_local_router)

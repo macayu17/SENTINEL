@@ -1,6 +1,14 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+// Optional nav link that only a developer machine sets, as "Label|/path" in .env.local.
+const [localLabel, localHref] = (process.env.NEXT_PUBLIC_LOCAL_LINK ?? '').split('|');
+
+/** Renders the developer-machine link, or nothing in the public build. */
+export function LocalNavLink({ className = 'btn' }: { className?: string }) {
+  return localHref ? <Link href={localHref} className={className}>{localLabel}</Link> : null;
+}
+
 /** Top bar for the internal screens: wordmark, context on the left, actions on the right. */
 export default function AppHeader({ context, actions, wide = false, children }: {
   context?: ReactNode;
@@ -18,7 +26,7 @@ export default function AppHeader({ context, actions, wide = false, children }: 
           </Link>
           {context}
         </div>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        <div className="flex flex-wrap items-center gap-2"><LocalNavLink />{actions}</div>
       </div>
       {children}
     </header>
