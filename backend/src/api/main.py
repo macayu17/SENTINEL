@@ -7,7 +7,7 @@ import asyncio
 import secrets
 
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .websocket import ConnectionManager
@@ -15,6 +15,7 @@ from ..market.simulator import MarketSimulator, get_sandbox_presets, create_sand
 from ..market.oracle import OracleConfig
 from ..market.latency_model import LatencyConfig, LatencyMode
 from ..market.scenario import get_scenario_config, list_scenarios
+from ..data.historical import HistoricalDataset, parse_nse_csv
 from ..prediction.liquidity_shock import LiquidityShockPredictor
 from ..prediction.large_order import LargeOrderDetector
 from ..utils.logger import get_logger
@@ -32,6 +33,7 @@ _sim_task: Optional[asyncio.Task] = None
 _warning_timeline: list[dict] = []
 _warning_states: dict[str, tuple] = {}
 _last_simulation_report: Optional[dict] = None
+_historical_datasets: dict[str, HistoricalDataset] = {}
 
 MAX_WARNING_EVENTS = 500
 AGENT_METRIC_FIELDS = (
@@ -207,6 +209,29 @@ async def list_sandbox_scenarios():
     return {"scenarios": list_scenarios()}
 
 
+@app.get("/api/historical/datasets")
+async def list_historical_datasets():
+    return {"datasets": [
+        {"id": item.dataset_id, "filename": item.filename, "symbol": item.symbol,
+         "points": len(item.points), "start": item.start, "end": item.end,
+         "initial_price": item.points[0].price}
+        for item in _historical_datasets.values()
+    ]}
+
+
+@app.post("/api/historical/import")
+async def import_historical_csv(request: Request, filename: str = "historical.csv"):
+    try:
+        dataset_id = secrets.token_hex(8)
+        dataset = parse_nse_csv((await request.body()).decode("utf-8-sig"), filename=filename, dataset_id=dataset_id)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _historical_datasets[dataset_id] = dataset
+    return {"id": dataset.dataset_id, "filename": dataset.filename, "symbol": dataset.symbol,
+            "points": len(dataset.points), "start": dataset.start, "end": dataset.end,
+            "initial_price": dataset.points[0].price}
+
+
 class SandboxCreateRequest(BaseModel):
     preset: str = "balanced"
     initial_price: float = 100.0
@@ -215,6 +240,7 @@ class SandboxCreateRequest(BaseModel):
     speed: float = 1.0
     scenario: str = "normal"
     seed: Optional[int] = None
+    historical_dataset_id: Optional[str] = None
 
 
 @app.post("/api/sandbox/create")
@@ -228,13 +254,18 @@ async def create_sandbox(request: SandboxCreateRequest):
     run_seed = request.seed if request.seed is not None else secrets.randbits(32)
     run_speed = _clamp_simulation_speed(request.speed)
     agents = create_sandbox_agents(request.preset, scenario=scenario, seed=run_seed)
+    historical = _historical_datasets.get(request.historical_dataset_id) if request.historical_dataset_id else None
+    if request.historical_dataset_id and historical is None:
+        raise HTTPException(status_code=404, detail="Historical dataset not found")
+    replay_prices = [point.price for point in historical.points] if historical else None
+    effective_initial_price = replay_prices[0] if replay_prices else request.initial_price
 
     # 20% annualized fundamental volatility per simulated second. Microstructure noise and
     # news jumps add the rest; this lands realized 1 s volatility in the 13-20% band of
     # the NASDAQ LOBSTER sample days, with matching fat tails.
-    base_sigma = request.initial_price * 0.20 / sqrt(252 * 390 * 60)
+    base_sigma = effective_initial_price * 0.20 / sqrt(252 * 390 * 60)
     oracle_cfg = OracleConfig(
-        r_bar=request.initial_price,
+        r_bar=effective_initial_price,
         kappa=0.001,
         sigma_s=base_sigma * scenario.oracle_sigma_multiplier,
     )
@@ -242,20 +273,24 @@ async def create_sandbox(request: SandboxCreateRequest):
 
     simulator = MarketSimulator(
         agents,
-        initial_price=request.initial_price,
-        duration_seconds=config.simulation_duration,
+        initial_price=effective_initial_price,
+        duration_seconds=(len(replay_prices) - 1 if replay_prices else config.simulation_duration),
         oracle_config=oracle_cfg,
         latency_config=LatencyConfig(mode=latency_mode),
         speed_multiplier=run_speed,
         scenario=scenario,
         informed_oracle_access=request.oracle_enabled,
         seed=run_seed,
+        historical_prices=replay_prices,
+        historical_dataset_id=historical.dataset_id if historical else None,
     )
     _last_simulation_report = None
     _sim_task = asyncio.create_task(_run_simulation_loop(simulator))
     return {"status": "started", "preset": request.preset, "agents": len(agents),
             "oracle_enabled": request.oracle_enabled, "speed": run_speed,
-            "scenario": scenario.name, "seed": run_seed}
+            "scenario": scenario.name, "seed": run_seed,
+            "historical_dataset_id": historical.dataset_id if historical else None,
+            "historical_points": len(replay_prices) if replay_prices else 0}
 
 
 class SpeedRequest(BaseModel):
@@ -354,7 +389,7 @@ async def _run_simulation_loop(sim: MarketSimulator) -> None:
                     agent_metrics=agent_metrics,
                     active_simulator=sim,
                 ))
-            await asyncio.sleep(0.1 / _clamp_simulation_speed(sim.speed_multiplier))
+            await asyncio.sleep(1.0 / _clamp_simulation_speed(sim.speed_multiplier))
 
         if sim.running:  # reached the session close on its own
             _finalize_report(sim)

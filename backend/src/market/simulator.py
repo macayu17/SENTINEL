@@ -73,6 +73,8 @@ class MarketSimulator:
         seed: Optional[int] = None,
         venue: str = "NASDAQ",
         preset: str = "custom",
+        historical_prices: Optional[List[float]] = None,
+        historical_dataset_id: Optional[str] = None,
     ) -> None:
         self.agents = list(agents)
         self._agents_by_id: Dict[str, BaseAgent] = {}
@@ -84,6 +86,8 @@ class MarketSimulator:
         self.speed_multiplier = speed_multiplier
         self.venue = venue
         self.preset = preset
+        self.historical_prices = list(historical_prices or [])
+        self.historical_dataset_id = historical_dataset_id
         self.scenario = scenario if isinstance(scenario, ScenarioConfig) else get_scenario_config(scenario)
         self.order_ttl_seconds = float(
             self.scenario.order_ttl_seconds if order_ttl_seconds is None else order_ttl_seconds
@@ -230,7 +234,7 @@ class MarketSimulator:
         if self.scenario.name == "liquidity_shock":
             target_multiplier, spread_multiplier, refill_levels = self._liquidity_provision_profile()
 
-        if self.oracle.enabled:
+        if self.oracle.enabled and not self.historical_prices:
             # Resting liquidity is priced off what the public knows, so a forced or
             # one-sided sweep meets fresh orders at fair value instead of chasing itself.
             anchor = round(self.oracle.public_value, 2)
@@ -441,6 +445,23 @@ class MarketSimulator:
         )
         return len(self._all_trades) > before
 
+    def _apply_historical_reference(self) -> None:
+        """Replay the next imported observation as the public market reference."""
+        if not self.historical_prices:
+            return
+        target = float(self.historical_prices[min(self.step_count, len(self.historical_prices) - 1)])
+        if target <= 0:
+            return
+        if abs(target - self.current_price) > TICK:
+            self._record_event(
+                "historical_reference",
+                f"Replayed reference price {target:.2f}",
+                severity="info",
+                dataset_id=self.historical_dataset_id,
+                price=target,
+            )
+        self.current_price = target
+
     def _sweep_scenario_flow(self, side: OrderSide) -> None:
         depth = self.order_book.get_depth(levels=10)
         opposite_levels = depth["asks"] if side == OrderSide.BUY else depth["bids"]
@@ -487,6 +508,7 @@ class MarketSimulator:
         price: Optional[float] = None,
         quantity: Optional[int] = None,
         status: Optional[str] = None,
+        dataset_id: Optional[str] = None,
     ) -> None:
         self._event_sequence += 1
         event: Dict[str, Any] = {
@@ -506,6 +528,7 @@ class MarketSimulator:
             "price": round(float(price), 6) if price is not None else None,
             "quantity": int(quantity) if quantity is not None else None,
             "status": status,
+            "dataset_id": dataset_id,
         }
         for key, value in optional_values.items():
             if value is not None:
@@ -1046,11 +1069,16 @@ class MarketSimulator:
         if self.oracle.enabled:
             self.oracle.advance(dt=1.0)
 
-        self._apply_reference_flow()
+        if self.historical_prices:
+            self._apply_historical_reference()
+        else:
+            self._apply_reference_flow()
         self._apply_scenario_driver()
         self._ensure_liquidity_floor()
 
         if (
+            not self.historical_prices
+            and
             self.order_book.mid_price is not None
             and self._session_profile()[0] != "PREOPEN"  # crossed book has no meaningful mid
         ):
@@ -1233,6 +1261,8 @@ class MarketSimulator:
                 "agent_count": len(self.agents),
                 "latency_mode": self.latency_model.config.mode.name,
                 "informed_access": self.informed_oracle_access,
+                "historical_dataset_id": self.historical_dataset_id,
+                "historical_replay": bool(self.historical_prices),
                 "steps": self.step_count,
             },
             "price_path": list(self._samples),

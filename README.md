@@ -137,7 +137,18 @@ report but never create or replace the active runtime model.
 - `POST /api/sandbox/create`
 - `GET /api/sandbox/presets`
 - `GET /api/sandbox/scenarios`
+- `GET /api/historical/datasets`
+- `POST /api/historical/import?filename=<name>` (raw NSE CSV body)
 - `WS /ws`
+
+Historical replay
+
+The start screen accepts NSE chart exports and quote-history CSVs. Importing a
+file normalizes it into timestamped prices, then selecting it for a run makes
+those prices the public reference path. The existing agents, order book,
+scenario drivers, detectors, and reports continue to run around that path.
+Datasets are kept in process memory and can be re-imported after a backend
+restart.
 
 ## Notes About The Current Architecture
 

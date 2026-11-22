@@ -30,6 +30,17 @@ export interface SandboxCreateRequest {
   speed: number;
   scenario?: string;
   seed?: number;
+  historical_dataset_id?: string;
+}
+
+export interface HistoricalDataset {
+  id: string;
+  filename: string;
+  symbol: string;
+  points: number;
+  start: string;
+  end: string;
+  initial_price: number;
 }
 
 export interface SimulationReportPoint {

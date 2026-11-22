@@ -4,6 +4,7 @@ import type {
   SandboxCreateRequest,
   SandboxPreset,
   SandboxScenario,
+  HistoricalDataset,
 } from '@/types/api';
 
 export type {
@@ -11,6 +12,7 @@ export type {
   SandboxCreateRequest,
   SandboxPreset,
   SandboxScenario,
+  HistoricalDataset,
   SimulationReport,
 } from '@/types/api';
 
@@ -67,6 +69,18 @@ class SentinelAPI {
     return this.request<{ scenarios: SandboxScenario[] }>('/api/sandbox/scenarios');
   }
 
+  async getHistoricalDatasets() {
+    return this.request<{ datasets: HistoricalDataset[] }>('/api/historical/datasets');
+  }
+
+  async importHistoricalCsv(file: File) {
+    const response = await fetch(`${getApiBaseUrl()}/api/historical/import?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: file,
+    });
+    if (!response.ok) throw new Error(`Import failed: ${response.status} ${response.statusText}`);
+    return response.json() as Promise<HistoricalDataset>;
+  }
+
   async createSandbox(config: SandboxCreateRequest) {
     return this.request<{
       status: string;
@@ -75,6 +89,8 @@ class SentinelAPI {
       oracle_enabled: boolean;
       speed: number;
       scenario: string;
+      historical_dataset_id?: string | null;
+      historical_points?: number;
     }>('/api/sandbox/create', {
       method: 'POST',
       body: JSON.stringify(config),

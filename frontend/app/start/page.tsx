@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import AppHeader from '@/components/ui/AppHeader';
 import { Meter, Segmented, StatusDot, Switch } from '@/components/ui/primitives';
-import { api, type LatencyMode, type SandboxPreset, type SandboxScenario } from '@/lib/api-client';
+import { api, type HistoricalDataset, type LatencyMode, type SandboxPreset, type SandboxScenario } from '@/lib/api-client';
 import { num } from '@/lib/format';
 import { saveRunMeta } from '@/lib/run-meta';
 import { getApiBaseUrl } from '@/lib/runtime-config';
@@ -46,6 +46,9 @@ export default function StartPage() {
   const setSimulationRunning = useMarketStore((s) => s.setSimulationRunning);
   const [presets, setPresets] = useState<Record<string, SandboxPreset>>({});
   const [scenarios, setScenarios] = useState<SandboxScenario[]>([]);
+  const [historicalDatasets, setHistoricalDatasets] = useState<HistoricalDataset[]>([]);
+  const [historicalDatasetId, setHistoricalDatasetId] = useState('');
+  const [importing, setImporting] = useState(false);
   const [preset, setPreset] = useState('balanced');
   const [scenario, setScenario] = useState('normal');
   const [latency, setLatency] = useState<LatencyMode>('deterministic');
@@ -59,12 +62,13 @@ export default function StartPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.getSandboxPresets(), api.getSandboxScenarios(), api.health()])
-      .then(([nextPresets, nextScenarios, health]) => {
+    Promise.all([api.getSandboxPresets(), api.getSandboxScenarios(), api.getHistoricalDatasets(), api.health()])
+      .then(([nextPresets, nextScenarios, nextHistorical, health]) => {
         if (cancelled) return;
         const first = nextPresets.balanced ? 'balanced' : Object.keys(nextPresets)[0];
         setPresets(nextPresets);
         setScenarios(nextScenarios.scenarios);
+        setHistoricalDatasets(nextHistorical.datasets);
         setPreset(first);
         setLatency(nextPresets[first].latency);
         setOracle(nextPresets[first].oracle);
@@ -99,6 +103,7 @@ export default function StartPage() {
         latency_mode: latency,
         speed: clamp(Number(speed), 1, 0.1, 20),
         ...(seedValue !== undefined && Number.isFinite(seedValue) ? { seed: seedValue } : {}),
+        ...(historicalDatasetId ? { historical_dataset_id: historicalDatasetId } : {}),
       });
       // The create response also carries the seed the backend chose.
       const chosenSeed = (response as { seed?: number }).seed ?? seedValue ?? null;
@@ -110,6 +115,17 @@ export default function StartPage() {
       setError(caught instanceof Error ? caught.message : 'Launch failed.');
       setLaunching(false);
     }
+  };
+
+  const importHistorical = async (file: File) => {
+    setImporting(true); setError('');
+    try {
+      const dataset = await api.importHistoricalCsv(file);
+      setHistoricalDatasets((current) => [...current, dataset]);
+      setHistoricalDatasetId(dataset.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Historical import failed.');
+    } finally { setImporting(false); }
   };
 
   const status = {
@@ -207,6 +223,17 @@ export default function StartPage() {
               </span>
               <Switch label="Fundamental value oracle" checked={oracle} onChange={setOracle} />
             </div>
+          </Section>
+          <Section id="historical" title="4 · Historical reference (optional)" aside="POST /api/historical/import">
+            <p className="m-0 text-[13px] text-fg-muted">Upload an NSE chart or quote-history CSV. Prices replay as the public reference while agents and the selected scenario interact with the book.</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <input className="field max-w-full" type="file" accept=".csv,text/csv" disabled={importing} onChange={(e) => { const file = e.target.files?.[0]; if (file) void importHistorical(file); }} />
+              {historicalDatasets.length > 0 && <select className="field min-w-[260px]" value={historicalDatasetId} onChange={(e) => setHistoricalDatasetId(e.target.value)} aria-label="Historical dataset">
+                <option value="">Synthetic reference</option>
+                {historicalDatasets.map((item) => <option key={item.id} value={item.id}>{item.symbol} · {item.points} points · {item.filename}</option>)}
+              </select>}
+            </div>
+            {historicalDatasetId && <p className="m-0 text-xs text-accent">Historical replay selected. Run duration follows the imported rows.</p>}
           </Section>
         </div>
 

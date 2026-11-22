@@ -121,7 +121,9 @@ export function useMarketWebSocket() {
       };
 
       ws.onerror = () => {
-        ws.close();
+        // Let the browser and onclose handler manage a failed handshake.
+        // Calling close() here can race with CONNECTING and emit
+        // "closed before the connection is established".
       };
     } catch {
       setConnected(false);
@@ -136,7 +138,15 @@ export function useMarketWebSocket() {
     }
     cancelScheduledFlush();
     latestUpdateRef.current = null;
-    if (wsRef.current) wsRef.current.close();
+    if (wsRef.current) {
+      // close() on a CONNECTING WebSocket is browser implementation-dependent
+      // and can surface "closed before the connection is established".
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      } else if (wsRef.current.readyState !== WebSocket.CONNECTING) {
+        wsRef.current.close();
+      }
+    }
     wsRef.current = null;
     setConnected(false);
   }, [cancelScheduledFlush, setConnected]);
