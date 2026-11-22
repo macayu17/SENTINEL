@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import StressMeter from '@/components/ui/StressMeter';
 import { EmptyState, Facts, Meter, Panel, Term } from '@/components/ui/primitives';
 import { int, num, pct } from '@/lib/format';
@@ -13,6 +14,9 @@ function alarming(key: string, value: number): boolean {
 
 const fact = (label: string) => TERM_GLOSSARY[label];
 
+/** A flagged level often lasts a single tick; keep the last one readable for this long after it goes. */
+const HOLD_MS = 10_000;
+
 /** Bars only where the value lives on a comparable 0–1 (or 0–2 for ratios) scale. */
 function barShare(key: string, value: number): number | null {
   if (key.endsWith('_ratio') && value >= 0 && value <= 4) return value / 2;
@@ -24,6 +28,13 @@ export default function StressPanel({ prediction, detection }: {
   prediction: LiquidityPrediction | null | undefined;
   detection: LargeOrderDetection | null | undefined;
 }) {
+  const [held, setHeld] = useState<LargeOrderDetection | null>(null);
+  useEffect(() => {
+    if (detection) { setHeld(detection); return; }
+    const timer = setTimeout(() => setHeld(null), HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [detection]);
+  const shown = detection ?? held;
   const horizon = prediction?.horizon_seconds ? `horizon ${prediction.horizon_seconds} s` : 'current state';
   return (
     <Panel title="Liquidity stress" caption={prediction ? `${horizon} · ${prediction.method}` : undefined} className="flex-[1_1_340px] !gap-3.5">
@@ -53,17 +64,17 @@ export default function StressPanel({ prediction, detection }: {
       <div className="flex flex-col gap-1.5 border-t border-line pt-3">
         <div className="flex items-baseline justify-between gap-2">
           <Term label="Large order detection" title="Large order detection" info="Flags a single price level in the visible book that is far bigger than the others: often a big institution parking an order, or a spoofer showing size it does not mean to trade." className="text-[13px] font-semibold" />
-          <span className="text-xs text-fg-muted">visible_order_book</span>
+          <span className="text-xs text-fg-muted">{detection || !shown ? 'visible_order_book' : 'gone from the book · last seen'}</span>
         </div>
-        {detection ? (
-          <Facts items={[
-            { label: 'Side · price', value: `${detection.side.toUpperCase()} ${num(detection.price, 3)}`, accent: detection.side === 'sell', info: fact('Side · price') },
-            { label: 'Est. size', value: int(detection.estimated_size), info: fact('Est. size') },
-            { label: 'Size multiple', value: `${num(detection.size_multiple, 1)}× median`, info: fact('Size multiple') },
-            { label: 'Depth share', value: `${pct(detection.depth_share)} of ${detection.side === 'sell' ? 'asks' : 'bids'}`, info: fact('Depth share') },
-            { label: 'Confidence', value: num(detection.confidence), info: fact('Confidence') },
-            { label: 'Pattern', value: detection.pattern, info: fact('Pattern') },
-          ]} />
+        {shown ? (
+          <div className={detection ? '' : 'opacity-60'}><Facts items={[
+            { label: 'Side · price', value: `${shown.side.toUpperCase()} ${num(shown.price, 3)}`, accent: shown.side === 'sell', info: fact('Side · price') },
+            { label: 'Est. size', value: int(shown.estimated_size), info: fact('Est. size') },
+            { label: 'Size multiple', value: `${num(shown.size_multiple, 1)}× median`, info: fact('Size multiple') },
+            { label: 'Depth share', value: `${pct(shown.depth_share)} of ${shown.side === 'sell' ? 'asks' : 'bids'}`, info: fact('Depth share') },
+            { label: 'Confidence', value: num(shown.confidence), info: fact('Confidence') },
+            { label: 'Pattern', value: shown.pattern, info: fact('Pattern') },
+          ]} /></div>
         ) : <p className="m-0 text-[13px] text-fg-muted">No outsized visible level on either side.</p>}
       </div>
     </Panel>

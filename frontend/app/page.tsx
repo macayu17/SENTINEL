@@ -153,8 +153,7 @@ export default function Home() {
       </section>
 
       <footer className="border-t border-line bg-ink text-[#b9b7b0]">
-        <div className="mx-auto flex max-w-[1280px] flex-wrap justify-between gap-3 px-5 py-8 text-base sm:px-10">
-          <span>made by <a href="https://ayushh.in">ayush kumar</a></span>
+        <div className="mx-auto flex max-w-[1280px] flex-wrap justify-end gap-3 px-5 py-8 text-base sm:px-10">
           <a href={GITHUB}>github</a>
         </div>
       </footer>
